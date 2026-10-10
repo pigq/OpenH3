@@ -784,6 +784,10 @@
     "collapse": "Réduire le plan"
   },
   "h3Activity": {
+    "confirmStop": "Confirmer l’arrêt",
+    "remoteUncertain": "La tâche précédente peut encore être active. Une nouvelle génération attend la confirmation de son arrêt.",
+    "reconnecting": "Reconnexion au moteur vidéo. La tâche ne sera pas soumise à nouveau.",
+    "suspectedStall": "Le moteur est en ligne, mais ce nœud ne signale plus de progression. Vérification jusqu’à la limite de temps.",
     "title": "Video task",
     "queued": "Queued",
     "running": "Generating video",

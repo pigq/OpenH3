@@ -5,6 +5,7 @@ import {
   normalizeH3GenerationSpec,
   type H3Artifact,
   type H3Activity,
+  type H3Monitor,
   type H3GenerationSpec,
   type H3NormalizedGenerationSpec,
   type H3Reference,
@@ -37,10 +38,20 @@ export type H3ComfyClientOptions = {
   sleep?: (ms: number) => Promise<void>;
   eventCheckIntervalMs?: number;
   maxWaitMs?: number;
+  /** Silence threshold for a suspected stall; a live queued/running task retains its total budget. */
+  maxIdleMs?: number;
+  /** Runtime health probe cadence while waiting for execution events. */
+  heartbeatIntervalMs?: number;
+  /** Consecutive failed runtime probes before ending the job. */
+  heartbeatFailureLimit?: number;
+  cancelConfirmAttempts?: number;
+  missingGraceMs?: number;
 };
 
 export type H3GenerationResult = { promptId: string; artifacts: H3Artifact[] };
-export type H3PromptSubmitted = (promptId: string) => void;
+export type H3PromptSubmitted = (promptId: string, pending?: boolean) => void;
+export type H3Progress = (progress: number, activity?: H3Activity, monitor?: H3Monitor) => void;
+export type H3MonitorContext = { startedAt?: string; activity?: H3Activity };
 
 function mimeType(filename: string): string {
   const extension = path.extname(filename).toLowerCase();
@@ -186,6 +197,9 @@ export class H3ComfyClient {
   private readonly sleep?: (ms: number) => Promise<void>;
   private readonly eventCheckIntervalMs: number;
   private readonly maxWaitMs: number;
+  private readonly maxIdleMs: number;
+  private readonly heartbeatIntervalMs: number;
+  private readonly heartbeatFailureLimit: number;
 
   constructor(private readonly options: H3ComfyClientOptions = {}) {
     this.baseUrl = (options.baseUrl ?? process.env.AIONUI_H3_URL ?? 'http://127.0.0.1:8188').replace(/\/$/, '');
@@ -197,6 +211,23 @@ export class H3ComfyClient {
     this.sleep = options.sleep;
     this.eventCheckIntervalMs = options.eventCheckIntervalMs ?? 30000;
     this.maxWaitMs = options.maxWaitMs ?? 30 * 60 * 1000;
+    this.maxIdleMs = options.maxIdleMs ?? 10 * 60 * 1000;
+    this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? 30_000;
+    this.heartbeatFailureLimit = Math.max(1, Math.floor(options.heartbeatFailureLimit ?? 3));
+    for (const value of [
+      this.maxWaitMs,
+      this.maxIdleMs,
+      this.heartbeatFailureLimit,
+      options.cancelConfirmAttempts ?? 4,
+    ])
+      if (!Number.isFinite(value) || value <= 0) throw new Error('H3_MONITOR_OPTIONS_INVALID');
+    for (const value of [
+      this.pollIntervalMs,
+      this.eventCheckIntervalMs,
+      this.heartbeatIntervalMs,
+      options.missingGraceMs ?? 60_000,
+    ])
+      if (!Number.isFinite(value) || value < 0) throw new Error('H3_MONITOR_OPTIONS_INVALID');
   }
 
   getBaseUrl(): string {
@@ -240,21 +271,58 @@ export class H3ComfyClient {
     return response;
   }
 
-  async cancel(promptId: string): Promise<void> {
+  /** A successful POST only acknowledges dispatch. Observe the target leaving the queue. */
+  async cancel(promptId: string, requireKnown = false): Promise<H3GenerationResult | void> {
+    const signal = AbortSignal.timeout(30_000);
     const response = await this.fetchImpl(`${this.baseUrl}/api/jobs/${encodeURIComponent(promptId)}/cancel`, {
       method: 'POST',
-      signal: AbortSignal.timeout(15000),
+      signal,
     });
     if (!response.ok) throw new Error(`H3_COMFY_INTERRUPT_HTTP_${response.status}`);
-    const payload = (await response.json().catch(() => ({}))) as { cancelled?: boolean };
-    if (payload.cancelled === false) throw new Error('H3_COMFY_CANCEL_NOT_APPLIED');
+    const payload = (await response.json()) as { cancelled?: boolean };
+    if (typeof payload?.cancelled !== 'boolean') throw new Error('H3_COMFY_CANCEL_INVALID_RESPONSE');
+    let absent = 0;
+    for (let attempt = 0; attempt < (this.options.cancelConfirmAttempts ?? 4); attempt++) {
+      const state = await this.probeHeartbeat(promptId, signal);
+      const history = await this.readHistory(promptId, signal);
+      if (state === 'absent') {
+        if (history?.status?.completed && history.status.status_str !== 'error')
+          return this.settledResult(promptId, history);
+        if (requireKnown && !payload.cancelled && !history?.status) throw new Error('H3_SUBMISSION_STATE_UNKNOWN');
+        if (++absent >= 2) return;
+      } else absent = 0;
+      await this.pause(Math.min(1000, this.pollIntervalMs), signal);
+    }
+    throw new Error('H3_COMFY_CANCEL_UNCONFIRMED');
+  }
+
+  async confirmStopped(promptId: string, requireKnown = false): Promise<H3GenerationResult | void> {
+    const signal = AbortSignal.timeout(25_000);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if ((await this.probeHeartbeat(promptId, signal)) !== 'absent') throw new Error('H3_REMOTE_STATE_UNCONFIRMED');
+      const history = await this.readHistory(promptId, signal);
+      if (history?.status?.completed && history.status.status_str !== 'error')
+        return this.settledResult(promptId, history);
+      if (requireKnown && !history?.status) throw new Error('H3_SUBMISSION_STATE_UNKNOWN');
+      if (!attempt) await this.pause(Math.min(1000, this.pollIntervalMs), signal);
+    }
+  }
+
+  /** Used only for legacy jobs whose submission ID was never persisted. */
+  async confirmIdle(): Promise<void> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const queue = this.parseQueue(await this.queueStatus());
+      if (queue.queue_running.length || queue.queue_pending.length) throw new Error('H3_REMOTE_STATE_UNCONFIRMED');
+      if (!attempt) await this.pause(1000, AbortSignal.timeout(5000));
+    }
   }
 
   async generate(
     spec: H3GenerationSpec,
     signal: AbortSignal,
-    onProgress?: (progress: number, activity?: H3Activity) => void,
-    onSubmitted?: H3PromptSubmitted
+    onProgress?: H3Progress,
+    onSubmitted?: H3PromptSubmitted,
+    context?: H3MonitorContext
   ): Promise<H3GenerationResult> {
     if (signal.aborted) throw new Error('H3_JOB_CANCELLED');
     const normalized = normalizeH3GenerationSpec(spec);
@@ -300,24 +368,24 @@ export class H3ComfyClient {
     try {
       await events.open();
       if (signal.aborted) throw new Error('H3_JOB_CANCELLED');
+      const reservedPromptId = crypto.randomUUID();
+      onSubmitted?.(reservedPromptId, true);
       const response = await this.fetchImpl(`${this.baseUrl}/prompt`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt: workflow, client_id: clientId }),
+        body: JSON.stringify({ prompt: workflow, client_id: clientId, prompt_id: reservedPromptId }),
         signal: AbortSignal.timeout(30000),
       });
       const payload = (await response.json()) as { prompt_id?: string; error?: unknown; node_errors?: unknown };
       if (!response.ok || !payload.prompt_id) {
-        if (payload.error || payload.node_errors) throw diagnoseComfyError(payload, true);
+        if (response.status >= 400 && response.status < 500) throw diagnoseComfyError(payload, true);
+        if (response.ok && (payload.error || payload.node_errors)) throw diagnoseComfyError(payload, true);
         throw new Error(`H3_COMFY_PROMPT_HTTP_${response.status}`);
       }
-      onSubmitted?.(payload.prompt_id);
-      if (signal.aborted) {
-        await this.cancel(payload.prompt_id);
-        throw new Error('H3_JOB_CANCELLED');
-      }
+      onSubmitted?.(payload.prompt_id, false);
+      if (signal.aborted) throw new Error('H3_JOB_CANCELLED');
       onProgress?.(0, { phase: 'waiting', updatedAt: new Date().toISOString() });
-      return await this.resume(payload.prompt_id, signal, onProgress, events);
+      return await this.resume(payload.prompt_id, signal, onProgress, events, context);
     } finally {
       events.close();
     }
@@ -348,10 +416,29 @@ export class H3ComfyClient {
   async resume(
     promptId: string,
     signal: AbortSignal,
-    onProgress?: (progress: number, activity?: H3Activity) => void,
-    events?: H3ComfyEvents
+    onProgress?: H3Progress,
+    events?: H3ComfyEvents,
+    context?: H3MonitorContext
   ): Promise<H3GenerationResult> {
-    const history = await this.waitForHistory(promptId, signal, onProgress, events);
+    const history = await this.waitForHistory(promptId, signal, onProgress, events, context);
+    const result = this.resultFromHistory(promptId, history);
+    onProgress?.(1);
+    return result;
+  }
+
+  private settledResult(promptId: string, history: HistoryEntry): H3GenerationResult | void {
+    try {
+      return this.resultFromHistory(promptId, history);
+    } catch (error) {
+      // A terminal history with no video (or interruption) still proves termination.
+      if (error instanceof Error && ['H3_COMFY_NO_OUTPUT', 'H3_JOB_CANCELLED'].includes(error.message)) return;
+      throw error;
+    }
+  }
+
+  private resultFromHistory(promptId: string, history: HistoryEntry): H3GenerationResult {
+    if (history.status?.messages?.some((item) => Array.isArray(item) && item[0] === 'execution_interrupted'))
+      throw new Error('H3_JOB_CANCELLED');
     if (history.status?.status_str === 'error') throw diagnoseComfyError(history);
     const artifacts = Object.values(history.outputs ?? {}).flatMap((output) => {
       const candidates = [
@@ -369,48 +456,91 @@ export class H3ComfyClient {
         }));
     });
     if (!artifacts.length) throw new Error('H3_COMFY_NO_OUTPUT');
-    onProgress?.(1);
     return { promptId, artifacts };
   }
 
   private async waitForHistory(
     promptId: string,
     signal: AbortSignal,
-    onProgress?: (progress: number, activity?: H3Activity) => void,
-    events?: H3ComfyEvents
+    onProgress?: H3Progress,
+    events?: H3ComfyEvents,
+    context?: H3MonitorContext
   ): Promise<HistoryEntry> {
     let delay = this.pollIntervalMs;
-    let activity: H3Activity = { phase: 'waiting', updatedAt: new Date().toISOString() };
+    let activity: H3Activity = context?.activity ?? { phase: 'waiting', updatedAt: new Date().toISOString() };
     onProgress?.(0, activity);
-    const startedAt = Date.now();
+    const persistedStart = Date.parse(context?.startedAt ?? '');
+    const startedAt = Number.isFinite(persistedStart) ? Math.min(persistedStart, Date.now()) : Date.now();
+    let lastActivityAt = Date.parse(activity.updatedAt) || startedAt;
+    let lastHistoryFingerprint = 'null';
+    let lastHeartbeatAt = Date.now();
+    let heartbeatFailures = 0;
+    let historyFailures = 0;
+    let missingSince: number | undefined;
+    let remoteState: H3Monitor['remoteState'];
+    let monitor: H3Monitor = { state: 'connected', consecutiveFailures: 0 };
     while (true) {
       if (signal.aborted) throw new Error('H3_JOB_CANCELLED');
-      if (Date.now() - startedAt >= this.maxWaitMs) throw new Error('H3_COMFY_HISTORY_TIMEOUT');
-      let response: Response;
+      // History wins over deadlines and queue races, but every request is bounded.
+      let entry: HistoryEntry | undefined;
       try {
-        response = await this.fetchImpl(`${this.baseUrl}/history/${encodeURIComponent(promptId)}`, {
-          signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
-        });
+        entry = await this.readHistory(promptId, signal);
+        historyFailures = 0;
       } catch (error) {
         if (signal.aborted) throw new Error('H3_JOB_CANCELLED', { cause: error });
-        await this.pause(delay, signal);
-        delay = Math.min(30000, Math.max(1, delay * 2));
-        continue;
+        historyFailures++;
       }
-      if (!response.ok) {
-        if (response.status === 404 || response.status >= 500 || response.status === 429) {
-          await this.pause(delay, signal);
-          delay = Math.min(30000, Math.max(1, delay * 2));
-          continue;
-        }
-        throw new Error(`H3_COMFY_HISTORY_HTTP_${response.status}`);
-      }
-      const payload = (await response.json()) as Record<string, HistoryEntry>;
-      const entry = payload[promptId];
       if (entry?.status?.completed || entry?.status?.status_str === 'error') return entry;
+      if (Date.now() - startedAt >= this.maxWaitMs) throw new Error('H3_COMFY_HISTORY_TIMEOUT');
+      const historyFingerprint = JSON.stringify(entry ?? null);
+      if (entry && historyFingerprint !== lastHistoryFingerprint) {
+        lastHistoryFingerprint = historyFingerprint;
+        lastActivityAt = Date.now();
+      }
+      const idle = Date.now() - lastActivityAt >= this.maxIdleMs;
+      if (Date.now() - lastHeartbeatAt >= this.heartbeatIntervalMs || (idle && !remoteState)) {
+        lastHeartbeatAt = Date.now();
+        try {
+          remoteState = await this.probeHeartbeat(promptId, signal);
+          heartbeatFailures = 0;
+          missingSince = remoteState === 'absent' && !historyFailures ? (missingSince ?? Date.now()) : undefined;
+          monitor = {
+            state: historyFailures
+              ? 'reconnecting'
+              : remoteState === 'absent'
+                ? 'missing'
+                : idle && remoteState === 'running'
+                  ? 'suspected-stall'
+                  : 'connected',
+            remoteState,
+            lastHeartbeatAt: new Date().toISOString(),
+            consecutiveFailures: historyFailures,
+          };
+        } catch (error) {
+          if (signal.aborted) throw new Error('H3_JOB_CANCELLED', { cause: error });
+          heartbeatFailures++;
+          missingSince = undefined;
+          monitor = { ...monitor, state: 'reconnecting', consecutiveFailures: heartbeatFailures };
+        }
+        // Reachability must never rewrite the execution activity timestamp.
+        onProgress?.(0, undefined, monitor);
+        if (heartbeatFailures >= this.heartbeatFailureLimit) throw new Error('H3_COMFY_HEARTBEAT_LOST');
+        if (missingSince !== undefined && Date.now() - missingSince >= (this.options.missingGraceMs ?? 60_000))
+          throw new Error('H3_COMFY_PROMPT_LOST');
+      }
+      if (historyFailures >= this.heartbeatFailureLimit) throw new Error('H3_COMFY_HISTORY_UNAVAILABLE');
       // History polling does not establish execution progress.
       if (events?.connected) {
-        const deadline = Date.now() + this.eventCheckIntervalMs;
+        const deadline =
+          Date.now() +
+          Math.max(
+            1,
+            Math.min(
+              this.eventCheckIntervalMs,
+              this.heartbeatIntervalMs || 1,
+              this.maxWaitMs - (Date.now() - startedAt)
+            )
+          );
         while (events.connected && Date.now() < deadline) {
           const event = await events.next(promptId, deadline - Date.now());
           if (!event) break;
@@ -418,6 +548,7 @@ export class H3ComfyClient {
             throw diagnoseComfyError({ status: { messages: [['execution_error', event.data]] } });
           if (event.type === 'execution_interrupted') throw new Error('H3_JOB_CANCELLED');
           if (event.type === 'execution_success') break;
+          const previousActivity = activity;
           if (event.type === 'executing') {
             const nodeId = typeof event.data.node === 'string' ? event.data.node : undefined;
             activity = {
@@ -426,7 +557,10 @@ export class H3ComfyClient {
               nodeType: typeof event.data.node_type === 'string' ? event.data.node_type : undefined,
               updatedAt: new Date().toISOString(),
             };
-            onProgress?.(0, activity);
+            if (previousActivity.phase !== activity.phase || previousActivity.nodeId !== activity.nodeId) {
+              lastActivityAt = Date.now();
+              onProgress?.(0, activity);
+            } else activity = previousActivity;
             continue;
           }
           const { value, max } = event.data;
@@ -453,11 +587,20 @@ export class H3ComfyClient {
               max,
               updatedAt: new Date().toISOString(),
             };
-            onProgress?.(Math.min(0.975, 0.025 + value / max), activity);
+            // Node progress is local to the current ComfyUI node. Do not
+            // present it as overall job progress; the UI can render value/max.
+            if (
+              previousActivity.nodeId !== activity.nodeId ||
+              previousActivity.value !== activity.value ||
+              previousActivity.max !== activity.max
+            ) {
+              lastActivityAt = Date.now();
+              onProgress?.(0, activity);
+            } else activity = previousActivity;
           }
         }
       } else {
-        await this.pause(delay, signal);
+        await this.pause(Math.max(0, Math.min(delay, this.maxWaitMs - (Date.now() - startedAt))), signal);
         delay = Math.min(30000, Math.max(1, delay * 2));
       }
     }
@@ -484,5 +627,45 @@ export class H3ComfyClient {
         });
       else timer = setTimeout(done, ms);
     });
+  }
+
+  private parseQueue(payload: unknown): { queue_running: unknown[][]; queue_pending: unknown[][] } {
+    const queue = payload as { queue_running?: unknown; queue_pending?: unknown } | null;
+    if (
+      !queue ||
+      !Array.isArray(queue.queue_running) ||
+      !Array.isArray(queue.queue_pending) ||
+      ![...queue.queue_running, ...queue.queue_pending].every(
+        (item) => Array.isArray(item) && typeof item[1] === 'string'
+      )
+    )
+      throw new Error('H3_COMFY_QUEUE_INVALID_RESPONSE');
+    return queue as { queue_running: unknown[][]; queue_pending: unknown[][] };
+  }
+
+  private async readHistory(promptId: string, signal: AbortSignal): Promise<HistoryEntry | undefined> {
+    const response = await this.fetchImpl(`${this.baseUrl}/history/${encodeURIComponent(promptId)}`, {
+      signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new Error(`H3_COMFY_HISTORY_HTTP_${response.status}`);
+    }
+    const payload = (await response.json()) as Record<string, HistoryEntry>;
+    return payload?.[promptId];
+  }
+
+  private async probeHeartbeat(promptId: string, signal: AbortSignal): Promise<'running' | 'queued' | 'absent'> {
+    const response = await this.fetchImpl(`${this.baseUrl}/queue`, {
+      signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new Error(`H3_COMFY_HEARTBEAT_QUEUE_HTTP_${response.status}`);
+    }
+    const queue = this.parseQueue(await response.json());
+    if (queue.queue_running.some((item) => item[1] === promptId)) return 'running';
+    if (queue.queue_pending.some((item) => item[1] === promptId)) return 'queued';
+    return 'absent';
   }
 }

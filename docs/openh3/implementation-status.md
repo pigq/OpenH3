@@ -1,4 +1,3 @@
-
 ### 2026-09-29 OpenH3 Alpha 安装包更新
 
 - 用户确认新的 OpenH3 字标为正式品牌资源；已保存原始 `openh3-logo-source.png`，生成透明 `openh3-logo.png`、桌面 `app.png` 和 Windows `app.ico`，并将登录页、侧栏和安装包切换到新字标。
@@ -110,7 +109,6 @@
 - [ ] 当前包的安装器和主程序均为 `NotSigned`；没有证书时只能作为未签名 Alpha 体验包，不能宣称已解决 Windows 安全软件拦截。
 - [ ] 未完成项保持不变：PC09/干净机器实机验收、H3 三模式和失败恢复、GPL 对应源码提供、7-Zip/Node/npm/bun NOTICE、H3 权重及衍生文件授权、macOS ICNS、身份兼容迁移。
 
-
 ### 2026-09-23 个人/团队名义 Alpha 发布准备
 
 - [x] 暂不绑定公司主体、组织仓库、商标或域名；当前只准备技术预览版发布资料。
@@ -164,7 +162,6 @@
 - [x] 根目录提供中文 `readme.md` 和英文 `README.en.md`，两个入口互相链接。
 - [x] README 已加入真实的参考图、应用内结果预览和压缩演示 GIF；原始 MP4 不进入源码仓库，避免引入不必要的大文件。
 
-
 ### 2026-09-29 发布门禁分类纠正（取代此前笼统的五项阻断表述）
 
 - 已完成：中英文 README、演示入口、社区规范与 GitHub 模板治理已在 d6d8b71d 推送；此前 09-28 状态说明仅更新了仓库外副本，本次补入仓库内状态记录。
@@ -174,3 +171,61 @@
 - 模型和工作流：逐文件再分发审查适用于实际分发的权重、LoRA、转换文件和内嵌工作流；不随包、不托管的用户自备模型不要求项目另行取得再分发许可。自动下载入口仍需核对适用条款。
 - 实机质量：已有本机可用记录不作废；开发环境外的安装、首次启动和代表性任务尚需验证。无需指定 PC09，Dense/SLA 对比只支撑加速性能/质量承诺，不作为源码公开的通用阻断。
 - 尚未签名：签名是发行信任改进项，可后置；产品成熟度与签名状态独立。当前保留 Alpha 是因为稳定性证据仍有限，不是因为未签名。未签名版本可在实际分发许可义务满足后发布，并明确标注状态。
+
+### 2026-10-10 Cloudflare Responses 网关接入
+
+- [x] 新增 `services/openh3-gateway` Cloudflare Worker，公开 `/v1/responses`、`/v1/models` 和 `/health`，不暴露上游 API Key。
+- [x] Worker 固定允许模型 `gpt-6-astra` 与 reasoning `low`，拒绝非对象 JSON 和超过 1 MiB 的请求；Chat Completions 不开放。
+- [x] 桌面端默认 Provider 改为 Responses API，客户端 API Key 为空；仅在构建时注入已部署的 `OPENH3_GATEWAY_URL`。
+- [x] Worker 与 Provider 回归测试通过（8 passed）；发布配置回归为 20 passed、1 skipped，TypeScript、i18n、Electron Vite 构建均通过；开源审计 Source findings 0、Artifact findings 0。
+- [x] Worker 已部署为 `https://openh3-gateway.qingh120.workers.dev`；`/health`、`/v1/models` 和一次 Responses 请求实测通过，Cloudflare Secret 列表确认仅保存 `UPSTREAM_API_KEY`。
+- [x] 已用真实 Worker URL 构建 Windows x64 未签名体验包：`out/OpenH3-2.2.2-win-x64.exe`，309,146,008 bytes，SHA256=`59FE03D68473A224A4FC455421EB3BF9AE606BDF843A1C238217F29FF8E8F5AF`。
+- [x] 包外资源检查通过：`app.asar`、OpenH3 `app.png`、`NOTICE.OpenH3.txt`、FFmpeg/ffprobe 均存在；构建产物未发现 Provider Key。
+- 当前按用户选择暂不增加 Cloudflare 速率/额度策略，不将其列为本轮阻断；实际安装验收状态单独记录，当前体验包尚未签名。
+
+### 2026-10-10 H3 安装异常与 ComfyUI 停滞处理（早期实现记录）
+
+- [x] H3 安装状态文件损坏或阶段字段异常时降级为可重试的失败状态，媒体服务不会因启动时 JSON 解析异常退出。
+- [x] 安装 worker 的 `error`/`exit` 只结算一次，避免下载、校验或解压异常触发重复完成/失败路径。
+- [x] ComfyUI 任务增加无历史/事件变化的停滞超时（默认 10 分钟），超过后以 `H3_COMFY_STALLED` 失败并释放运行锁；总超时仍保留。
+- [x] 节点内部进度不再冒充整体任务百分比，避免 Agent/界面误判进度并反复查询；当前节点进度继续通过 `activity.value/max` 展示。
+- [x] runtime 测试通过：27 个测试文件、156 个测试（含新增停滞和损坏状态覆盖）；TypeScript 与 i18n 检查通过。
+
+### 2026-10-10 H3 全局运行时心跳 watchdog（早期实现，已由下方完整闭环替代）
+
+- [x] 任务等待期间每 30 秒探测 ComfyUI `/system_stats` 与 `/queue`，成功心跳只更新监控状态，不刷新执行活动时间；界面可区分运行时在线与任务实际进展。
+- [x] 心跳只证明 ComfyUI 进程可达，不会掩盖执行停滞；任务执行事件/历史仍单独记录，无执行变化先标记疑似停滞；队列/历史核对和总时限负责最终收口。
+- [x] 连续 3 次运行时探测失败返回 `H3_COMFY_HEARTBEAT_LOST`；远端未确认时保留任务栅栏，不释放给替代 GPU 任务。
+- [x] watchdog 回归测试通过：runtime 27 个测试文件、157 个测试，TypeScript 通过。
+
+### 2026-10-10 ComfyUI 任务闭环与远端状态栅栏
+
+- [x] 任务监控改为“历史结果优先 + 指定 prompt 队列核对 + 有界心跳”：进程可达不再冒充任务进展；重复事件不会刷新执行时间；长节点保留总时限。
+- [x] 取消接口增加远端确认：`cancelled: true` 只表示取消指令已发出；目标仍在运行/排队时保持阻塞，不会开始下一次 GPU 生成。
+- [x] 提交过程先持久化 prompt 预留 ID；提交回执异常、断联、重启均保留 `remoteUncertain` 栅栏，避免重复提交；后台每 30 秒只做一次有界核对，绝不自动重试生成。
+- [x] 任务快照增加 `stopPolling: true`、`nextAction`、`automaticRetryAllowed: false`；MCP 明确要求 Agent 提交后结束当前回合，由界面 SSE/定时刷新展示结果。
+- [x] 取消与完成竞态保留已完成视频；任务不存在返回 HTTP 404；SSE 终态正确关闭；释放显存前核对无活动任务。
+- [x] H3 安装状态 `null`/数组/数字和落盘失败均降级为可重试状态；安装回调异常只结算一次。
+- [x] 补充 runtime/UI 回归和媒体服务真实 HTTP 集成覆盖；最终相关测试集合 `37 files, 245 passed, 1 skipped`，TypeScript、i18n、Oxlint（0 errors）通过。
+- [x] Windows 安装包已在后续构建复验中重新生成；本轮以文末“对话输入框视频导入图标优化与安装包刷新”记录的包路径、大小和 SHA256 为准。
+- [ ] 仍需在真实 ComfyUI GPU 上验证：长采样无事件、运行时重启、取消后队列清空、断联恢复和多显存配置；这些不由单元/HTTP 集成测试替代。
+
+本轮监控默认值：队列心跳 30 秒、连续失败 3 次、执行静默 10 分钟仅标记疑似停滞、总时限 30 分钟（保留 `AIONUI_H3_MAX_WAIT_MS` 配置），队列消失且历史为空需 60 秒宽限。取消确认最多 4 次、整体请求限时 30 秒。WebSocket 丢失后使用 HTTP 核对原 prompt，不重新提交。
+
+边界：`stopPolling` 是 MCP 的明确协作契约，并非对任意第三方 Agent 推理循环的强制中断。内置 UI 在终态停止 SSE/轮询。提交回执丢失且服务从未确认过该 prompt 时，空队列不能证明迟到提交不会生效，系统保留阻塞而不强制解锁；需要核实运行时任务后处理。没有对用户反馈的每一种“闪退”宣称已定位根因，当前只修复并测试了已复现的状态文件和 worker 回调异常路径。
+
+### 2026-10-10 H3 完整闭环构建验证
+
+- [x] 使用缓存 Electron 37.10.3 和重新下载的 AionCore v0.2.2 完成 Windows x64 未签名包：`out/OpenH3-2.2.2-win-x64.exe`，309,229,248 bytes，SHA256=`A215D857CAEDF1B4B5A8553722CA1F6D6149CD7F1DCF06F77A675B75022FC43C`。
+- [x] 包内资源：`resources/app.asar`、OpenH3 `resources/app.png`、`NOTICE.OpenH3.txt`、FFmpeg/ffprobe、AionCore 与媒体服务均存在；app.asar 中 147 个文本文件扫描无 Provider Key、开发机路径或私有地址。
+- [x] 包内媒体服务确认包含 `H3_REMOTE_STATE_UNCONFIRMED`、`confirmStopped`；MCP bundle 确认包含 `stopPolling`；Cloudflare 网关 URL 出现在 Provider chunk；无 `video-provider-bootstrap.json`。
+- [x] `open-source-release-audit.js`：Source findings 0、Artifact findings 0；许可证证据缺口仍为 6 项，属于正式合规材料，不因 Alpha 包自动消失。
+- [ ] `Get-AuthenticodeSignature` 状态为未签名；本包只能称 Windows x64 Alpha 未签名体验包。
+
+### 2026-10-10 对话输入框视频导入图标优化与安装包刷新
+
+- [x] 视频导入按钮改用与 SendBox 一致的 IconPark outline 单色图标，固定 32px 圆形点击区域和 16px 图标尺寸；上传中、取消、hover、focus 和 disabled 状态统一处理。
+- [x] 视频导入 DOM 回归测试补充按钮和取消状态断言；相关测试 2 passed，TypeScript、i18n、Oxfmt 和 Oxlint（0 errors）通过。
+- [x] 重新构建 Windows x64 未签名 Alpha 体验包：`out/OpenH3-2.2.2-win-x64.exe`（309,144,751 bytes，SHA256=`0A758938B56ED8F7FF496815A480E905C9A561E0EDF700DC3F6378606A80037D`）。
+- [x] afterPack 验证 `resources/app.asar`、OpenH3 `app.png`、FFmpeg/ffprobe、第三方许可证资源和 x64 native module；开源发布审计 Source findings 0、Artifact findings 0。
+- [ ] 安装包仍未签名，只能称为 Windows x64 Alpha 未签名体验包；干净机器安装/首启和真实 GPU 任务验收仍需单独执行。

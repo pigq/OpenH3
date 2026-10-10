@@ -784,6 +784,10 @@
     "collapse": "收合計劃"
   },
   "h3Activity": {
+    "confirmStop": "確認停止",
+    "remoteUncertain": "上一個任務可能仍在執行，確認遠端任務結束後才能開始新的生成。",
+    "reconnecting": "正在重新連接影片引擎，不會重複提交目前任務。",
+    "suspectedStall": "引擎在線，但目前節點長時間沒有進度變化，將繼續核對直到任務時限。",
     "title": "Video task",
     "queued": "Queued",
     "running": "Generating video",

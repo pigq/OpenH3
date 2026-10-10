@@ -48,14 +48,12 @@ describe('release packaging configuration', () => {
     expect(readProjectFile('scripts/afterPack.js')).toContain("['ffmpeg.exe', 'ffprobe.exe']");
   });
 
-  it('keeps public release builds free of provider bootstrap injection by default', () => {
+  it('does not support embedding provider credentials in release packages', () => {
     const afterPack = readProjectFile('scripts/afterPack.js');
 
-    expect(afterPack).toContain('AIONUI_PROVIDER_BOOTSTRAP_FILE');
-    expect(afterPack).toContain('fs.unlinkSync(bootstrapTarget)');
-    expect(readProjectFile('scripts/open-source-release-audit.js')).toContain(
-      "providerBootstrap: 'forbidden'",
-    );
+    expect(afterPack).not.toContain('AIONUI_PROVIDER_BOOTSTRAP_FILE');
+    expect(afterPack).not.toContain('video-provider-bootstrap.json');
+    expect(readProjectFile('scripts/open-source-release-audit.js')).toContain("providerBootstrap: 'forbidden'");
   });
 
   it('links first-run H3 setup to the upstream model and ComfyUI licenses', () => {

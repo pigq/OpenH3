@@ -116,6 +116,10 @@ export type H3Job = {
   status: H3JobStatus;
   progress: number;
   activity?: H3Activity;
+  monitor?: H3Monitor;
+  /** A remote prompt may still own GPU work. Blocks replacement submissions across restarts. */
+  remoteUncertain?: boolean;
+  submissionPending?: boolean;
   promptId?: string;
   parentVersionId?: string;
   cancelRequested?: boolean;
@@ -125,6 +129,30 @@ export type H3Job = {
   error?: string;
   diagnosis?: H3ComfyDiagnosis;
 };
+
+export type H3Monitor = {
+  state: 'connected' | 'reconnecting' | 'suspected-stall' | 'missing';
+  remoteState?: 'queued' | 'running' | 'absent';
+  lastHeartbeatAt?: string;
+  consecutiveFailures: number;
+};
+
+/** Agent calls are snapshots, not a loop that waits for GPU work. The UI owns live updates. */
+export function h3AgentSnapshot(job: H3Job) {
+  return {
+    ...job,
+    terminal: !['queued', 'running'].includes(job.status),
+    stopPolling: true,
+    automaticRetryAllowed: false,
+    nextAction: job.remoteUncertain
+      ? 'CONFIRM_REMOTE_STOP'
+      : ['queued', 'running'].includes(job.status)
+        ? 'END_TURN_UI_WILL_MONITOR'
+        : job.status === 'succeeded'
+          ? 'SHOW_RESULT'
+          : 'EXPLAIN_FAILURE_WAIT_FOR_USER',
+  };
+}
 
 export const h3VersionSchema = z
   .object({

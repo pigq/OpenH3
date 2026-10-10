@@ -784,6 +784,10 @@
     "collapse": "收起计划"
   },
   "h3Activity": {
+    "confirmStop": "确认停止",
+    "remoteUncertain": "上一个任务可能仍在运行，确认远端任务结束后才能开始新的生成。",
+    "reconnecting": "正在重新连接视频引擎，不会重复提交当前任务。",
+    "suspectedStall": "引擎在线，但当前节点长时间没有进度变化，将继续核对直至任务时限。",
     "title": "视频任务",
     "queued": "排队中",
     "running": "正在生成视频",

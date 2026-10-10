@@ -19,7 +19,15 @@ export class H3SetupTask {
     ) => Promise<void>
   ) {
     if (fs.existsSync(file)) {
-      const saved = JSON.parse(fs.readFileSync(file, 'utf8')) as H3SetupState;
+      let saved: H3SetupState;
+      try {
+        saved = JSON.parse(fs.readFileSync(file, 'utf8')) as H3SetupState;
+      } catch {
+        // A power loss can leave a truncated state file. Preserve the file for
+        // diagnostics and let the user retry instead of crashing media-service.
+        this.state = { phase: 'failed', error: 'H3_SETUP_STATE_CORRUPTED' };
+        return;
+      }
       const phases: H3SetupPhase[] = [
         'idle',
         'downloading',
@@ -30,10 +38,18 @@ export class H3SetupTask {
         'paused',
         'failed',
       ];
-      if (!phases.includes(saved.phase)) throw new Error('H3_SETUP_STATE_INVALID');
+      if (!saved || typeof saved !== 'object' || Array.isArray(saved) || !phases.includes(saved.phase)) {
+        this.state = { phase: 'failed', error: 'H3_SETUP_STATE_INVALID' };
+        return;
+      }
       this.state = saved;
-      if (['downloading', 'verifying', 'extracting', 'installing-acceleration'].includes(saved.phase))
-        this.save({ ...saved, phase: 'paused' });
+      if (['downloading', 'verifying', 'extracting', 'installing-acceleration'].includes(saved.phase)) {
+        try {
+          this.save({ ...saved, phase: 'paused' });
+        } catch {
+          this.state = { ...saved, phase: 'failed', error: 'H3_SETUP_STATE_WRITE_FAILED' };
+        }
+      }
     }
   }
   status(): H3SetupState {
@@ -76,6 +92,9 @@ export class H3SetupTask {
           error: controller.signal.aborted ? undefined : error instanceof Error ? error.message : String(error),
         })
       )
+      .catch(() => {
+        this.state = { ...this.state, phase: 'failed', error: 'H3_SETUP_STATE_WRITE_FAILED' };
+      })
       .finally(() => {
         this.running = undefined;
       });

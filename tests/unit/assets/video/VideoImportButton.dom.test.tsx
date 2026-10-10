@@ -16,6 +16,8 @@ describe('video import', () => {
   it('uses the authenticated upload pipeline then opens a reference-only preview', async () => {
     h.upload.mockResolvedValue('/managed/clip.mp4');
     const { container } = render(<VideoImportButton conversationId='chat' />);
+    expect(container.querySelector('.sendbox-video-import-btn')).toBeTruthy();
+    expect(container.querySelector('.sendbox-video-import-btn svg')).toBeTruthy();
     fireEvent.change(container.querySelector('input[type=file]')!, {
       target: { files: [new File(['data'], 'clip.mp4')] },
     });
@@ -40,6 +42,7 @@ describe('video import', () => {
       target: { files: [new File(['data'], 'clip.mp4')] },
     });
     await waitFor(() => expect(h.upload).toHaveBeenCalled());
+    expect(container.querySelector('.sendbox-video-import-btn--cancel')).toBeTruthy();
     const signal = h.upload.mock.calls[0][4].signal as AbortSignal;
     unmount();
     finish('/managed/clip.mp4');

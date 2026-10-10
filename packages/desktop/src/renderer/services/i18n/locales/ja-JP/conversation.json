@@ -784,6 +784,10 @@
     "collapse": "プランを折りたたむ"
   },
   "h3Activity": {
+    "confirmStop": "停止を確認",
+    "remoteUncertain": "前のタスクが実行中の可能性があります。終了を確認するまで新しい生成は開始できません。",
+    "reconnecting": "動画エンジンに再接続しています。タスクは再送信しません。",
+    "suspectedStall": "エンジンは稼働中ですが、ノードの進捗が更新されていません。制限時間まで確認を続けます。",
     "title": "Video task",
     "queued": "Queued",
     "running": "Generating video",

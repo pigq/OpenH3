@@ -784,6 +784,10 @@
     "collapse": "계획 접기"
   },
   "h3Activity": {
+    "confirmStop": "중지 확인",
+    "remoteUncertain": "이전 작업이 실행 중일 수 있습니다. 종료를 확인할 때까지 새 생성을 시작할 수 없습니다.",
+    "reconnecting": "영상 엔진에 다시 연결 중입니다. 현재 작업은 다시 제출하지 않습니다.",
+    "suspectedStall": "엔진은 온라인이지만 노드 진행률이 갱신되지 않았습니다. 제한 시간까지 확인합니다.",
     "title": "Video task",
     "queued": "Queued",
     "running": "Generating video",

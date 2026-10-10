@@ -175,3 +175,19 @@ it('labels a measured node fraction instead of total progress', async () => {
   await view.findByText('50%');
   expect(view.getByTestId('h3-live-progress').textContent).toContain('nodeProgress');
 });
+
+it('offers remote-stop confirmation for a failed job that still blocks dispatch', async () => {
+  mocks.get.mockResolvedValue({
+    id,
+    status: 'failed',
+    remoteUncertain: true,
+    artifacts: [],
+    error: 'H3_COMFY_HISTORY_TIMEOUT',
+  });
+  mocks.cancel.mockResolvedValue({ id, status: 'failed', remoteUncertain: false, artifacts: [] });
+  const view = render(<H3ToolResults messages={[message]} />);
+  const confirm = await view.findByText('conversation.h3Activity.confirmStop');
+  fireEvent.click(confirm);
+  await waitFor(() => expect(mocks.cancel).toHaveBeenCalledWith(id));
+  await waitFor(() => expect(view.queryByText('conversation.h3Activity.confirmStop')).toBeNull());
+});

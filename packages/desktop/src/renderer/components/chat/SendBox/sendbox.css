@@ -495,6 +495,69 @@ body[arco-theme='dark'] .sendbox-panel .send-button-custom--disabled svg * {
   transform: none !important;
 }
 
+/* Video import lives beside the attachment and draft actions. Keep it in the
+ * same 32px action grid so the video glyph does not read like a foreign
+ * control, especially when the input switches between one and multiple lines. */
+.sendbox-video-import-btn,
+.sendbox-video-import-btn.arco-btn {
+  width: 32px !important;
+  min-width: 32px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 50% !important;
+  box-shadow: none !important;
+  color: var(--color-text-3) !important;
+  flex: 0 0 32px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.sendbox-video-import-btn .arco-btn-icon,
+.sendbox-video-import-btn .arco-icon,
+.sendbox-video-import-btn > span {
+  width: 16px !important;
+  height: 16px !important;
+  margin: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  line-height: 1 !important;
+}
+
+.sendbox-video-import-btn svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.sendbox-video-import-btn:hover,
+.sendbox-video-import-btn:active,
+.sendbox-video-import-btn:focus,
+.sendbox-video-import-btn:focus-visible {
+  border: none !important;
+  box-shadow: none !important;
+  background: var(--color-fill-2) !important;
+  color: var(--color-text-1) !important;
+}
+
+.sendbox-video-import-btn:disabled,
+.sendbox-video-import-btn:disabled:hover,
+.sendbox-video-import-btn:disabled:active,
+.sendbox-video-import-btn:disabled:focus,
+.sendbox-video-import-btn:disabled:focus-visible {
+  background: transparent !important;
+  color: var(--color-text-3) !important;
+  opacity: 0.72 !important;
+  cursor: not-allowed !important;
+}
+
+.sendbox-video-import-btn--cancel {
+  color: var(--color-text-2) !important;
+}
+
 /* Allow sendbox tools area to shrink so the send button stays visible */
 .sendbox-tools {
   min-width: 0;

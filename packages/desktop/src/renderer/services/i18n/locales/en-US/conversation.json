@@ -784,6 +784,10 @@
     "collapse": "Collapse plan"
   },
   "h3Activity": {
+    "confirmStop": "Confirm stop",
+    "remoteUncertain": "The previous task may still be running. New generation is blocked until its remote state is confirmed.",
+    "reconnecting": "Reconnecting to the video engine; this task will not be resubmitted.",
+    "suspectedStall": "The engine is online, but this node has not reported progress recently. Checking until the task time limit.",
     "title": "Video task",
     "queued": "Queued",
     "running": "Generating video",

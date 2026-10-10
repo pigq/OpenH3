@@ -7,6 +7,7 @@ export interface H3JobStore {
   create(job: H3Job): H3Job;
   update(id: string, patch: Partial<H3Job>): H3Job;
   listActive(): H3Job[];
+  listBlocked(): H3Job[];
 }
 
 export class FileH3JobStore implements H3JobStore {
@@ -38,6 +39,9 @@ export class FileH3JobStore implements H3JobStore {
   }
   listActive(): H3Job[] {
     return [...this.jobs.values()].filter((job) => ['queued', 'running'].includes(job.status));
+  }
+  listBlocked(): H3Job[] {
+    return [...this.jobs.values()].filter((job) => job.remoteUncertain);
   }
   private flush(): void {
     const temp = `${this.filename}.tmp`;

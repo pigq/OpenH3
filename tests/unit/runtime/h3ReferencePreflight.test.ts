@@ -21,6 +21,7 @@ function store(): H3JobStore {
       return job;
     },
     listActive: () => [...jobs.values()].filter((job) => job.status === 'queued' || job.status === 'running'),
+    listBlocked: () => [...jobs.values()].filter((job) => job.remoteUncertain),
   };
 }
 
@@ -88,9 +89,9 @@ describe('H3 reference preflight', () => {
     const jobStore = store();
     const preflight = { validate: vi.fn().mockRejectedValue(new Error('H3_REFERENCE_DURATION_TOO_SHORT')) };
     const runner = new H3JobRunner(jobStore, undefined, preflight);
-    await expect(
-      runner.enqueue({ prompt: 'test', references: [{ type: 'video', path: 'clip.mp4' }] })
-    ).rejects.toThrow('H3_REFERENCE_DURATION_TOO_SHORT');
+    await expect(runner.enqueue({ prompt: 'test', references: [{ type: 'video', path: 'clip.mp4' }] })).rejects.toThrow(
+      'H3_REFERENCE_DURATION_TOO_SHORT'
+    );
     expect(jobStore.listActive()).toEqual([]);
   });
 

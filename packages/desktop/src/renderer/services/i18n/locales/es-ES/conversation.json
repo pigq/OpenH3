@@ -785,6 +785,10 @@
     "collapse": "Contraer plan"
   },
   "h3Activity": {
+    "confirmStop": "Confirmar detención",
+    "remoteUncertain": "La tarea anterior puede seguir activa. No se iniciará otra generación hasta confirmar su finalización.",
+    "reconnecting": "Reconectando con el motor de vídeo. La tarea no se enviará de nuevo.",
+    "suspectedStall": "El motor está conectado, pero el nodo no informa de avances. Se comprobará hasta el límite de tiempo.",
     "title": "Video task",
     "queued": "Queued",
     "running": "Generating video",

@@ -790,6 +790,10 @@
     "collapse": "Recolher plano"
   },
   "h3Activity": {
+    "confirmStop": "Confirmar parada",
+    "remoteUncertain": "A tarefa anterior pode estar ativa. Uma nova geração aguarda a confirmação do encerramento.",
+    "reconnecting": "Reconectando ao mecanismo de vídeo. A tarefa não será reenviada.",
+    "suspectedStall": "O mecanismo está online, mas o nó não informa progresso. A verificação continuará até o limite de tempo.",
     "title": "Video task",
     "queued": "Queued",
     "running": "Generating video",

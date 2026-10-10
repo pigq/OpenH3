@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createH3Job, type H3Job } from '@/common/chat/document/h3Job';
+import { createH3Job, h3AgentSnapshot, type H3Job } from '@/common/chat/document/h3Job';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,10 +13,108 @@ function memoryStore(initial: H3Job): H3JobStore {
     create: (next) => (job = next),
     update: (_id, patch) => (job = { ...job, ...patch }),
     listActive: () => (['queued', 'running'].includes(job.status) ? [job] : []),
+    listBlocked: () => (job.remoteUncertain ? [job] : []),
   };
 }
 import { H3JobRunner } from '@/process/services/runtime/H3JobRunner';
 import { diagnoseComfyError } from '@/process/services/runtime/h3ComfyError';
+
+it.each(['queued', 'running', 'succeeded', 'failed', 'cancelled'] as const)(
+  'ends Agent polling for a %s snapshot',
+  (status) => {
+    expect(h3AgentSnapshot({ ...createH3Job({ prompt: 'test' }), status })).toMatchObject({
+      stopPolling: true,
+      automaticRetryAllowed: false,
+      terminal: !['queued', 'running'].includes(status),
+    });
+  }
+);
+
+it('recovers an interrupted cancellation as a persistent barrier, never as a resumed generation', () => {
+  const store = memoryStore({
+    ...createH3Job({ prompt: 'test' }, 'p'),
+    status: 'running',
+    promptId: 'remote',
+    cancelRequested: true,
+  });
+  const client = { generate: vi.fn(), resume: vi.fn(), cancel: vi.fn() };
+  const runner = new H3JobRunner(store, client);
+  runner.recover();
+  expect(runner.blocked()).toBe(true);
+  expect(store.get('p')).toMatchObject({ status: 'failed', remoteUncertain: true, cancelRequested: false });
+  expect(client.resume).not.toHaveBeenCalled();
+});
+
+it('unblocks automatically after a previously unreachable prompt is confirmed stopped', async () => {
+  const store = memoryStore({
+    ...createH3Job({ prompt: 'test' }, 'p'),
+    status: 'failed',
+    remoteUncertain: true,
+    promptId: 'remote',
+  });
+  const client = {
+    generate: vi.fn(),
+    resume: vi.fn(),
+    cancel: vi.fn(),
+    confirmStopped: vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue(undefined),
+  };
+  const runner = new H3JobRunner(store, client);
+  await runner.reconcile();
+  expect(runner.blocked()).toBe(true);
+  await runner.reconcile();
+  expect(runner.blocked()).toBe(false);
+  expect(client.generate).not.toHaveBeenCalled();
+  expect(client.cancel).not.toHaveBeenCalled();
+});
+
+it('preserves artifacts when completion races with a user cancellation', async () => {
+  const store = memoryStore({ ...createH3Job({ prompt: 'test' }, 'p'), status: 'running', promptId: 'remote' });
+  const result = {
+    promptId: 'remote',
+    artifacts: [{ filename: 'done.mp4', subfolder: '', type: 'output', mimeType: 'video/mp4' }],
+  };
+  const runner = new H3JobRunner(store, {
+    generate: vi.fn(),
+    resume: vi.fn(),
+    cancel: vi.fn().mockResolvedValue(result),
+  });
+  await expect(runner.cancel('p')).resolves.toMatchObject({
+    status: 'succeeded',
+    artifacts: [{ filename: 'done.mp4' }],
+  });
+});
+
+it('persists a dispatch barrier when a timed-out remote task cannot be stopped, including after restart', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'h3-fence-'));
+  try {
+    const filename = path.join(directory, 'jobs.json');
+    const store = new FileH3JobStore(filename);
+    store.create({ ...createH3Job({ prompt: 'old' }, 'old'), promptId: 'remote' });
+    const client = {
+      generate: vi.fn(),
+      resume: vi.fn().mockRejectedValue(new Error('H3_COMFY_HISTORY_TIMEOUT')),
+      cancel: vi.fn().mockRejectedValue(new Error('offline')),
+    };
+    await expect(new H3JobRunner(store, client).run('old')).rejects.toThrow('H3_COMFY_HISTORY_TIMEOUT');
+    expect(client.cancel).toHaveBeenCalledWith('remote');
+    const restored = new FileH3JobStore(filename);
+    expect(restored.get('old')).toMatchObject({
+      status: 'failed',
+      remoteUncertain: true,
+      finishedAt: expect.any(String),
+    });
+    const runner = new H3JobRunner(restored, client);
+    runner.recover();
+    await expect(runner.enqueue({ prompt: 'new' })).rejects.toThrow('H3_REMOTE_STATE_UNCONFIRMED');
+    client.cancel.mockResolvedValue(undefined);
+    await runner.cancel('old');
+    expect(restored.get('old')?.remoteUncertain).toBe(false);
+    await expect(runner.enqueue({ prompt: 'new' })).resolves.toHaveProperty('status', 'queued');
+    expect(client.generate).not.toHaveBeenCalled();
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 describe('H3 job runner', () => {
   it('persists structured runtime diagnosis for Agent job queries', async () => {
@@ -70,6 +168,7 @@ describe('H3 job runner', () => {
         state.set(id, next);
         return next;
       },
+      listBlocked: () => [...state.values()].filter((job) => job.remoteUncertain),
       listActive: () => [...state.values()].filter((job) => job.status === 'running' || job.status === 'queued'),
     };
     const client = {
@@ -100,6 +199,7 @@ describe('H3 job runner', () => {
         state.set(id, next);
         return next;
       },
+      listBlocked: () => [...state.values()].filter((job) => job.remoteUncertain),
       listActive: () => [...state.values()],
     };
     const runner = new H3JobRunner(store, {

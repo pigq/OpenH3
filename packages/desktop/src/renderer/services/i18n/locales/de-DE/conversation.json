@@ -785,6 +785,10 @@
     "collapse": "Plan einklappen"
   },
   "h3Activity": {
+    "confirmStop": "Stopp bestätigen",
+    "remoteUncertain": "Die vorherige Aufgabe läuft möglicherweise noch. Neue Generierungen warten auf die Bestätigung ihres Endes.",
+    "reconnecting": "Verbindung zur Video-Engine wird wiederhergestellt. Die Aufgabe wird nicht erneut gesendet.",
+    "suspectedStall": "Die Engine ist erreichbar, aber der Knoten meldet keinen Fortschritt. Prüfung bis zum Zeitlimit.",
     "title": "Video task",
     "queued": "Queued",
     "running": "Generating video",

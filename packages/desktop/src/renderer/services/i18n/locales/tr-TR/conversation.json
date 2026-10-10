@@ -786,6 +786,10 @@
     "collapse": "Planı daralt"
   },
   "h3Activity": {
+    "confirmStop": "Durdurmayı doğrula",
+    "remoteUncertain": "Önceki görev hâlâ çalışıyor olabilir. Bittiği doğrulanana kadar yeni üretim engellenir.",
+    "reconnecting": "Video motoruna yeniden bağlanılıyor. Görev yeniden gönderilmeyecek.",
+    "suspectedStall": "Motor çevrimiçi ancak düğüm ilerleme bildirmiyor. Süre sınırına kadar kontrol edilecek.",
     "title": "Video task",
     "queued": "Queued",
     "running": "Generating video",

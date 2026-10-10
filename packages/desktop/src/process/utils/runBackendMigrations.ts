@@ -19,7 +19,7 @@ import { BUILTIN_IMAGE_GEN_NAME, type IMcpServer, type IProvider } from '@/commo
 import { BUILTIN_VIDEO_MEDIA_NAME } from '../resources/builtinMcp/constants';
 import { getBuiltinMcpScriptPath, type ProcessConfig as ProcessConfigType } from './initStorage';
 import { migrateAssistantsToBackend } from './migrateAssistants';
-import { provisionVideoProvider, readVideoProviderKey } from './videoProviderPreset';
+import { provisionVideoProvider, DEFAULT_VIDEO_GATEWAY_URL } from './videoProviderPreset';
 
 type ConfigFile = typeof ProcessConfigType;
 type MigrationStepResult = boolean;
@@ -215,7 +215,15 @@ function buildDefaultMcpServers(): McpImportServer[] {
       enabled: true,
       builtin: true,
       transport: { type: 'stdio', command: 'node', args: [getBuiltinMcpScriptPath('builtin-mcp-video-media')] },
-      original_json: JSON.stringify({ mcpServers: { [BUILTIN_VIDEO_MEDIA_NAME]: { command: 'node', args: [getBuiltinMcpScriptPath('builtin-mcp-video-media')] } } }, null, 2),
+      original_json: JSON.stringify(
+        {
+          mcpServers: {
+            [BUILTIN_VIDEO_MEDIA_NAME]: { command: 'node', args: [getBuiltinMcpScriptPath('builtin-mcp-video-media')] },
+          },
+        },
+        null,
+        2
+      ),
     },
     {
       name: BUILTIN_CHROME_DEVTOOLS_NAME,
@@ -528,7 +536,7 @@ export async function runBackendMigrations(configFile: ConfigFile): Promise<void
 
   const syncStart = Date.now();
   try {
-    await provisionVideoProvider(httpRequest, readVideoProviderKey());
+    await provisionVideoProvider(httpRequest, DEFAULT_VIDEO_GATEWAY_URL);
   } catch {
     // Do not log provider payloads or credential-bearing HTTP errors.
     console.warn('[AionUi] Video provider initialization incomplete');

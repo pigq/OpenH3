@@ -5,6 +5,210 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+describe('H3 watchdog reconciliation', () => {
+  it('ignores duplicate node events rather than manufacturing fresh activity', async () => {
+    let reads = 0;
+    const updates = vi.fn();
+    const event = { type: 'progress', data: { prompt_id: 'p', node: '7', value: 1, max: 4 } };
+    const queue = [event, event, event, { type: 'execution_success', data: { prompt_id: 'p' } }];
+    const events = {
+      connected: true,
+      next: async () => queue.shift(),
+    } as unknown as import('@/process/services/runtime/h3ComfyEvents').H3ComfyEvents;
+    const client = new H3ComfyClient({
+      fetchImpl: (async () =>
+        Response.json(
+          ++reads === 1
+            ? {}
+            : { p: { status: { completed: true }, outputs: { out: { videos: [{ filename: 'done.mp4' }] } } } }
+        )) as typeof fetch,
+    });
+    await client.resume('p', new AbortController().signal, updates, events);
+    expect(updates.mock.calls.filter(([, activity]) => activity?.phase === 'node-progress')).toHaveLength(1);
+  });
+
+  it('releases a terminated prompt even when its successful history has no usable output', async () => {
+    const client = new H3ComfyClient({
+      pollIntervalMs: 0,
+      sleep: async () => undefined,
+      fetchImpl: (async (url) =>
+        Response.json(
+          String(url).endsWith('/cancel')
+            ? { cancelled: false }
+            : String(url).endsWith('/queue')
+              ? { queue_running: [], queue_pending: [] }
+              : { p: { status: { completed: true }, outputs: {} } }
+        )) as typeof fetch,
+    });
+    await expect(client.cancel('p')).resolves.toBeUndefined();
+  });
+
+  it('bounds history failures even when the queue endpoint stays healthy', async () => {
+    const client = new H3ComfyClient({
+      heartbeatIntervalMs: 0,
+      pollIntervalMs: 0,
+      sleep: async () => undefined,
+      fetchImpl: (async (url) =>
+        String(url).endsWith('/queue')
+          ? Response.json({ queue_running: [[0, 'p']], queue_pending: [] })
+          : new Response('{}', { status: 503 })) as typeof fetch,
+    });
+    await expect(client.resume('p', new AbortController().signal)).rejects.toThrow('H3_COMFY_HISTORY_UNAVAILABLE');
+  });
+  it('does not unlock an ambiguous submission merely because the queue is empty', async () => {
+    const client = new H3ComfyClient({
+      pollIntervalMs: 0,
+      sleep: async () => undefined,
+      fetchImpl: (async (url) =>
+        Response.json(
+          String(url).endsWith('/cancel')
+            ? { cancelled: false }
+            : String(url).endsWith('/queue')
+              ? { queue_running: [], queue_pending: [] }
+              : {}
+        )) as typeof fetch,
+    });
+    await expect(client.cancel('reserved', true)).rejects.toThrow('H3_SUBMISSION_STATE_UNKNOWN');
+    await expect(client.confirmStopped('reserved', true)).rejects.toThrow('H3_SUBMISSION_STATE_UNKNOWN');
+  });
+
+  it('uses persisted execution time rather than restarting the deadline after recovery', async () => {
+    const client = new H3ComfyClient({ maxWaitMs: 100, fetchImpl: (async () => Response.json({})) as typeof fetch });
+    await expect(
+      client.resume('p', new AbortController().signal, undefined, undefined, {
+        startedAt: new Date(Date.now() - 1000).toISOString(),
+      })
+    ).rejects.toThrow('H3_COMFY_HISTORY_TIMEOUT');
+  });
+
+  it.each(['queued', 'running'])(
+    'recovers a brief disconnection while the target is %s, without a second submission',
+    async (state) => {
+      let now = 1000,
+        reads = 0,
+        probes = 0;
+      const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+      const updates = vi.fn();
+      const fetchImpl = vi.fn(async (url) => {
+        if (String(url).endsWith('/queue')) {
+          if (++probes === 1) throw new Error('offline');
+          return Response.json({
+            queue_running: state === 'running' ? [[0, 'p']] : [],
+            queue_pending: state === 'queued' ? [[0, 'p']] : [],
+          });
+        }
+        return Response.json(
+          ++reads < 4
+            ? {}
+            : { p: { status: { completed: true }, outputs: { out: { videos: [{ filename: 'done.mp4' }] } } } }
+        );
+      });
+      const client = new H3ComfyClient({
+        heartbeatIntervalMs: 0,
+        maxWaitMs: 100,
+        pollIntervalMs: 0,
+        sleep: async () => {
+          now += 10;
+        },
+        fetchImpl: fetchImpl as typeof fetch,
+      });
+      try {
+        await client.resume('p', new AbortController().signal, updates);
+        expect(updates.mock.calls.some(([, , m]) => m?.state === 'reconnecting')).toBe(true);
+        expect(updates.mock.calls.some(([, , m]) => m?.state === 'connected' && m?.remoteState === state)).toBe(true);
+        expect(fetchImpl.mock.calls.some(([url]) => String(url).endsWith('/prompt'))).toBe(false);
+      } finally {
+        clock.mockRestore();
+      }
+    }
+  );
+
+  it('lets history settle after the target disappears from the queue', async () => {
+    let reads = 0;
+    const client = new H3ComfyClient({
+      heartbeatIntervalMs: 0,
+      missingGraceMs: 60_000,
+      pollIntervalMs: 0,
+      sleep: async () => undefined,
+      fetchImpl: (async (url) =>
+        Response.json(
+          String(url).endsWith('/queue')
+            ? { queue_running: [], queue_pending: [] }
+            : ++reads < 3
+              ? {}
+              : { p: { status: { completed: true }, outputs: { out: { videos: [{ filename: 'done.mp4' }] } } } }
+        )) as typeof fetch,
+    });
+    await expect(client.resume('p', new AbortController().signal)).resolves.toHaveProperty('promptId', 'p');
+  });
+  it('does not confuse cancellation acknowledgement with remote termination', async () => {
+    const client = new H3ComfyClient({
+      cancelConfirmAttempts: 2,
+      pollIntervalMs: 0,
+      sleep: async () => undefined,
+      fetchImpl: (async (url) =>
+        Response.json(
+          String(url).endsWith('/cancel') ? { cancelled: true } : { queue_running: [[0, 'p']], queue_pending: [] }
+        )) as typeof fetch,
+    });
+    await expect(client.cancel('p')).rejects.toThrow('H3_COMFY_CANCEL_UNCONFIRMED');
+  });
+
+  it('preserves a completed result when completion wins the cancellation race', async () => {
+    const client = new H3ComfyClient({
+      pollIntervalMs: 0,
+      sleep: async () => undefined,
+      fetchImpl: (async (url) =>
+        Response.json(
+          String(url).endsWith('/cancel')
+            ? { cancelled: false }
+            : String(url).endsWith('/queue')
+              ? { queue_running: [], queue_pending: [] }
+              : { p: { status: { completed: true }, outputs: { out: { videos: [{ filename: 'done.mp4' }] } } } }
+        )) as typeof fetch,
+    });
+    await expect(client.cancel('p')).resolves.toMatchObject({ promptId: 'p', artifacts: [{ filename: 'done.mp4' }] });
+  });
+
+  it('allows silent running nodes past the idle threshold and keeps execution timestamps truthful', async () => {
+    let now = 1000;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    let reads = 0;
+    const updates = vi.fn();
+    const client = new H3ComfyClient({
+      maxIdleMs: 5,
+      maxWaitMs: 100,
+      heartbeatIntervalMs: 0,
+      pollIntervalMs: 0,
+      sleep: async () => {
+        now += 10;
+      },
+      fetchImpl: (async (url) =>
+        Response.json(
+          String(url).endsWith('/queue')
+            ? { queue_running: [[0, 'p']], queue_pending: [] }
+            : String(url).includes('/history/')
+              ? ++reads >= 4
+                ? { p: { status: { completed: true }, outputs: { out: { videos: [{ filename: 'done.mp4' }] } } } }
+                : {}
+              : {}
+        )) as typeof fetch,
+    });
+    try {
+      await expect(
+        client.resume('p', new AbortController().signal, updates, undefined, {
+          activity: { phase: 'waiting', updatedAt: new Date(1000).toISOString() },
+        })
+      ).resolves.toHaveProperty('promptId', 'p');
+      expect(updates.mock.calls.some(([, , monitor]) => monitor?.state === 'suspected-stall')).toBe(true);
+      const activities = updates.mock.calls.map(([, activity]) => activity).filter(Boolean);
+      expect(new Set(activities.map((a) => a.updatedAt)).size).toBe(1);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+});
+
 describe('H3 Comfy client workflow adapter', () => {
   it('loads the currently selected bundle root for each generation', async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'h3-root-switch-'));
@@ -270,13 +474,23 @@ describe('H3 Comfy client workflow adapter', () => {
   it('cancels one queued or running prompt through the pinned by-id endpoint', async () => {
     const requests: Array<{ url: string; body?: string }> = [];
     const client = new (await import('@/process/services/runtime/H3ComfyClient')).H3ComfyClient({
+      pollIntervalMs: 0,
+      sleep: async () => undefined,
       fetchImpl: (async (input, init) => {
         requests.push({ url: String(input), body: init?.body?.toString() });
-        return new Response('{}', { status: 200 });
+        return Response.json(
+          String(input).endsWith('/cancel')
+            ? { cancelled: true }
+            : String(input).endsWith('/queue')
+              ? { queue_running: [], queue_pending: [] }
+              : {}
+        );
       }) as typeof fetch,
     });
     await client.cancel('prompt-1');
-    expect(requests).toEqual([{ url: 'http://127.0.0.1:8188/api/jobs/prompt-1/cancel' }]);
+    expect(requests[0]).toEqual({ url: 'http://127.0.0.1:8188/api/jobs/prompt-1/cancel' });
+    expect(requests.filter((r) => r.url.endsWith('/queue'))).toHaveLength(2);
+    expect(requests.some((r) => r.url.endsWith('/interrupt'))).toBe(false);
   });
   it('terminates on execution errors even when completed is false', async () => {
     const client = new H3ComfyClient({
@@ -285,9 +499,55 @@ describe('H3 Comfy client workflow adapter', () => {
     });
     await expect(client.resume('p', new AbortController().signal)).rejects.toThrow('H3_COMFY_EXECUTION_FAILED');
   });
+  it('fails a missing prompt after the queue/history race grace period', async () => {
+    let now = 1000;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const client = new H3ComfyClient({
+      maxIdleMs: 5,
+      missingGraceMs: 20,
+      heartbeatIntervalMs: 0,
+      pollIntervalMs: 0,
+      sleep: async () => {
+        now += 10;
+      },
+      fetchImpl: (async (url) =>
+        Response.json(String(url).endsWith('/queue') ? { queue_running: [], queue_pending: [] } : {})) as typeof fetch,
+    });
+    try {
+      await expect(client.resume('stalled', new AbortController().signal)).rejects.toThrow('H3_COMFY_PROMPT_LOST');
+    } finally {
+      clock.mockRestore();
+    }
+  });
+  it('ends the job when the ComfyUI runtime heartbeat is lost', async () => {
+    const client = new H3ComfyClient({
+      maxIdleMs: 60_000,
+      heartbeatIntervalMs: 0,
+      heartbeatFailureLimit: 2,
+      pollIntervalMs: 0,
+      sleep: async () => undefined,
+      fetchImpl: (async (input) =>
+        String(input).endsWith('/history/lost')
+          ? Response.json({})
+          : new Response('{}', { status: 503 })) as typeof fetch,
+    });
+    await expect(client.resume('lost', new AbortController().signal)).rejects.toThrow('H3_COMFY_HEARTBEAT_LOST');
+  });
   it('rejects a cancellation response that did not cancel the remote prompt', async () => {
-    const client = new H3ComfyClient({ fetchImpl: (async () => Response.json({ cancelled: false })) as typeof fetch });
-    await expect(client.cancel('p')).rejects.toThrow('H3_COMFY_CANCEL_NOT_APPLIED');
+    const client = new H3ComfyClient({
+      cancelConfirmAttempts: 1,
+      pollIntervalMs: 0,
+      sleep: async () => undefined,
+      fetchImpl: (async (url) =>
+        Response.json(
+          String(url).endsWith('/cancel')
+            ? { cancelled: false }
+            : String(url).endsWith('/queue')
+              ? { queue_running: [[0, 'p']], queue_pending: [] }
+              : {}
+        )) as typeof fetch,
+    });
+    await expect(client.cancel('p')).rejects.toThrow('H3_COMFY_CANCEL_UNCONFIRMED');
   });
 
   it('does not promote uploaded references or previews to generated outputs', async () => {

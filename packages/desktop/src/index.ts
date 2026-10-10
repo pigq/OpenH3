@@ -745,7 +745,9 @@ const handleAppReady = async (): Promise<void> => {
     const bundledScript = app.isPackaged
       ? path.join(process.resourcesPath, 'app.asar.unpacked', 'out', 'main', 'media-service.js')
       : path.join(__dirname, 'media-service.js');
-    const scriptPath = fs.existsSync(bundledScript) ? bundledScript : path.join(process.cwd(), 'scripts', 'media-service.ts');
+    const scriptPath = fs.existsSync(bundledScript)
+      ? bundledScript
+      : path.join(process.cwd(), 'scripts', 'media-service.ts');
     if (fs.existsSync(scriptPath)) {
       const isTypeScript = scriptPath.endsWith('.ts');
       const command = isTypeScript ? process.execPath : process.execPath;
@@ -756,7 +758,14 @@ const handleAppReady = async (): Promise<void> => {
         scriptPath: isTypeScript ? args[1] : scriptPath,
         dataDir: getDataPath(),
         command,
-        ...(isTypeScript ? { spawnProcess: (file, _ignored, options) => { const { spawn } = require('node:child_process') as typeof import('node:child_process'); return spawn(file, args, options); } } : {}),
+        ...(isTypeScript
+          ? {
+              spawnProcess: (file, _ignored, options) => {
+                const { spawn } = require('node:child_process') as typeof import('node:child_process');
+                return spawn(file, args, options);
+              },
+            }
+          : {}),
       });
       await mediaServiceProcess.start();
       mark('mediaService');
@@ -916,9 +925,10 @@ const handleAppReady = async (): Promise<void> => {
       // This bootstrap uses direct HTTP only, so it can precede the renderer's
       // first cached provider query. Legacy BroadcastChannel migrations stay deferred.
       try {
-        const { provisionVideoProvider, readVideoProviderKey } = await import('./process/utils/videoProviderPreset');
+        const { provisionVideoProvider, DEFAULT_VIDEO_GATEWAY_URL } =
+          await import('./process/utils/videoProviderPreset');
         const { httpRequest } = await import('./common/adapter/httpBridge');
-        await provisionVideoProvider(httpRequest, readVideoProviderKey());
+        await provisionVideoProvider(httpRequest, DEFAULT_VIDEO_GATEWAY_URL);
       } catch {
         console.warn('[AionUi] Early video provider initialization incomplete');
       }

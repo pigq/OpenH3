@@ -52,15 +52,6 @@ module.exports = async function afterPack(context) {
   const { arch, electronPlatformName, appOutDir, packager } = context;
   const targetArch = normalizeArch(typeof arch === 'string' ? arch : Arch[arch] || process.arch);
   const buildArch = normalizeArch(os.arch());
-  const providerBootstrap = process.env.AIONUI_PROVIDER_BOOTSTRAP_FILE;
-  const bootstrapTarget = path.join(resolveResourcesDir(electronPlatformName, appOutDir, packager), 'video-provider-bootstrap.json');
-  if (providerBootstrap) {
-    const config = JSON.parse(fs.readFileSync(providerBootstrap, 'utf8').replace(/^\uFEFF/, ''));
-    if (typeof config.apiKey !== 'string' || !config.apiKey.trim()) throw new Error('PROVIDER_BOOTSTRAP_KEY_REQUIRED');
-    fs.writeFileSync(bootstrapTarget, JSON.stringify({ apiKey: config.apiKey }));
-  } else if (fs.existsSync(bootstrapTarget)) {
-    fs.unlinkSync(bootstrapTarget);
-  }
 
   console.log(`\n🔧 afterPack hook started`);
   console.log(`   Platform: ${electronPlatformName}, Build arch: ${buildArch}, Target arch: ${targetArch}`);

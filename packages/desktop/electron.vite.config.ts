@@ -156,6 +156,8 @@ export default defineConfig(({ mode }) => {
         'process.env.NODE_ENV': JSON.stringify(mode),
         'process.env.env': JSON.stringify(process.env.env),
         'process.env.SENTRY_DSN': JSON.stringify(process.env.SENTRY_DSN ?? ''),
+        // Public endpoint only; credentials stay in the Cloudflare Worker secret.
+        'process.env.OPENH3_GATEWAY_URL': JSON.stringify(process.env.OPENH3_GATEWAY_URL ?? ''),
         // Discontinued-build fork flag (see discontinuedBuild.ts). Only AionUi's
         // final `-final` tag build sets IS_DISCONTINUED_BUILD=true in CI.
         'process.env.IS_DISCONTINUED_BUILD': JSON.stringify(process.env.IS_DISCONTINUED_BUILD === 'true'),

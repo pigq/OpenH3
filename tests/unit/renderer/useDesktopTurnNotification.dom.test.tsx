@@ -55,7 +55,7 @@ describe('useDesktopTurnNotification', () => {
     emitStream({ type: 'finish', conversation_id: 's1', turn_id: 't1' });
     expect(showInvoke).toHaveBeenCalledTimes(1);
     expect(showInvoke).toHaveBeenCalledWith({
-      title: 'AionUi',
+      title: 'OpenH3',
       body: 'settings.browserNotification.bodyTurnCompleted',
       conversation_id: 's1',
     });
@@ -65,7 +65,7 @@ describe('useDesktopTurnNotification', () => {
     renderHook(() => useDesktopTurnNotification());
     emitStream({ type: 'acp_permission', conversation_id: 's1', msg_id: 'm1' });
     expect(showInvoke).toHaveBeenCalledWith({
-      title: 'AionUi',
+      title: 'OpenH3',
       body: 'settings.browserNotification.bodyConfirmation',
       conversation_id: 's1',
     });
@@ -75,7 +75,7 @@ describe('useDesktopTurnNotification', () => {
     renderHook(() => useDesktopTurnNotification());
     emitStream({ type: 'ask', conversation_id: 's1', msg_id: 'm2' });
     expect(showInvoke).toHaveBeenCalledWith({
-      title: 'AionUi',
+      title: 'OpenH3',
       body: 'settings.browserNotification.bodyConfirmation',
       conversation_id: 's1',
     });
@@ -86,7 +86,7 @@ describe('useDesktopTurnNotification', () => {
     renderHook(() => useDesktopTurnNotification());
     emitStream({ type: 'acp_permission', conversation_id: 's1', msg_id: 'm3' });
     expect(showInvoke).toHaveBeenCalledWith({
-      title: 'AionUi',
+      title: 'OpenH3',
       body: 'settings.browserNotification.bodyConfirmationNamed::My Chat',
       conversation_id: 's1',
     });

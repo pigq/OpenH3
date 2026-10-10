@@ -1,0 +1,8 @@
+name = "openh3-gateway"
+main = "src/index.ts"
+compatibility_date = "2026-10-10"
+
+[vars]
+UPSTREAM_BASE_URL = "https://ai.realseek.wiki/v1"
+DEFAULT_MODEL = "gpt-6-astra"
+DEFAULT_REASONING_EFFORT = "low"

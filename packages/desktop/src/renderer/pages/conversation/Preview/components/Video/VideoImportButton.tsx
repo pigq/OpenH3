@@ -49,12 +49,24 @@ export default function VideoImportButton({ conversationId }: { conversationId: 
     <>
       <Upload accept='.mp4,.webm,.mov,.m4v,.ogv' showUploadList={false} beforeUpload={importFile} disabled={busy}>
         <Tooltip content={t('preview.video.import')}>
-          <Button aria-label={t('preview.video.import')} type='text' icon={<VideoFile />} loading={busy} />
+          <Button
+            aria-label={t('preview.video.import')}
+            type='text'
+            className='sendbox-video-import-btn'
+            icon={<VideoFile theme='outline' size='16' strokeWidth={2.4} />}
+            loading={busy}
+          />
         </Tooltip>
       </Upload>
       {busy && (
         <Tooltip content={t('common.cancel')}>
-          <Button type='text' aria-label={t('common.cancel')} icon={<Close />} onClick={() => abort.current?.abort()} />
+          <Button
+            type='text'
+            className='sendbox-video-import-btn sendbox-video-import-btn--cancel'
+            aria-label={t('common.cancel')}
+            icon={<Close theme='outline' size='16' strokeWidth={2.6} />}
+            onClick={() => abort.current?.abort()}
+          />
         </Tooltip>
       )}
     </>

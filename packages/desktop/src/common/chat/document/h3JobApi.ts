@@ -77,6 +77,7 @@ function baseUrl(): string {
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${baseUrl()}${url}`, {
     ...init,
+    signal: init?.signal ?? AbortSignal.timeout(url === '/api/h3/setup/start' ? 300_000 : 45_000),
     headers: { 'content-type': 'application/json', ...init?.headers },
   });
   const payload = (await response.json()) as T & { error?: string; diagnosis?: H3ComfyDiagnosis };
@@ -97,7 +98,7 @@ export const h3JobApi: H3JobApiClient = {
   get: (id) => request<H3Job>(`/api/h3/jobs/${encodeURIComponent(id)}`),
   cancel: (id) => request<H3Job>(`/api/h3/jobs/${encodeURIComponent(id)}?action=cancel`, { method: 'POST' }),
   status: async () => {
-    const response = await fetch(`${baseUrl()}/api/h3/status`);
+    const response = await fetch(`${baseUrl()}/api/h3/status`, { signal: AbortSignal.timeout(15_000) });
     const payload = (await response.json()) as H3RuntimeStatus;
     return payload;
   },

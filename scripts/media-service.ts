@@ -75,13 +75,16 @@ const h3Runtime = new H3RuntimeManager(h3Client, {
 const h3Runner = new H3JobRunner(
   h3Store,
   {
-    generate: async (spec, signal, onProgress, onSubmitted) => {
+    generate: async (spec, signal, onProgress, onSubmitted, context) => {
       if (h3Setup.busy()) throw new Error('H3_SETUP_BUSY');
       await h3Runtime.ensureStarted();
-      return h3Client.generate(spec, signal, onProgress, onSubmitted);
+      return h3Client.generate(spec, signal, onProgress, onSubmitted, context);
     },
-    resume: (promptId, signal, onProgress) => h3Client.resume(promptId, signal, onProgress),
-    cancel: (promptId) => h3Client.cancel(promptId),
+    resume: (promptId, signal, onProgress, events, context) =>
+      h3Client.resume(promptId, signal, onProgress, events, context),
+    cancel: (promptId, requireKnown) => h3Client.cancel(promptId, requireKnown),
+    confirmStopped: (promptId, requireKnown) => h3Client.confirmStopped(promptId, requireKnown),
+    confirmIdle: () => h3Client.confirmIdle(),
   },
   new H3ReferencePreflight()
 );
@@ -91,8 +94,15 @@ const h3Setup = new H3SetupTask(
     new Promise<void>((resolve, reject) => {
       const worker = new Worker(path.join(__dirname, 'h3-install-worker.js'), { workerData: { bundleRoot, download } });
       let done = false;
+      let settled = false;
       let failure: string | undefined;
       const pause = () => worker.postMessage({ pause: true });
+      const settle = (callback: () => void): void => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', pause);
+        callback();
+      };
       signal.addEventListener('abort', pause, { once: true });
       if (signal.aborted) pause();
       worker.on(
@@ -103,15 +113,26 @@ const h3Setup = new H3SetupTask(
           done?: boolean;
           error?: string;
         }) => {
-          if (event.phase) progress(event.phase, event.detail);
+          if (settled) return;
+          try {
+            if (event.phase) progress(event.phase, event.detail);
+          } catch (error) {
+            failure = 'H3_SETUP_STATE_WRITE_FAILED';
+            void worker.terminate().then(
+              () => settle(() => reject(error)),
+              () => settle(() => reject(error))
+            );
+            return;
+          }
           if (event.done) done = true;
           if (event.error) failure = event.error;
         }
       );
-      worker.once('error', reject);
+      worker.once('error', (error) => settle(() => reject(error)));
       worker.once('exit', (code) => {
-        signal.removeEventListener('abort', pause);
-        code === 0 && done ? resolve() : reject(new Error(failure ?? 'H3_INSTALL_WORKER_FAILED'));
+        settle(() => {
+          code === 0 && done ? resolve() : reject(new Error(failure ?? `H3_INSTALL_WORKER_EXITED:${code}`));
+        });
       });
     })
 );
@@ -123,8 +144,9 @@ const lastH3Event = new Map<string, string>();
 let runtimeStarting = false;
 let h3Dispatching = false;
 function pumpH3Jobs(): void {
-  if (h3Dispatching) return;
-  const next = h3Store.listActive().find((job) => job.status === 'queued');
+  if (h3Dispatching || h3Runner.blocked()) return;
+  const queued = h3Store.listActive().filter((job) => job.status === 'queued');
+  const next = queued.find((job) => job.promptId) ?? queued[0];
   if (!next) return;
   h3Dispatching = true;
   const task = h3Runner
@@ -142,6 +164,19 @@ function startH3Job(job: H3Job): void {
   pumpH3Jobs();
 }
 for (const job of h3Runner.recover()) startH3Job(job);
+let reconciling = false;
+const reconcileTimer = setInterval(() => {
+  if (reconciling || !h3Runner.blocked()) return;
+  reconciling = true;
+  void h3Runner
+    .reconcile(publishH3)
+    .then(pumpH3Jobs)
+    .catch(() => undefined)
+    .finally(() => {
+      reconciling = false;
+    });
+}, 30_000);
+reconcileTimer.unref();
 
 function safePath(value: string, root: string): boolean {
   const resolved = path.resolve(value);
@@ -179,7 +214,11 @@ function publishH3(job: H3Job): void {
     lastH3Event.set(job.id, serialized);
     for (const response of h3Subscribers.get(job.id) ?? []) response.write(`event: progress\ndata: ${serialized}\n\n`);
   }
-  if (['succeeded', 'failed', 'cancelled'].includes(job.status)) h3Subscribers.delete(job.id);
+  if (['succeeded', 'failed', 'cancelled'].includes(job.status) && !job.remoteUncertain) {
+    for (const response of h3Subscribers.get(job.id) ?? []) response.end();
+    h3Subscribers.delete(job.id);
+    lastH3Event.delete(job.id);
+  }
 }
 
 function json(res: http.ServerResponse, status: number, body: unknown): void {
@@ -238,7 +277,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/h3/setup/install') {
       if (process.platform !== 'win32') return json(res, 400, { error: 'H3_SETUP_WINDOWS_ONLY' });
       if (h3Client.getBaseUrl() !== 'http://127.0.0.1:8188') return json(res, 409, { error: 'H3_EXTERNAL_RUNTIME' });
-      if (h3Store.listActive().length) return json(res, 409, { error: 'H3_JOBS_ACTIVE' });
+      if (h3Store.listActive().length || h3Runner.blocked()) return json(res, 409, { error: 'H3_JOBS_ACTIVE' });
       const payload = (await body(req)) as {
         download?: boolean;
         acceptModelTerms?: boolean;
@@ -252,7 +291,7 @@ const server = http.createServer(async (req, res) => {
         if (hardware.status === 'unverified' && payload.acceptExperimentalHardware !== true)
           return json(res, 400, { error: 'H3_HARDWARE_CONFIRMATION_REQUIRED', hardware });
         // Recheck after the asynchronous probe, before handing off to the worker.
-        if (h3Store.listActive().length) return json(res, 409, { error: 'H3_JOBS_ACTIVE' });
+        if (h3Store.listActive().length || h3Runner.blocked()) return json(res, 409, { error: 'H3_JOBS_ACTIVE' });
       }
       return json(res, 202, h3Setup.start(h3Runtime.installStatus().bundleRoot, payload.download === true));
     }
@@ -264,6 +303,7 @@ const server = http.createServer(async (req, res) => {
         return json(res, 200, {
           ready: true,
           install,
+          blockedJobs: h3Store.listBlocked().map(({ id, error }) => ({ id, error })),
           readiness: h3Runtime.installReadiness(),
           acceleration: h3Runtime.accelerationStatus(),
           system: await h3Client.systemStats(),
@@ -272,6 +312,7 @@ const server = http.createServer(async (req, res) => {
         return json(res, 503, {
           ready: false,
           install,
+          blockedJobs: h3Store.listBlocked().map(({ id, error }) => ({ id, error })),
           readiness: h3Runtime.installReadiness(),
           acceleration: h3Runtime.accelerationStatus(),
           error: 'H3_RUNTIME_NOT_RUNNING',
@@ -281,7 +322,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/h3/setup/configure') {
       if (h3Setup.busy()) return json(res, 409, { error: 'H3_SETUP_BUSY' });
       if (process.env.AIONUI_H3_BUNDLE_ROOT) return json(res, 409, { error: 'H3_ENVIRONMENT_OVERRIDE_ACTIVE' });
-      if (h3Store.listActive().length) return json(res, 409, { error: 'H3_JOBS_ACTIVE' });
+      if (h3Store.listActive().length || h3Runner.blocked()) return json(res, 409, { error: 'H3_JOBS_ACTIVE' });
       const payload = (await body(req)) as { bundleRoot?: unknown };
       if (typeof payload.bundleRoot !== 'string' || !path.isAbsolute(payload.bundleRoot.trim()))
         return json(res, 400, { error: 'H3_BUNDLE_ROOT_MUST_BE_ABSOLUTE' });
@@ -298,12 +339,15 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/api/h3/queue') return json(res, 200, await h3Client.queueStatus());
     if (req.method === 'POST' && url.pathname === '/api/h3/free-memory') {
+      if (h3Store.listActive().length || h3Runner.blocked()) return json(res, 409, { error: 'H3_RUNTIME_BUSY' });
+      await h3Client.confirmIdle();
       const payload = (await body(req)) as { unloadModels?: boolean };
       await h3Client.freeMemory(payload.unloadModels === true);
       return json(res, 200, { ok: true, unloadModels: payload.unloadModels === true });
     }
     if (req.method === 'POST' && url.pathname === '/api/h3/jobs') {
       if (h3Setup.busy()) return json(res, 409, { error: 'H3_SETUP_BUSY' });
+      if (h3Runner.blocked()) return json(res, 409, { error: 'H3_REMOTE_STATE_UNCONFIRMED' });
       const spec = h3GenerationSpecSchema.parse(await body(req));
       const job = await h3Runner.enqueue(spec);
       startH3Job(job);
@@ -317,6 +361,7 @@ const server = http.createServer(async (req, res) => {
     const deriveVersion = /^\/api\/h3\/versions\/([^/]+)\/derive$/.exec(url.pathname);
     if (deriveVersion && req.method === 'POST') {
       if (h3Setup.busy()) return json(res, 409, { error: 'H3_SETUP_BUSY' });
+      if (h3Runner.blocked()) return json(res, 409, { error: 'H3_REMOTE_STATE_UNCONFIRMED' });
       const version = versionStore.list().find((item) => item.id === deriveVersion[1]);
       const parentJob = version && h3Store.get(version.jobId);
       if (!version || !parentJob) return json(res, 404, { error: 'H3_VERSION_NOT_FOUND' });
@@ -334,6 +379,8 @@ const server = http.createServer(async (req, res) => {
     }
     const h3Events = /^\/api\/h3\/jobs\/([^/]+)\/events$/.exec(url.pathname);
     if (h3Events && req.method === 'GET') {
+      const found = h3Store.get(h3Events[1]);
+      if (!found) return json(res, 404, { error: 'H3_JOB_NOT_FOUND' });
       res.writeHead(200, {
         'content-type': 'text/event-stream',
         'cache-control': 'no-cache',
@@ -345,6 +392,11 @@ const server = http.createServer(async (req, res) => {
       h3Subscribers.set(h3Events[1], set);
       const current = h3Store.get(h3Events[1]);
       if (current) res.write(`event: progress\ndata: ${JSON.stringify(current)}\n\n`);
+      if (current && !['queued', 'running'].includes(current.status) && !current.remoteUncertain) {
+        set.delete(res);
+        if (!set.size) h3Subscribers.delete(current.id);
+        res.end();
+      }
       req.on('close', () => {
         set.delete(res);
         if (!set.size) h3Subscribers.delete(h3Events[1]);
@@ -352,11 +404,14 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     const h3Match = /^\/api\/h3\/jobs\/([^/]+)$/.exec(url.pathname);
-    if (h3Match && req.method === 'GET')
-      return json(res, 200, h3Store.get(h3Match[1]) ?? { error: 'H3_JOB_NOT_FOUND' });
+    if (h3Match && req.method === 'GET') {
+      const job = h3Store.get(h3Match[1]);
+      return json(res, job ? 200 : 404, job ?? { error: 'H3_JOB_NOT_FOUND' });
+    }
     if (h3Match && req.method === 'POST' && url.searchParams.get('action') === 'cancel') {
       const job = await h3Runner.cancel(h3Match[1]);
       publishH3(job);
+      pumpH3Jobs();
       return json(res, 200, job);
     }
     if (req.method === 'POST' && url.pathname === '/api/media-jobs') {

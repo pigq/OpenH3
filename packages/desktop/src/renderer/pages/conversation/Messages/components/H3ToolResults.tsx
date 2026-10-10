@@ -169,24 +169,35 @@ function H3ToolResult({ id }: { id: string }) {
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState(false);
   const [job, setJob] = useState<H3Job>();
+  const settled = job?.id === id && !['queued', 'running'].includes(job.status) && !job.remoteUncertain;
   useEffect(() => {
+    if (settled) return;
     let disposed = false;
+    let refreshing = false;
+    let terminal = false;
     const update = (next: H3Job) => {
-      if (!disposed && next.id === id) {
+      if (!disposed && !terminal && next.id === id) {
+        terminal = !['queued', 'running'].includes(next.status) && !next.remoteUncertain;
         setJob(next);
         setUnavailable(false);
       }
     };
     const source = h3JobApi.events(id, update);
-    const refresh = (): void =>
+    const refresh = (): void => {
+      if (refreshing || disposed || terminal) return;
+      refreshing = true;
       void h3JobApi
         .get(id)
         .then(update)
         .catch(() => {
-          if (!disposed) setUnavailable(true);
+          if (!disposed && !terminal) setUnavailable(true);
+        })
+        .finally(() => {
+          refreshing = false;
         });
+    };
     source.onerror = (): void => {
-      if (!disposed) setUnavailable(true);
+      if (!disposed && !terminal) setUnavailable(true);
     };
     refresh();
     const timer = setInterval(refresh, 15000);
@@ -195,7 +206,7 @@ function H3ToolResult({ id }: { id: string }) {
       clearInterval(timer);
       source.close();
     };
-  }, [id]);
+  }, [id, settled]);
   const active = job?.status === 'queued' || job?.status === 'running';
   const cancel = async () => {
     setCancelling(true);
@@ -219,13 +230,20 @@ function H3ToolResult({ id }: { id: string }) {
               ? t(`conversation.h3Activity.${job.status}`)
               : t('conversation.h3Activity.loading')}
         </span>
-        {active && (
+        {(active || job?.remoteUncertain) && (
           <Button size='small' loading={cancelling} disabled={!!job.cancelRequested} onClick={() => void cancel()}>
-            {job.cancelRequested ? t('conversation.h3Activity.cancelling') : t('conversation.h3Activity.cancel')}
+            {job.cancelRequested
+              ? t('conversation.h3Activity.cancelling')
+              : job.remoteUncertain
+                ? t('conversation.h3Activity.confirmStop')
+                : t('conversation.h3Activity.cancel')}
           </Button>
         )}
       </div>
       {active && <H3LiveProgress job={job} unavailable={unavailable} />}
+      {job?.remoteUncertain && <p role='alert'>{t('conversation.h3Activity.remoteUncertain')}</p>}
+      {active && job.monitor?.state === 'reconnecting' && <p>{t('conversation.h3Activity.reconnecting')}</p>}
+      {active && job.monitor?.state === 'suspected-stall' && <p>{t('conversation.h3Activity.suspectedStall')}</p>}
       {job?.error && (
         <p className='break-all text-t-secondary' role='alert'>
           {job.error}
