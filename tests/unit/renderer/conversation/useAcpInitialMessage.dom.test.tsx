@@ -10,6 +10,7 @@ import { BackendHttpError } from '@/common/adapter/httpBridge';
 import { useAcpInitialMessage } from '@/renderer/pages/conversation/platforms/acp/useAcpInitialMessage';
 import { useGuidDraft } from '@/renderer/pages/guid/hooks/useGuidDraft';
 import { useComfySelectionPending } from '@/renderer/pages/conversation/runtime/Creation/useComfySelectionPending';
+import { templateSnapshotFixture } from '../../contentCatalog/galleryFixture';
 
 const bindCreation = vi.fn();
 const bindComfy = vi.fn();
@@ -110,6 +111,7 @@ describe('useAcpInitialMessage', () => {
           profileId: 'qwen-fp8',
           family: 'qwen-edit',
           intent: 'generate',
+          templateSnapshot: templateSnapshotFixture,
         },
       })
     );
@@ -119,6 +121,7 @@ describe('useAcpInitialMessage', () => {
     expect(bindComfy).toHaveBeenCalledWith('request-qwen', 'conv-1', 'qwen-fp8', 'qwen-edit', 'generate', {
       source: 'local',
       kind: 'image',
+      templateSnapshot: templateSnapshotFixture,
     });
     expect(bindCreation).not.toHaveBeenCalled();
     expect(bindComfy.mock.invocationCallOrder[0]).toBeLessThan(sendMessageInvokeMock.mock.invocationCallOrder[0]);

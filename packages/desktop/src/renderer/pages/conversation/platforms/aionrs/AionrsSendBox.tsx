@@ -421,6 +421,7 @@ const AionrsSendBox: React.FC<{
             {
               source: creationRequest.source ?? 'local',
               kind: creationRequest.kind ?? 'image',
+              templateSnapshot: creationRequest.templateSnapshot,
             }
           );
           if (!bound.ok) throw new Error(t('guid.creation.toolsUnavailable'));

@@ -8,6 +8,7 @@ import type { AionrsModelSelection } from '@/renderer/pages/conversation/platfor
 import type { TeamSendBoxRuntime } from '@/renderer/pages/team/components/teamSendRuntime';
 import { useGuidDraft } from '@/renderer/pages/guid/hooks/useGuidDraft';
 import { beginComfySelectionChange } from '@/renderer/pages/conversation/runtime/Creation/useComfySelectionPending';
+import { templateSnapshotFixture } from '../../contentCatalog/galleryFixture';
 const bindComfy = vi.fn().mockResolvedValue({ ok: true });
 vi.mock('@/common/chat/document/creation/comfyApi', () => ({
   comfyApi: { bind: (...args: unknown[]) => bindComfy(...args) },
@@ -345,7 +346,14 @@ describe('AionrsSendBox', () => {
       JSON.stringify({
         input: 'generate image',
         creationRequestId: 'request-z',
-        creationRequest: { source: 'local', kind: 'image', profileId: 'z-fp8', family: 'z-image', intent: 'generate' },
+        creationRequest: {
+          source: 'local',
+          kind: 'image',
+          profileId: 'z-fp8',
+          family: 'z-image',
+          intent: 'generate',
+          templateSnapshot: templateSnapshotFixture,
+        },
       })
     );
     sendMessageInvokeMock.mockResolvedValueOnce({ turn_id: 'turn-1', msg_id: 'msg-1', runtime: {} });
@@ -354,6 +362,7 @@ describe('AionrsSendBox', () => {
     expect(bindComfy).toHaveBeenCalledWith('request-z', 'conv-1', 'z-fp8', 'z-image', 'generate', {
       source: 'local',
       kind: 'image',
+      templateSnapshot: templateSnapshotFixture,
     });
     expect(bindComfy.mock.invocationCallOrder[0]).toBeLessThan(sendMessageInvokeMock.mock.invocationCallOrder[0]);
   });

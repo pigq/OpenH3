@@ -9,6 +9,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IMcpServer } from '@/common/config/storage';
 import { useGuidSend, type GuidSendDeps } from '@/renderer/pages/guid/hooks/useGuidSend';
 import { Message } from '@arco-design/web-react';
+import { resetGuidDraft, setGuidTemplateSnapshot } from '@/renderer/pages/guid/hooks/useGuidDraft';
+import { templateSnapshotFixture } from '../contentCatalog/galleryFixture';
 
 const createConversationInvokeMock = vi.fn();
 const swrMutateMock = vi.fn();
@@ -135,6 +137,7 @@ describe('useGuidSend', () => {
   });
 
   it('uses the media tool and local skill for a local image profile and persists its request snapshot', async () => {
+    setGuidTemplateSnapshot(templateSnapshotFixture);
     const deps = createDeps();
     deps.creationModel = {
       id: 'qwen-profile',
@@ -172,6 +175,9 @@ describe('useGuidSend', () => {
     expect(payload?.extra.selected_session_mcp_servers[0].name).toBe('openh3-video-media');
     const initial = JSON.parse(sessionStorage.getItem('acp_initial_message_conv-1')!);
     expect(initial.creationRequest).toEqual(payload.extra.creation_request);
+    expect(initial.creationRequest.templateSnapshot).toEqual(templateSnapshotFixture);
+    expect(initial.input).toContain('hello');
+    expect(initial.creationRequest.templateSnapshot.prompt).toBe('Original template prompt');
     expect(initial.creationRequestId).toBe(payload.extra.creation_request.requestId);
   });
 
@@ -323,6 +329,7 @@ describe('useGuidSend', () => {
     );
   });
   beforeEach(() => {
+    resetGuidDraft();
     createConversationInvokeMock.mockReset();
     createConversationInvokeMock.mockResolvedValue({ id: 'conv-1' });
     swrMutateMock.mockReset();

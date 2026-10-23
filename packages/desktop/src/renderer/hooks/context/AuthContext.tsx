@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { PREVIEW_SCOPE_KEY_PREFIX } from '@/renderer/pages/conversation/Preview/context/previewScope';
 import { refreshSession } from '@/common/adapter/sessionRefresh';
+import { resetGuidDraft } from '@/renderer/pages/guid/hooks/useGuidDraft';
 // M6: CSRF removed with legacy webserver — stub functions for compatibility, re-implement in M7
 const withCsrfToken = <T extends Record<string, unknown>>(data: T): T => data;
 const hasValidCsrfToken = (): boolean => true;
@@ -55,6 +56,7 @@ const isDesktopRuntime = typeof window !== 'undefined' && Boolean(window.electro
 // 清除过期的认证缓存，包括 Cookie 和 localStorage
 function clearAuthCache(): void {
   if (typeof window === 'undefined') return;
+  resetGuidDraft();
 
   try {
     // Clear CSRF cookie
@@ -73,6 +75,7 @@ function clearAuthCache(): void {
         (key.includes('auth') ||
           key.includes('csrf') ||
           key.includes('token') ||
+          key === 'openh3.guid-draft.v1' ||
           key.startsWith(PREVIEW_SCOPE_KEY_PREFIX))
       ) {
         keysToRemove.push(key);

@@ -23,6 +23,7 @@ import {
   type ComfyProfile,
 } from '@/common/chat/document/creation/comfy';
 import path from 'node:path';
+import type { TemplateSnapshot } from '@/common/contentCatalog/snapshot';
 
 type CreationSelection = {
   profileId?: string;
@@ -30,6 +31,7 @@ type CreationSelection = {
   intent: string;
   source?: 'local' | 'cloud';
   kind?: 'image' | 'video';
+  templateSnapshot?: TemplateSnapshot;
 };
 
 async function comfyRequest(endpoint: string, body?: unknown): Promise<unknown> {
@@ -121,6 +123,7 @@ async function main() {
       async ({ prompt, image_uris }) => {
         const requestId = envValue('OPENH3_CREATION_REQUEST_ID', 'AIONUI_CREATION_REQUEST_ID');
         let resolvedCloudSelection = false;
+        let templateSnapshot: TemplateSnapshot | undefined;
         if (requestId?.trim()) {
           try {
             const result = (await comfyRequest(`/api/comfy/profiles?${new URLSearchParams({ requestId })}`)) as {
@@ -135,6 +138,7 @@ async function main() {
               return await localImageGeneration(prompt, image_uris, requestId, result.profiles, selection);
             }
             if (selection.source !== 'cloud') throw new Error('COMFY_SELECTION_CONTEXT_MISSING');
+            templateSnapshot = selection.templateSnapshot;
             resolvedCloudSelection = true;
           } catch (error) {
             return {
@@ -185,7 +189,12 @@ async function main() {
         // workspace path from the model (path traversal boundary).
         const workspaceDir = process.cwd();
 
-        const result = await executeImageGeneration({ prompt, image_uris }, provider, workspaceDir, proxy);
+        const result = await executeImageGeneration(
+          { prompt, image_uris, ...(templateSnapshot ? { templateSnapshot } : {}) },
+          provider,
+          workspaceDir,
+          proxy
+        );
 
         if (!result.success) {
           return {

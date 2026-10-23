@@ -1,7 +1,9 @@
 import { Button } from '@arco-design/web-react';
-import React, { useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CREATION_TEMPLATES, type CreationTemplate } from '../utils/creationTemplates';
+import type { ContentCatalog, OfficialEntry, OfficialTemplate } from '@/common/contentCatalog/schema';
+import { localize } from '@/common/contentCatalog/policy';
+import OfficialWorkDetails from '@/renderer/components/ContentCatalog/OfficialWorkDetails';
 import { creationMasonry } from '../Creation/masonry';
 import CreationTemplateCard from './CreationTemplateCard';
 import styles from '../index.module.css';
@@ -10,12 +12,15 @@ type TemplateFilter = 'all' | 'image' | 'video';
 const TEMPLATE_FILTERS: TemplateFilter[] = ['all', 'image', 'video'];
 
 type CreationTemplatesProps = {
-  onUseTemplate: (prompt: string, template: CreationTemplate) => void;
+  catalog?: ContentCatalog;
+  onUseTemplate: (prompt: string, template: OfficialTemplate) => void;
 };
 
-const CreationTemplates: React.FC<CreationTemplatesProps> = ({ onUseTemplate }) => {
-  const { t } = useTranslation();
+const CreationTemplates: React.FC<CreationTemplatesProps> = ({ onUseTemplate, catalog }) => {
+  const { t, i18n } = useTranslation();
+  const [details, setDetails] = useState<OfficialEntry>();
   const [filter, setFilter] = useState<TemplateFilter>('all');
+  useEffect(() => setDetails(undefined), [catalog?.releaseSequence]);
   const wallRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [narrow, setNarrow] = useState(false);
@@ -35,7 +40,7 @@ const CreationTemplates: React.FC<CreationTemplatesProps> = ({ onUseTemplate }) 
       window.removeEventListener('resize', update);
     };
   }, []);
-  const templates = CREATION_TEMPLATES.filter((template) => filter === 'all' || template.kind === filter);
+  const templates = (catalog?.entries ?? []).filter((template) => filter === 'all' || template.kind === filter);
   const masonry = creationMasonry(
     width,
     templates.map((template) => template.ratio),
@@ -71,13 +76,34 @@ const CreationTemplates: React.FC<CreationTemplatesProps> = ({ onUseTemplate }) 
       >
         {templates.map((template, index) => (
           <CreationTemplateCard
-            key={template.key}
+            key={`${catalog!.releaseSequence}:${template.id}:${template.revision}`}
+            catalog={catalog!}
+            onDetails={setDetails}
             template={template}
             onUseTemplate={onUseTemplate}
             style={width ? { position: 'absolute', ...masonry.items[index] } : undefined}
           />
         ))}
       </div>
+      {details && catalog && (
+        <OfficialWorkDetails
+          entry={details}
+          catalog={catalog}
+          onClose={() => setDetails(undefined)}
+          onUse={(template) =>
+            onUseTemplate(
+              template.requiresReference
+                ? t('guid.templateReferencePrompt', {
+                    ratio: template.ratio,
+                    prompt: localize(template.prompt, i18n.language, catalog.defaultLocale),
+                    interpolation: { escapeValue: false },
+                  })
+                : localize(template.prompt, i18n.language, catalog.defaultLocale),
+              template
+            )
+          }
+        />
+      )}
     </section>
   );
 };

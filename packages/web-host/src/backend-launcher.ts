@@ -84,6 +84,7 @@ export type BackendDirConfig = {
 };
 
 export type BackendLaunchOptions = {
+  contentHost?: { port: number; token: string };
   app: AppMetadata;
   resolveBackend: BackendBinaryResolver;
   port?: number;
@@ -225,13 +226,25 @@ export function buildSpawnArgs(config: SpawnConfig): string[] {
  * backend's `/api/system/info` matches what Electron main persists in
  * ProcessEnv('aionui.dir') (the persisted legacy key).
  */
-export function buildSpawnEnv(dirs?: BackendDirConfig): NodeJS.ProcessEnv {
+export function buildSpawnEnv(
+  dirs?: BackendDirConfig,
+  contentHost?: { port: number; token: string }
+): NodeJS.ProcessEnv {
   // PREBUILDS_ONLY protects the packaged Electron process's own node-gyp-build
   // natives (see desktop process/index.ts) and must stay scoped to it. Agent
   // CLIs spawned under OpenH3 Core (e.g. cursor-agent) ship natives under
   // build/Release only, and node-gyp-build skips that directory for any
   // non-empty value, aborting the agent before the ACP handshake (#4070).
-  const { PREBUILDS_ONLY: _prebuildsOnly, ...parentEnv } = process.env;
+  const {
+    PREBUILDS_ONLY: _prebuildsOnly,
+    OPENH3_CONTENT_PORT: _contentPort,
+    OPENH3_CONTENT_TOKEN: _contentToken,
+    ...parentEnv
+  } = process.env;
+  if (contentHost) {
+    parentEnv.OPENH3_CONTENT_PORT = String(contentHost.port);
+    parentEnv.OPENH3_CONTENT_TOKEN = contentHost.token;
+  }
   if (!dirs) return parentEnv;
   return {
     ...parentEnv,
@@ -523,6 +536,10 @@ async function probeHealthCheckTcpConnect(port: number, timeoutMs = 1_000): Prom
 }
 
 export class BackendLifecycleManager {
+  private contentHost?: { port: number; token: string };
+  configureContentHost(endpoint: { port: number; token: string }): void {
+    this.contentHost = endpoint;
+  }
   private childProcess: ChildProcess | null = null;
   private _port = 0;
   private _status: BackendStatus = 'stopped';
@@ -699,7 +716,7 @@ export class BackendLifecycleManager {
     try {
       this.childProcess = spawn(binaryPath, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: buildSpawnEnv(dirs),
+        env: buildSpawnEnv(dirs, this.contentHost),
         cwd: dirs?.workDir ?? dbPath,
         detached: process.platform !== 'win32',
       });
@@ -1092,6 +1109,7 @@ export class BackendLifecycleManager {
  */
 export async function startBackend(opts: BackendLaunchOptions): Promise<BackendHandle> {
   const manager = new BackendLifecycleManager(opts.app, opts.resolveBackend);
+  if (opts.contentHost) manager.configureContentHost(opts.contentHost);
   const dataDir = opts.dataDir ?? '';
   if (!dataDir) {
     throw new Error('startBackend: dataDir is required');

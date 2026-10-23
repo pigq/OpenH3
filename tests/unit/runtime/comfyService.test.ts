@@ -106,6 +106,43 @@ function plan() {
   };
 }
 describe('Comfy installation and profile service', () => {
+  it('round-trips the original template revision on each submitted job, independent of later selection and restart', async () => {
+    const { service, engine, install, probe } = setup();
+    service.register(profile);
+    await service.revalidate(profile.id, { prompt: 'smoke' });
+    const snapshot = {
+      templateId: 'official:test',
+      templateRevision: 1,
+      releaseSequence: 2,
+      locale: 'en-US',
+      title: 'Title',
+      prompt: 'Original prompt',
+      parameters: { width: 768 },
+      requiresReference: false,
+    };
+    service.bind({
+      requestId,
+      conversationId: 'chat',
+      profileId: profile.id,
+      family: 'z-image',
+      intent: 'generate',
+      templateSnapshot: snapshot,
+    });
+    const job = service.generate(requestId, profile.id, { prompt: 'Edited prompt' });
+    snapshot.parameters.width = 1;
+    service.bind({
+      requestId,
+      conversationId: 'chat',
+      profileId: profile.id,
+      family: 'z-image',
+      intent: 'generate',
+      templateSnapshot: { ...snapshot, templateRevision: 2 },
+    });
+    await service.idle();
+    expect(service.job(job.id, { requestId }).templateSnapshot?.templateRevision).toBe(1);
+    const restarted = new ComfyService({ filename: path.join(root, 'state.json'), engine, install, probe });
+    expect(restarted.job(job.id, { requestId }).templateSnapshot).toEqual({ ...snapshot, parameters: { width: 768 } });
+  });
   it('keeps planning separate from execution and requires UI consent for this conversation', async () => {
     const { service, install } = setup();
     const operation = await service.request(requestId, plan());

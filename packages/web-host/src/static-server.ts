@@ -82,7 +82,7 @@ function forwardToBackend(req: IncomingMessage, res: ServerResponse, backendPort
     port: backendPort,
     path: req.url,
     method: req.method,
-    headers: { ...req.headers, host: `127.0.0.1:${backendPort}` },
+    headers: { ...req.headers, host: `127.0.0.1:${backendPort}`, 'x-openh3-webui-request': '1' },
   };
   const proxy = http.request(options, (proxyRes) => {
     res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);

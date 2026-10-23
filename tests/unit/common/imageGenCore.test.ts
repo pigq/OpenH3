@@ -4,8 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, expect, it, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { describe, expect, it, afterEach, vi } from 'vitest';
+import {
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  promises,
+} from 'node:fs';
 import { join, resolve as pathResolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { processImageUri, saveGeneratedImage, executeImageGeneration } from '@/common/chat/imageGenCore';
@@ -49,6 +58,60 @@ const PNG_1x1 = Buffer.from(
 
 const DATA_URL_PNG =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+it('persists immutable official provenance beside each cloud result without credentials', async () => {
+  const ws = createWorkspace();
+  const templateSnapshot = {
+    templateId: 'official:cloud',
+    templateRevision: 1,
+    releaseSequence: 1,
+    locale: 'en-US',
+    title: 'Title',
+    prompt: 'Original prompt',
+    parameters: { width: 1024 },
+    requiresReference: false,
+  };
+  const metadata = { prompt: 'User edited prompt', providerId: 'provider-1', model: 'image-model', templateSnapshot };
+  const file = await saveGeneratedImage(DATA_URL_PNG, ws, metadata);
+  templateSnapshot.prompt = 'withdrawn';
+  const saved = JSON.parse(readFileSync(`${file}.generation.json`, 'utf8'));
+  expect(saved).toMatchObject({
+    status: 'succeeded',
+    prompt: 'User edited prompt',
+    templateSnapshot: { prompt: 'Original prompt', templateRevision: 1 },
+  });
+  expect(saved.api_key).toBeUndefined();
+  expect(saved.providerId).toBe('provider-1');
+});
+it('cleans an uncommitted provenance temp file without deleting the generated image when commit fails', async () => {
+  const ws = createWorkspace();
+  const rename = vi.spyOn(promises, 'rename').mockRejectedValueOnce(new Error('commit failed'));
+  try {
+    await expect(
+      saveGeneratedImage(DATA_URL_PNG, ws, {
+        prompt: 'Actual prompt',
+        providerId: 'provider',
+        model: 'model',
+        templateSnapshot: {
+          templateId: 'official:test',
+          templateRevision: 1,
+          releaseSequence: 1,
+          locale: 'en-US',
+          title: 'Title',
+          prompt: 'Template prompt',
+          parameters: {},
+          requiresReference: false,
+        },
+      })
+    ).rejects.toThrow('commit failed');
+    const files = readdirSync(ws);
+    expect(files.some((name) => name.endsWith('.png'))).toBe(true);
+    expect(files.some((name) => name.endsWith('.tmp'))).toBe(false);
+    expect(files.some((name) => name.endsWith('.generation.json'))).toBe(false);
+  } finally {
+    rename.mockRestore();
+  }
+});
 
 describe('processImageUri', () => {
   it('should return image_url for an HTTP URL without filesystem access', async () => {

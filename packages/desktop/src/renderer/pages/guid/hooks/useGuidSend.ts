@@ -5,6 +5,7 @@
  */
 
 import { ipcBridge } from '@/common';
+import { getGuidTemplateSnapshot } from './useGuidDraft';
 import { type ChatFileRef, chatFileRefPath } from '@/common/types/chatFile';
 import {
   isBuiltinImageGenerationName,
@@ -206,7 +207,9 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
         : input;
     const creationRequestId = creationRequest ? crypto.randomUUID() : undefined;
     const requiresCreationBinding = creationRequest?.source === 'local';
-    const creationSnapshot = creationRequest ? { ...creationRequest, requestId: creationRequestId! } : undefined;
+    const creationSnapshot = creationRequest
+      ? { ...creationRequest, requestId: creationRequestId!, templateSnapshot: getGuidTemplateSnapshot() }
+      : undefined;
     if (creationRequest) {
       const wantsVideoMedia = requiresCreationBinding || creationRequest.kind === 'video';
       const matchesRequired = (server: IMcpServer) =>

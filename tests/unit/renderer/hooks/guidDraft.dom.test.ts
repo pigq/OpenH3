@@ -1,8 +1,59 @@
 import { act, renderHook } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
-import { clearGuidDraftIfMatches, useGuidDraft } from '@/renderer/pages/guid/hooks/useGuidDraft';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  clearGuidDraftIfMatches,
+  useGuidDraft,
+  setGuidTemplateSnapshot,
+  getGuidTemplateSnapshot,
+} from '@/renderer/pages/guid/hooks/useGuidDraft';
 
 describe('useGuidDraft', () => {
+  it('restores plain-text legacy drafts and reloads the persisted template copy', async () => {
+    localStorage.setItem('openh3.guid-draft.v1', JSON.stringify('Legacy draft'));
+    vi.resetModules();
+    const fresh = await import('@/renderer/pages/guid/hooks/useGuidDraft');
+    const hook = renderHook(() => fresh.useGuidDraft());
+    expect(hook.result.current[0]).toBe('Legacy draft');
+    act(() =>
+      fresh.setGuidTemplateSnapshot({
+        templateId: 'official:test',
+        templateRevision: 1,
+        releaseSequence: 1,
+        locale: 'en-US',
+        title: 'Title',
+        prompt: 'Original',
+        parameters: {},
+        requiresReference: false,
+      })
+    );
+    hook.unmount();
+    vi.resetModules();
+    const again = await import('@/renderer/pages/guid/hooks/useGuidDraft');
+    expect(again.getGuidTemplateSnapshot()?.prompt).toBe('Original');
+    again.resetGuidDraft();
+  });
+  it('persists an independent template revision with the editable draft and removes it on reset', () => {
+    const hook = renderHook(() => useGuidDraft());
+    act(() => hook.result.current[1]('Editable prompt'));
+    const snapshot = {
+      templateId: 'official:test',
+      templateRevision: 1,
+      releaseSequence: 2,
+      locale: 'en-US',
+      title: 'Title',
+      prompt: 'Original',
+      parameters: { width: 768 },
+      requiresReference: false,
+    };
+    act(() => setGuidTemplateSnapshot(snapshot));
+    snapshot.parameters.width = 1;
+    expect(getGuidTemplateSnapshot()?.parameters.width).toBe(768);
+    act(() => hook.result.current[1]('Edited prompt'));
+    expect(JSON.parse(localStorage.getItem('openh3.guid-draft.v1')!).templateSnapshot.prompt).toBe('Original');
+    act(() => clearGuidDraftIfMatches('Edited prompt'));
+    expect(getGuidTemplateSnapshot()).toBeUndefined();
+    hook.unmount();
+  });
   it('clears the sent draft after navigation has unmounted its composer', () => {
     const first = renderHook(() => useGuidDraft());
     act(() => first.result.current[1]('Sent prompt'));

@@ -1,0 +1,60 @@
+name: Publish official content catalog
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: Approved editorial source JSON path in this repository
+        required: true
+        default: content-source/catalog-source.json
+      sequence:
+        description: Strictly increasing content release sequence (also for rollback)
+        required: true
+      key_id:
+        description: ID in the client-bundled trusted keyring
+        required: true
+      min_client_version:
+        description: Minimum compatible client version
+        required: true
+        default: '2.2.2'
+      rollback_reason:
+        description: Optional audited reason for intentionally re-publishing an older payload with a higher sequence
+        required: false
+concurrency:
+  group: official-content-publication
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  publish:
+    if: github.repository == 'pigq/OpenH3' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: official-content
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Validate approved content and media
+        env:
+          CONTENT_SOURCE: ${{ inputs.source }}
+          CONTENT_SEQUENCE: ${{ inputs.sequence }}
+        run: |
+          node scripts/content-catalog/build.mjs --input "$CONTENT_SOURCE" --assets-dir "$(dirname "$CONTENT_SOURCE")" --out "$RUNNER_TEMP/content-build" --keyring resources/content-catalog/trusted-keys.json --sequence "$CONTENT_SEQUENCE"
+          cat "$RUNNER_TEMP/content-build/changes.json"
+      - name: Sign and publish immutable snapshot, then advance signed channel
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SIGNING_PEM: ${{ secrets.CONTENT_SIGNING_PRIVATE_KEY }}
+          CONTENT_KEY_ID: ${{ inputs.key_id }}
+          CONTENT_MIN_CLIENT: ${{ inputs.min_client_version }}
+          CONTENT_ROLLBACK_REASON: ${{ inputs.rollback_reason }}
+          OPENH3_CONTENT_PRIVATE_KEY_FILE: ${{ runner.temp }}/content-private.pem
+        run: |
+          node --input-type=module -e "import fs from 'node:fs'; if(!process.env.SIGNING_PEM)throw Error('Missing signing key');fs.writeFileSync(process.env.OPENH3_CONTENT_PRIVATE_KEY_FILE,process.env.SIGNING_PEM,{mode:0o600,flag:'wx'});"
+          node scripts/content-catalog/publish.mjs --publish --directory "$RUNNER_TEMP/content-build" --key-id "$CONTENT_KEY_ID" --keyring resources/content-catalog/trusted-keys.json --min-client-version "$CONTENT_MIN_CLIENT" --rollback-reason "$CONTENT_ROLLBACK_REASON"
+      - name: Remove temporary private key
+        if: always()
+        env:
+          OPENH3_CONTENT_PRIVATE_KEY_FILE: ${{ runner.temp }}/content-private.pem
+        run: node --input-type=module -e "import fs from 'node:fs';fs.rmSync(process.env.OPENH3_CONTENT_PRIVATE_KEY_FILE,{force:true});"

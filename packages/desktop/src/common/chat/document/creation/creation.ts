@@ -7,6 +7,7 @@ import {
   type TProviderWithModel,
 } from '@/common/config/storage';
 import type { ComfyFamily, ComfyIntent, ComfyProfile } from './comfy';
+import type { TemplateSnapshot } from '@/common/contentCatalog/snapshot';
 
 export type CreationKind = 'image' | 'video';
 export type CreationSource = 'local' | 'cloud';
@@ -49,7 +50,7 @@ export type LocalCreationInventory = {
 export type CreationRequest = Pick<
   CreationModel,
   'id' | 'name' | 'kind' | 'source' | 'state' | 'profileId' | 'family' | 'intent'
->;
+> & { templateSnapshot?: TemplateSnapshot };
 
 /** Attach explicit user choices to the first turn without exposing credentials. */
 export function creationMessage(input: string, summary: string): string {

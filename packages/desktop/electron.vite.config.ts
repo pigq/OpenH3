@@ -20,6 +20,7 @@ function buildMcpServersPlugin() {
     name: 'vite-plugin-build-mcp-servers',
     closeBundle() {
       execSync(`node "${resolve('scripts/build-mcp-servers.js')}"`, { stdio: 'inherit' });
+      execSync(`node "${resolve('scripts/content-catalog/export-builtin.mjs')}"`, { stdio: 'inherit' });
     },
   };
 }

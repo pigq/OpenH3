@@ -1,6 +1,6 @@
 # Release guide / 发布指南
 
-公开安装包和校验文件放在主仓库 [GitHub Releases](https://github.com/pigq/OpenH3/releases)，不提交到源码树；`BHUHD/OpenH3` 只作为同一项目的镜像。
+公开安装包和校验文件放在 [GitHub Releases](https://github.com/pigq/OpenH3/releases)，不提交到源码树。
 
 ## 当前 Alpha
 
@@ -41,3 +41,53 @@ NSIS 明确配置 `deleteAppDataOnUninstall: false`，保留现有安装 GUID �
 Desktop updates use only GitHub Releases in `pigq/OpenH3`. Publish the draft release after uploading installers, blockmaps and all platform/architecture `latest*.yml` files. The native GitHub updater reads these manifests; manual checks use the GitHub Releases API and preserve asset download URLs. Drafts are excluded, prereleases require opt-in, and older versions are not installed. GitHub failures can be retried; there is no upstream CDN fallback.
 
 The normal flow is: download in the background → confirm restart and update → silent replacement and restart. Existing configuration and user data are retained. Manual installer fallback remains a separately labelled action.
+
+## 官方内容库（独立频道）
+
+客户端更新使用 `pigq/OpenH3` 的 GitHub Releases；官方内容库使用同一仓库的 `content-stable` 分支，载荷放在 `content-snapshots` 的不可变 commit。两者不共享版本号、重启按钮或发布元数据，也不访问旧 CDN。内容同步仅更新官方模型介绍、模板和已上架展示作品，绝不下载安装或改写用户模型、ComfyUI 节点、工作流及依赖。用户生成结果不进入官方作品列表。
+
+### 上线前准备
+
+1. 将受信任的 Ed25519 **公钥**（SPKI PEM）及预置轮换公钥加入 `resources/content-catalog/trusted-keys.json`，随客户端发布。私钥不进入仓库和安装包。
+2. 在 GitHub 配置受保护的 `official-content` environment、必要审阅者及 `CONTENT_SIGNING_PRIVATE_KEY` secret。该 workflow 只允许官方仓库 `main` 上手动运行。没有公钥时保持随包内置库；不会退化成无签名同步。
+3. 审核每项媒体的作者、许可和来源，确认再分发权。旧内置预览带明确的待审标记，发布器会拒绝，不能以占位授权替换。没有新展示作品时列表可为空。
+4. **必须同时交付配套 Core**：本次 HTTP 中继、WebUI 认证和子进程密钥过滤位于独立 `aioncore` 仓库。仅编译桌面源码不会更新已有 `resources/bundled-openh3-core` 二进制。更新 Core bundle 的版本/摘要并重新执行打包验证，不要用旧 Core 冒充完整功能。
+
+### 编辑、校验与预览
+
+编辑源 JSON 包含 `{ catalog, approvals }`。每项审批须匹配 `id/revision`，包含 `status: "published"`、`approvedBy`、ISO `approvedAt`；未上架内容禁止进入产物。稳定 ID 使用 `official:`，变更文本、媒体或行为必须增加修订。模型卡只能描述客户端支持的家族，不能声明任意执行器。
+
+```powershell
+node scripts/content-catalog/export-builtin.mjs
+node scripts/content-catalog/build.mjs --input content-source/catalog-source.json --assets-dir content-source --out .runtime/content-preview --keyring resources/content-catalog/trusted-keys.json --sequence 1
+node scripts/content-catalog/preview.mjs --after .runtime/content-preview/catalog.json
+```
+
+`build` 的输出目录必须不存在；检查 schema、默认语言、审批、媒体 magic bytes、摘要、大小、LFS 指针、来源授权和路径边界。输出 `catalog.json`、按摘要命名的媒体及 `changes.json`。本地预览不发布。发布器还会验证当前频道的签名和载荷，重新计算新增/修改/撤下差异并强制修订递增，不能用省略 `--previous` 绕过检查。
+
+### 签名、发布与回退
+
+通过 `Publish official content catalog` workflow 提供编辑源路径、严格递增的序号、key ID 和最低客户端版本。流程先上传完整载荷并提交 `content-snapshots`，再签名最终清单（有效期 30 天），最后以 `force: false` 移动 `content-stable`。中间失败不移动已签名频道；并发冲突需重新审核、重新运行，不 force push。不得创建内容专用的客户端 Release 或改动 `latest*.yml`。
+
+本地离线签名工具 `sign.mjs` 仅从 `OPENH3_CONTENT_PRIVATE_KEY_FILE` 读取私钥；签的是最终清单原始字节，不是重新序列化对象。密钥轮换先通过客户端交付新公钥，再切换签名者；删除旧公钥也须通过客户端发布。
+
+官方回退：用已审阅旧内容构建**更高** `releaseSequence`，在 workflow 填写至少 8 字符的 `rollback_reason`，审批后重新发布；审计原因写进不可变 `changes.json`。本地“恢复上一版本”只切换有效缓存，不降低反重放高水位。过期清单不能新激活，已验证的离线缓存仍可用。
+
+### 运行维护与验收
+
+- 专用缓存位于用户数据目录的 `official-content`，不会删除模型或用户结果。启动后 30 秒检查、每 6 小时检查；网络错误最多按 1/5/15 分钟额外重试。设置可关闭自动同步，手动检查仍可用。
+- 必需封面全量校验后原子切换；视频按需读取，支持 Range/HEAD。缓存软上限 512 MiB，保护当前、上一份、恢复凭据和页面租约；超限停止新的可选媒体下载。
+- 页面更新只提示刷新，不突然重排；草稿、会话 `creation_request` 及每个新 ComfyUI 任务保留模板修订副本。云图结果旁保留独立 `.generation.json`（实际提示词、来源副本、模型标识、结果摘要），不含 provider 密钥。历史 H3 任务维持原格式，不伪造过去不存在的来源数据。
+- Desktop 与 WebUI 复用同一宿主服务；WebUI 经过 Core 认证及 CSRF，普通登录用户只读，只有宿主管理员可控制同步。loopback 内部令牌不回传浏览器，不继承给 agent 子进程。
+- `TRUST_UNCONFIGURED`：先交付可信公钥；`SIGNATURE_INVALID`/`DIGEST_MISMATCH`：核对发布产物，不跳过校验；`MANIFEST_EXPIRED`：重新发布更高序号；`CLOCK_INVALID`：检查宿主时间；`CONTENT_HOST_UNAVAILABLE`：检查配套 Core 与宿主；`CACHE_LIMIT`/`DISK_FULL`：处理专用缓存/磁盘，不清理模型。
+- 跨进程验收使用隔离临时资料、临时公钥和模型哨兵文件：设置 `OPENH3_CORE_TEST_BINARY` 指向本次构建 Core，运行 `tests/integration/contentCatalog/core.test.ts`。默认未提供该路径时明确跳过此测试，不能据此宣称端到端通过。Windows 覆盖安装、macOS/Linux 安装产物与 Bun standalone 仍须各平台发行验收。
+
+2026-10-23 本地验证：Windows Bun 编译后的 standalone 已通过生产 SPA、匿名拒绝、登录后目录读取、随包 52 个模板/3 个模型卡、资源摘要、Range、CSRF 和独立同步设置的隔离启动冒烟。该验证使用新 Core debug 二进制，不等于正式 tarball、受管运行时完整性或各平台安装升级验收。
+
+### 2026-10-24 提交前审查记录
+
+本次修复了去重下载的任务接管及早到终态、跨平台安装包误推荐、内容恢复/回收并发、跨实例媒体租约及崩溃锁恢复，并加入回归。修改相关的 38 个 Vitest suite 通过（405 项通过，1 项 Bash fixture 因环境跳过）；真实 Core 跨进程内容测试已执行。TypeScript、Electron-vite 构建、格式与 i18n 检查通过；lint 无 error，仍有既有 warning。
+
+配套 Core 的内容认证/CSRF/权限中继 3 项集成测试和内部凭据过滤 2 项测试通过，`cargo check` 与格式检查通过。但 affected-crate 整体测试并未全绿：未改动的 `session_skill` 存在旧品牌变量与 CRLF 断言失败，runtime 的既有 Unix 命令/路径 fixture 在 Windows 上有 13 项失败；Clippy 被未改动的 `openh3-extension/src/skill_view.rs` 嵌套 `if` 阻断。它们不计作本次通过项，也未借此修改无关代码。
+
+此次是源码提交验收，不是正式发布验收。公钥/签名保护环境、媒体授权审批、新 Core bundle 以及真实覆盖安装和各平台发行验收仍须完成。

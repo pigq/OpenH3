@@ -88,6 +88,7 @@ export const useAcpInitialMessage = ({
             intent?: ComfyIntent;
             source?: 'local' | 'cloud';
             kind?: 'image' | 'video';
+            templateSnapshot?: import('@/common/contentCatalog/snapshot').TemplateSnapshot;
           };
           const bound = await comfyApi.bind(
             initialMessage.creationRequestId,
@@ -98,6 +99,7 @@ export const useAcpInitialMessage = ({
             {
               source: request.source ?? 'local',
               kind: request.kind ?? 'image',
+              templateSnapshot: request.templateSnapshot,
             }
           );
           if (!bound.ok) throw new Error(t('guid.creation.toolsUnavailable'));

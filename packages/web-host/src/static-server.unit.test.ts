@@ -87,6 +87,16 @@ describe('static-server', () => {
     const json = (await r.json()) as { path: string };
     expect(json.path).toBe('/api/anything');
   });
+  it('overwrites the embedded-WebUI marker so browsers cannot inherit desktop authentication', async () => {
+    const backend = await startMockBackend((req, res) => res.end(String(req.headers['x-openh3-webui-request'])));
+    stopBackend = backend.close;
+    handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+    expect(
+      await (
+        await fetch(`${handle.localUrl}/api/content-catalog/catalog`, { headers: { 'x-openh3-webui-request': '0' } })
+      ).text()
+    ).toBe('1');
+  });
 
   it('/login reverse-proxies to backend (no local handler)', async () => {
     const backend = await startMockBackend((req, res) => {
