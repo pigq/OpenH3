@@ -100,7 +100,7 @@ node scripts/content-catalog/preview.mjs --after .runtime/content-preview/catalo
 
 配置正式公钥后，当前集成再次通过 Desktop 的 lint（0 error）、格式、TypeScript、i18n 与完整 Vitest 门禁：618 个 suite、5854 项通过，另有 1 个 suite、9 项按既有条件跳过。跨进程内容测试使用本次构建的 release Core 执行，未以默认跳过代替通过。运行使用现有 CI 配置并限制进程为 4 个逻辑 CPU，未增加测试超时或削弱断言。Vite 生产构建亦已通过。
 
-Core 的格式、Clippy 和迁移不可变检查通过。首次 workspace 测试仍有 2 项失败：既有广播 fixture 在订阅前发出了事件，现改用已有 gate 并通过 agent 库全部 981 项；损坏数据库备份遇到 Windows 文件占用，未改生产逻辑，独立重跑该 suite 的 22 项通过。完整 workspace 正在重新验证，此处不将首次全量结果记作全绿。
+Core 的格式、Clippy 和迁移不可变检查通过。首次 workspace 测试仍有 2 项失败：既有广播 fixture 在订阅前发出了事件，现改用已有 gate 并通过 agent 库全部 981 项；损坏数据库备份遇到 Windows 文件占用，未改生产逻辑，独立重跑该 suite 的 22 项通过。第二次 workspace 只有 runtime 的 5 项 shell fixture 因测试进程 PATH 未包含已安装的 `sh` 而失败；补齐测试环境后，runtime 库全部 95 项通过，未修改生产逻辑或跳过测试。带明确 shell 预检的完整 workspace 正在重新验证，此处不把分项重跑记作一次完整全绿。
 
 ### 正式内容签名配置（2026-10-24）
 
@@ -118,3 +118,11 @@ Core 的格式、Clippy 和迁移不可变检查通过。首次 workspace 测试
 从真实 tarball 启动，在独立资料目录验证了生产 SPA、首次生成密码后登录、匿名拒绝、CSRF、8 个模型家族与 52 个模板、正式公钥指纹、内置离线回退、媒体摘要与 Range/HEAD、同步设置。重启同一程序后，原密码、设置、会话标记和用户模型哨兵文件均保留。此处验证的是 standalone 进程重启持久化，**不是已安装客户端从旧版自动覆盖升级**。
 
 解包后的 2496 个文件逐字节扫描未检出本次正式私钥的 PEM、DER、Ed25519 seed 或 GitHub token 格式；196 个许可类文件已生成清单，不等于媒体授权和完整第三方再分发材料已通过。未在维护者实际安装或资料目录执行安装器，也未发布这些验收产物。
+
+### Windows 安装包构建验证（2026-10-24）
+
+规范构建脚本已生成 `OpenH3-3.0.0-win-x64.exe`（234429409 字节，SHA256 `7ea853040bc58d56d2005730261109c915445c63e37c446681255545378898f9`），并验证真实 Core、受管运行时、FFmpeg 和原生 SQLite 模块。首次下载 Electron 超时后，构建显式复用了锁定依赖中同版本的 Electron `37.10.3`，未关闭签名检查或改用旧 Core。`latest.yml` 的文件名和 SHA512 与实际安装包匹配，随包更新配置仅指向 `pigq/OpenH3`，公钥指纹与正式信任锚一致。
+
+当前安装包 Authenticode 状态为 **NotSigned**；官方内容 Ed25519 签名并不等于 Windows 程序签名。通过 `ELECTRON_RUN_AS_NODE` 验证了实际打包 SQLite 的 ABI 和内存查询，未运行应用主流程或安装器。安装包、解包应用及展开后的 ASAR 共 38326 个文件扫描未检出上述正式私钥材料或 GitHub token；1187 个许可类文件仅作清单记录。
+
+该结果只证明构建、元数据和以上产物检查通过，尚不证明旧安装自动升级、取消/失败恢复或跨平台实装通过。保留原安装 GUID、配置和数据的真实旧版升级验收仍须在独立 Windows 环境执行。
