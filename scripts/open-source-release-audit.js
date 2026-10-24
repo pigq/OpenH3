@@ -70,26 +70,34 @@ function scanSource() {
     const content = readText(filePath);
     if (content === null) continue;
 
-    for (const pattern of secretPatterns) {
-      if (/^(tests|test)\//i.test(entry)) continue;
-      for (const match of content.matchAll(pattern.regex)) {
-        const line = content.slice(0, match.index).split('\n').length;
-        const value = match[0].replace(/([:=]\s*["'`]?)[^\s"'`]+/u, '$1[REDACTED]');
-        findings.push({ file: entry, line, kind: pattern.name, match: value });
-      }
+    findings.push(...scanSourceText(content, entry));
+  }
+  return findings;
+}
+
+function scanSourceText(content, entry) {
+  const findings = [];
+  if (/^(tests|test)\//i.test(entry)) return findings;
+  for (const pattern of secretPatterns) {
+    for (const match of content.matchAll(pattern.regex)) {
+      const line = content.slice(0, match.index).split('\n').length;
+      findings.push({ file: entry, line, kind: pattern.name, match: '[REDACTED]' });
     }
-    if (!/^(tests|test)\//i.test(entry)) {
-      for (const match of content.matchAll(literalAssignmentPattern)) {
-        if (/AIONUI_[A-Z0-9_]+/u.test(match[0])) continue;
-        const line = content.slice(0, match.index).split('\n').length;
-        findings.push({
-          file: entry,
-          line,
-          kind: 'literal credential assignment',
-          match: match[0].replace(/([:=]\s*["'`]?)[^\s"'`]+/u, '$1[REDACTED]'),
-        });
-      }
-    }
+  }
+  for (const match of content.matchAll(literalAssignmentPattern)) {
+    const literal = match[0].match(/(["'`])([^"'`]*)\1$/u);
+    const value = literal?.[2];
+    // Only exact environment identifiers and UUID-generation expressions are
+    // non-credentials. Never exempt a secret merely containing these strings.
+    if (value && /^(?:OPENH3|AIONUI)_[A-Z0-9_]+_(?:KEY|TOKEN|SECRET)$/u.test(value)) continue;
+    if (literal?.[1] === '`' && /^(?:crypto\.randomUUID\(\)|\$\{crypto\.randomUUID\(\)\})$/u.test(value)) continue;
+    const line = content.slice(0, match.index).split('\n').length;
+    findings.push({
+      file: entry,
+      line,
+      kind: 'literal credential assignment',
+      match: match[0].replace(/([:=]\s*["'`]?)[^\s"'`]+/u, '$1[REDACTED]'),
+    });
   }
   return findings;
 }
@@ -166,31 +174,36 @@ const licenseEvidencePresent = [
   'resources/third-party-licenses/NOTICE.OpenH3.txt',
 ];
 
-const report = {
-  generatedAt: new Date().toISOString(),
-  sourceSecretFindings: scanSource(),
-  artifactFindings: scanArtifacts(),
-  licenseFiles: collectLicenseFiles(),
-  licenseEvidencePresent,
-  licenseEvidenceGaps,
-  publicBuildRules: {
-    providerBootstrap: 'forbidden',
-    providerKey: 'forbidden',
-    modelWeights: 'must be separately licensed or user-provided',
-  },
-};
+function main() {
+  const report = {
+    generatedAt: new Date().toISOString(),
+    sourceSecretFindings: scanSource(),
+    artifactFindings: scanArtifacts(),
+    licenseFiles: collectLicenseFiles(),
+    licenseEvidencePresent,
+    licenseEvidenceGaps,
+    publicBuildRules: {
+      providerBootstrap: 'forbidden',
+      providerKey: 'forbidden',
+      modelWeights: 'must be separately licensed or user-provided',
+    },
+  };
 
-fs.mkdirSync(path.dirname(reportPath), { recursive: true });
-fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+  fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+  fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
 
-console.log(`OpenH3 release audit: ${reportPath}`);
-console.log(`Source findings: ${report.sourceSecretFindings.length}`);
-console.log(`Artifact findings: ${report.artifactFindings.length}`);
-console.log(`License files found: ${report.licenseFiles.length}`);
-console.log(`License evidence gaps: ${report.licenseEvidenceGaps.length}`);
+  console.log(`OpenH3 release audit: ${reportPath}`);
+  console.log(`Source findings: ${report.sourceSecretFindings.length}`);
+  console.log(`Artifact findings: ${report.artifactFindings.length}`);
+  console.log(`License files found: ${report.licenseFiles.length}`);
+  console.log(`License evidence gaps: ${report.licenseEvidenceGaps.length}`);
 
-if (report.sourceSecretFindings.length || report.artifactFindings.length) {
-  for (const finding of [...report.sourceSecretFindings, ...report.artifactFindings])
-    console.error(JSON.stringify(finding));
-  process.exitCode = 1;
+  if (report.sourceSecretFindings.length || report.artifactFindings.length) {
+    for (const finding of [...report.sourceSecretFindings, ...report.artifactFindings])
+      console.error(JSON.stringify(finding));
+    process.exitCode = 1;
+  }
 }
+
+module.exports = { scanSourceText };
+if (require.main === module) main();
