@@ -360,6 +360,16 @@ pub fn create_router_with_all_state(services: &AppServices, states: ModuleStates
     let office_proxy =
         office_proxy_routes(states.office).route_layer(from_fn_with_state(auth_mw_state.clone(), auth_middleware));
     let public_assets = asset_routes(AssetRouterState::default());
+    let content_catalog_authenticated =
+        crate::content_catalog_proxy::content_catalog_routes(services.content_catalog_proxy.clone())
+            .route_layer(from_fn_with_state(
+                auth_mw_state.clone(),
+                crate::content_catalog_proxy::authenticate,
+            ))
+            .route_layer(from_fn_with_state(
+                (services.cookie_config.clone(), services.identity_mode.is_local()),
+                crate::content_catalog_proxy::webui_csrf,
+            ));
 
     // WebSocket upgrade route — exempt from CSRF (no cookie-based
     // double-submit) but still gets security response headers.
@@ -400,6 +410,7 @@ pub fn create_router_with_all_state(services: &AppServices, states: ModuleStates
         .route("/health", get(health_check))
         .merge(auth_routes(auth_state))
         .merge(system_authenticated)
+        .merge(content_catalog_authenticated)
         .merge(conversation_authenticated)
         .merge(conversation_ops_authenticated)
         .merge(remote_agent_authenticated)
