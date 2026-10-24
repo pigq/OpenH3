@@ -169,7 +169,9 @@ if start; then exit 1; fi
       [
         '-c',
         `set -e
-source <(sed '$d' scripts/install-ubuntu.sh)
+# Bash 3.2 can source process-substitution pipes as empty files.
+eval "$(sed '$d' scripts/install-ubuntu.sh)"
+declare -F detect_arch resolve_version download_deb >/dev/null
 task_dir=$(mktemp -d)
 trap 'rm -rf "$task_dir"' EXIT
 trace="$task_dir/downloads"
