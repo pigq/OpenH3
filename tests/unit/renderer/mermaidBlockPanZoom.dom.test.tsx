@@ -5,7 +5,7 @@
  */
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
 
 const renderMock = vi.hoisted(() => vi.fn());
@@ -98,6 +98,9 @@ describe('MermaidBlock pan/zoom', () => {
   it('shows zoom controls and applies/resets scale when enablePanZoom is set', async () => {
     render(<MermaidBlock code={'graph TD; A-->B'} enablePanZoom />);
     const diagram = await screen.findByTestId('mermaid-diagram');
+    // The fresh SVG resets its transform in a passive effect. Settle that reset
+    // before interacting so it cannot overwrite the first click under load.
+    await act(async () => {});
     // Pan viewport clips (hidden overflow) instead of native scroll.
     expect(diagram.style.overflow).toBe('hidden');
 

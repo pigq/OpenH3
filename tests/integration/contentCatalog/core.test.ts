@@ -127,7 +127,9 @@ it.skipIf(!process.env.OPENH3_CORE_TEST_BINARY)(
       await backend?.stop();
       await service.stop();
       await host.close();
-      await rm(root, { recursive: true, force: true });
+      // Windows can briefly retain directory handles after the Core exits.
+      // Bound cleanup retries without hiding a persistent resource leak.
+      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   },
   60000
