@@ -18,7 +18,8 @@ const registry = {
 };
 const stats = { system: { python_version: '3.12.9', pytorch_version: '2.9.0', comfyui_version: '0.3.60' } };
 beforeEach(() => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'comfy-engine-'));
+  // Match the engine's canonical paths when the OS temp directory is a symlink.
+  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'comfy-engine-')));
   fs.writeFileSync(path.join(root, 'main.py'), '');
   fs.writeFileSync(path.join(root, 'python.exe'), '');
   fs.writeFileSync(path.join(root, 'valid.safetensors'), 'weights');
