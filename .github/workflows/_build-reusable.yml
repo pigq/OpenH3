@@ -436,23 +436,26 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $Command = $env:WINDOWS_BUILD_COMMAND
-          $BuildFailed = $false
+          $LASTEXITCODE = 0
 
           try {
             Write-Host "Running Windows build command: $Command"
             iex $Command
+            $BuildExitCode = $LASTEXITCODE
+            if ($BuildExitCode -ne 0) {
+              throw "Windows build command exited with code $BuildExitCode."
+            }
             Write-Host "Windows build completed successfully"
           } catch {
-            $BuildFailed = $true
-            Write-Warning "${{ matrix.platform }} build failed but will not block the workflow"
-            Write-Host "::notice title=Windows build skipped::${{ matrix.platform }} build failed (see logs above) but workflow is allowed to continue."
+            $BuildExitCode = $LASTEXITCODE
+            "result=failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            if ($BuildExitCode -ne 0) {
+              exit $BuildExitCode
+            }
+            throw
           }
 
-          if ($BuildFailed) {
-            "result=failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          } else {
-            "result=success" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          }
+          "result=success" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
         env:
           WINDOWS_BUILD_COMMAND: ${{ matrix.command }}
           OPENH3_BACKEND_RUN_ID: ${{ inputs.openh3_core_run_id || inputs.aioncore_run_id }}
