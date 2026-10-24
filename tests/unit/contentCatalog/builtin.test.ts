@@ -5,6 +5,8 @@ import path from 'node:path';
 import { exportBuiltin } from '../../../scripts/content-catalog/export-builtin.mjs';
 import { createContentRuntime } from '@/process/services/contentCatalog/builtin';
 import { buildSpawnEnv } from '../../../packages/web-host/src/backend-launcher';
+import { COMFY_FAMILIES } from '@/renderer/pages/guid/Creation/comfyDraft';
+import { CONTENT_CAPABILITIES } from '@/common/contentCatalog/policy';
 it('exports all 52 bundled templates and serves their offline digest-addressed media without changing user data', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'builtin-content-'));
   let runtime: Awaited<ReturnType<typeof createContentRuntime>> | undefined;
@@ -12,7 +14,10 @@ it('exports all 52 bundled templates and serves their offline digest-addressed m
     const dir = path.join(root, 'builtin');
     const catalog = await exportBuiltin(dir);
     expect(catalog.entries).toHaveLength(52);
-    expect(catalog.models).toHaveLength(3);
+    expect(catalog.models.map((model) => model.family)).toEqual(COMFY_FAMILIES.map((model) => model.family));
+    for (const model of catalog.models) {
+      expect(CONTENT_CAPABILITIES).toEqual(expect.arrayContaining(model.requiredCapabilities));
+    }
     for (const e of catalog.entries) {
       expect(Object.keys(e.title)).toHaveLength(13);
       expect(Object.keys(e.prompt)).toHaveLength(13);

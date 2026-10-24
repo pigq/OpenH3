@@ -38,7 +38,7 @@ export async function buildCatalog({ input, assetsDir, out, keyring, sequence, p
       throw Error('APPROVAL_REQUIRED');
     if (entry.requiredCapabilities.some((c) => !CONTENT_CAPABILITIES.includes(c))) throw Error('CAPABILITY_UNKNOWN');
     if ('family' in entry && !CONTENT_CAPABILITIES.includes(`comfy.${entry.family}`)) throw Error('CAPABILITY_UNKNOWN');
-    if ('attribution' in entry && /require.? review|unknown|pending|todo/i.test(entry.attribution.license))
+    if (/require.? review|unknown|pending|todo/i.test(entry.attribution.license))
       throw Error('ATTRIBUTION_REVIEW_REQUIRED');
   }
   if (previous) {

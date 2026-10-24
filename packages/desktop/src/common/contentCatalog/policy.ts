@@ -5,8 +5,13 @@ export const CONTENT_CAPABILITIES = [
   'template.image',
   'template.video',
   'comfy.h3',
+  'comfy.fasth3-omni',
   'comfy.qwen-edit',
   'comfy.z-image',
+  'comfy.flux-3-image-klein',
+  'comfy.moss-image-base',
+  'comfy.moss-image-sft',
+  'comfy.krea2',
 ] as const;
 export const localize = (values: Record<string, string>, locale: string, defaultLocale: string): string =>
   values[locale] ?? values[locale.split('-')[0]] ?? values[defaultLocale] ?? '';

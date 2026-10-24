@@ -27,6 +27,7 @@ export const galleryFixture: ContentCatalog = {
     cover: '1'.padStart(64, '0'),
     minClientVersion: '0.0.0',
     requiredCapabilities: [],
+    attribution: { author: 'Test', license: 'CC0', sourceUrl: 'https://github.com/pigq/OpenH3' },
   })),
   assets: [],
   entries: CREATION_TEMPLATES.map((e, index) => ({

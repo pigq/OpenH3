@@ -60,11 +60,18 @@ export async function exportBuiltin(out = path.join(root, 'out/content-catalog')
     });
   }
   const models = [];
-  for (const [family, name, kind, file] of [
-    ['h3', 'H3', 'video', 'previews/coast.webp'],
-    ['qwen-edit', 'Qwen-Edit', 'image', 'style/women-hair-grid.webp'],
-    ['z-image', 'Z-Image', 'image', 'images/landscape.webp'],
-  ]) {
+  const { COMFY_FAMILIES } = await bundleModule('packages/desktop/src/renderer/pages/guid/Creation/comfyDraft.ts');
+  const modelPreviews = {
+    h3: 'h3-openh3-demo.webp',
+    'fasth3-omni': 'fasth3-omni-official.webp',
+    'qwen-edit': 'qwen-edit-2509-official.webp',
+    'z-image': 'z-image-official.webp',
+    'flux-3-image-klein': 'flux-3-image-klein-official.webp',
+    'moss-image-base': 'moss/moss-image-base-official.webp',
+    'moss-image-sft': 'moss/moss-image-sft-official.webp',
+    krea2: 'krea2-official.webp',
+  };
+  for (const { family, name, kind } of COMFY_FAMILIES) {
     models.push({
       id: `official:model-${family}`,
       revision: 1,
@@ -75,9 +82,16 @@ export async function exportBuiltin(out = path.join(root, 'out/content-catalog')
       description: Object.fromEntries(
         Object.entries(locales).map(([locale, data]) => [locale, data.comfy?.families?.[family] ?? name])
       ),
-      cover: await add(path.join(root, 'packages/desktop/src/renderer/assets/creation', file)),
+      cover: await add(
+        path.join(root, 'packages/desktop/src/renderer/assets/creation/model-previews', modelPreviews[family])
+      ),
       minClientVersion: '0.0.0',
       requiredCapabilities: [`comfy.${family}`],
+      attribution: {
+        author: 'OpenH3 model preview catalog',
+        license: 'Bundled legacy media; publication rights require review',
+        sourceUrl: 'https://github.com/pigq/OpenH3',
+      },
     });
   }
   const catalog = parseCatalog({

@@ -6,6 +6,7 @@ import { createHash, generateKeyPairSync, verify } from 'node:crypto';
 import { buildCatalog } from '../../../scripts/content-catalog/build.mjs';
 import { signCatalog } from '../../../scripts/content-catalog/sign.mjs';
 import { publishCatalog } from '../../../scripts/content-catalog/publish.mjs';
+import { exportBuiltin } from '../../../scripts/content-catalog/export-builtin.mjs';
 import { candidate, keys, pair, withCatalog, image, digest } from '../../unit/contentCatalog/fixtures';
 import type { ContentCatalog } from '@/common/contentCatalog/schema';
 const template = {
@@ -25,6 +26,32 @@ const template = {
   minClientVersion: '0.0.0',
   requiredCapabilities: [],
 };
+it('does not publish bundled model preview media without reviewed attribution, even with approval', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'model-media-review-'));
+  try {
+    const assetsDir = path.join(root, 'builtin');
+    const catalog = await exportBuiltin(assetsDir);
+    catalog.releaseSequence = 1;
+    catalog.entries = [];
+    const input = path.join(root, 'source.json');
+    const source = {
+      catalog,
+      approvals: catalog.models.map((model) => ({
+        id: model.id,
+        revision: model.revision,
+        status: 'published',
+        approvedBy: 'test-maintainer',
+        approvedAt: catalog.publishedAt,
+      })),
+    };
+    await writeFile(input, JSON.stringify(source));
+    await expect(buildCatalog({ input, assetsDir, out: path.join(root, 'dist'), keyring: keys })).rejects.toThrow(
+      'ATTRIBUTION_REVIEW_REQUIRED'
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 async function simulatedPublisher(
   options: { fail?: string; current?: ContentCatalog; next?: ContentCatalog; rollbackReason?: string } = {}
 ) {
@@ -235,6 +262,7 @@ it('builds only approved, attributed, digest-verified data and signs the final o
               revision: 1,
               origin: 'official',
               family: 'unknown',
+              attribution: entry.attribution,
               name: 'Unknown',
               kind: 'image',
               description: entry.description,

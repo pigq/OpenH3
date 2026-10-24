@@ -119,6 +119,7 @@ describe('content orchestration', () => {
       ],
       models: [digest, secondHash].map((cover, i) => ({
         id: `official:pending${i}`,
+        attribution: { author: 'Test', license: 'CC0', sourceUrl: 'https://github.com/pigq/OpenH3' },
         revision: 1,
         origin: 'official',
         family: 'h3',
@@ -245,6 +246,7 @@ describe('content orchestration', () => {
       assets: [...c.catalog.assets, { ...c.catalog.assets[0], sha256: second, path: 'second.webp' }],
       models: [digest, second].map((cover, i) => ({
         id: `official:model${i}`,
+        attribution: { author: 'Test', license: 'CC0', sourceUrl: 'https://github.com/pigq/OpenH3' },
         revision: 1,
         origin: 'official' as const,
         family: 'h3',

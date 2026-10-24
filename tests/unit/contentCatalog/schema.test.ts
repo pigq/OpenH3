@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { catalogSchema, officialEntrySchema } from '@/common/contentCatalog/schema';
+import { catalogSchema, modelCardSchema, officialEntrySchema } from '@/common/contentCatalog/schema';
 import { resolveEntryAction, localize, supportsEntry } from '@/common/contentCatalog/policy';
 import { captureTemplateSnapshot } from '@/common/contentCatalog/snapshot';
 const sha = 'a'.repeat(64);
@@ -34,6 +34,24 @@ const catalog = {
   assets: [{ sha256: sha, path: 'assets/cover.webp', mimeType: 'image/webp', sizeBytes: 10 }],
 };
 describe('official content contract', () => {
+  it('requires author, license and HTTPS media source on model cards too', () => {
+    const model = {
+      id: 'official:model-h3',
+      revision: 1,
+      origin: 'official',
+      family: 'h3',
+      name: 'H3',
+      kind: 'video',
+      description: base.description,
+      cover: sha,
+    };
+    expect(modelCardSchema.safeParse(model).success).toBe(false);
+    expect(modelCardSchema.safeParse({ ...model, attribution: base.attribution }).success).toBe(true);
+    expect(
+      modelCardSchema.safeParse({ ...model, attribution: { ...base.attribution, sourceUrl: 'http://example.com' } })
+        .success
+    ).toBe(false);
+  });
   it('accepts templates and showcases separately', () => {
     expect(officialEntrySchema.parse(template).entryType).toBe('template');
     expect(officialEntrySchema.parse(showcase).entryType).toBe('showcase');

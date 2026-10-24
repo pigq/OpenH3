@@ -90,6 +90,7 @@ export const modelCardSchema = z
     kind: z.enum(['image', 'video']),
     description: localizedTextSchema,
     cover: digestSchema,
+    attribution,
     ...requirements,
   })
   .strict();
