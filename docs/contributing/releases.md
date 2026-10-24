@@ -100,13 +100,13 @@ node scripts/content-catalog/preview.mjs --after .runtime/content-preview/catalo
 
 配置正式公钥后，当前集成再次通过 Desktop 的 lint（0 error）、格式、TypeScript、i18n 与完整 Vitest 门禁：618 个 suite、5854 项通过，另有 1 个 suite、9 项按既有条件跳过。跨进程内容测试使用本次构建的 release Core 执行，未以默认跳过代替通过。运行使用现有 CI 配置并限制进程为 4 个逻辑 CPU，未增加测试超时或削弱断言。Vite 生产构建亦已通过。
 
-Core 的格式、Clippy 和迁移不可变检查通过。首次 workspace 测试仍有 2 项失败：既有广播 fixture 在订阅前发出了事件，现改用已有 gate 并通过 agent 库全部 981 项；损坏数据库备份遇到 Windows 文件占用，未改生产逻辑，独立重跑该 suite 的 22 项通过。第二次 workspace 只有 runtime 的 5 项 shell fixture 因测试进程 PATH 未包含已安装的 `sh` 而失败；补齐测试环境后，runtime 库全部 95 项通过，未修改生产逻辑或跳过测试。带明确 shell 预检的完整 workspace 正在重新验证，此处不把分项重跑记作一次完整全绿。
+Core 的格式、Clippy 和迁移不可变检查通过。首次 workspace 测试有 2 项失败：既有广播 fixture 在订阅前发出了事件，现改用已有 gate 并通过 agent 库全部 981 项；损坏数据库备份遇到 Windows 文件占用，未改生产逻辑，独立重跑该 suite 的 22 项通过。第二次 workspace 只有 runtime 的 5 项 shell fixture 因测试进程 PATH 未包含已安装的 `sh` 而失败；补齐测试环境后，runtime 库全部 95 项通过，未修改生产逻辑或跳过测试。随后在显式包含 Git Bash 的 PATH 中执行完整 `cargo test -j2 --workspace --no-fail-fast`，命令退出码为 0，256 个结果摘要合计 9528 项通过、53 项按既有条件忽略，无失败；此为一次完整运行结果，而非拼接分项重跑。
 
 ### 正式内容签名配置（2026-10-24）
 
 - 活跃 key ID：`openh3-content-20261024`；算法 Ed25519，公钥为 SPKI PEM，仅公钥随源码和客户端交付。
 - 公钥 SPKI DER 的 SHA256：`1decb9f5ca9eac04dc41c3509dd78e22ea5c7e3ee51ce86064f486607f9cbf41`。
-- 私钥以 PKCS8 PEM 保存在维护者本机受限目录；关闭目录继承，仅当前 Windows 用户与 SYSTEM 可访问。私钥不进入 Git、日志或安装包，另行保管加密离线备份。
+- 私钥以 PKCS8 PEM 保存在维护者本机受限目录；关闭目录继承，仅当前 Windows 用户与 SYSTEM 可访问。私钥不进入 Git、日志或安装包；尚未建立离线加密备份，发布前须另行备份。
 - GitHub `official-content` environment 已配置 `CONTENT_SIGNING_PRIVATE_KEY`，上传前使用 GitHub environment 公钥通过 libsodium sealed box 加密；不是仓库级 secret。
 - 环境仅允许 `main` **分支**（不允许同名 tag），必须由 `pigq` 审批，管理员不能跳过。当前采用单维护者审批，允许发起人本人审批，并非双人复核；增加独立审核人后再启用禁止自审。
 - 未触发内容发布 workflow，未创建 `content-stable`/`content-snapshots` 发布来代替未完成的媒体授权。发布前先将公钥随客户端交付，再使用匹配 key ID 签名；轮换同样先交付新公钥再切换 secret。
@@ -126,3 +126,5 @@ Core 的格式、Clippy 和迁移不可变检查通过。首次 workspace 测试
 当前安装包 Authenticode 状态为 **NotSigned**；官方内容 Ed25519 签名并不等于 Windows 程序签名。通过 `ELECTRON_RUN_AS_NODE` 验证了实际打包 SQLite 的 ABI 和内存查询，未运行应用主流程或安装器。安装包、解包应用及展开后的 ASAR 共 38326 个文件扫描未检出上述正式私钥材料或 GitHub token；1187 个许可类文件仅作清单记录。
 
 该结果只证明构建、元数据和以上产物检查通过，尚不证明旧安装自动升级、取消/失败恢复或跨平台实装通过。保留原安装 GUID、配置和数据的真实旧版升级验收仍须在独立 Windows 环境执行。
+
+维护者已确认暂时没有隔离 Windows 测试环境，本轮先完成代码提交。未执行安装器或修改现用客户端；真实覆盖升级验收保留为正式发布前待办，不以产物解包、单元测试或 standalone 重启检查代替。
