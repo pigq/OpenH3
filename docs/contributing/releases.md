@@ -1,6 +1,6 @@
 # Release guide / 发布指南
 
-公开安装包和校验文件放在 [GitHub Releases](https://github.com/pigq/OpenH3/releases)，不提交到源码树。
+公开安装包和校验文件以主仓库 [GitHub Releases](https://github.com/pigq/OpenH3/releases) 为准，不提交到源码树。
 
 ## 当前 Alpha
 
@@ -50,8 +50,8 @@ The normal flow is: download in the background → confirm restart and update �
 
 1. 将受信任的 Ed25519 **公钥**（SPKI PEM）及预置轮换公钥加入 `resources/content-catalog/trusted-keys.json`，随客户端发布。私钥不进入仓库和安装包。
 2. 在 GitHub 配置受保护的 `official-content` environment、必要审阅者及 `CONTENT_SIGNING_PRIVATE_KEY` secret。该 workflow 只允许官方仓库 `main` 上手动运行。没有公钥时保持随包内置库；不会退化成无签名同步。
-3. 审核每项媒体的作者、许可和来源，确认再分发权。旧内置预览带明确的待审标记，发布器会拒绝，不能以占位授权替换。没有新展示作品时列表可为空。
-4. **必须同时交付配套 Core**：本次 HTTP 中继、WebUI 认证和子进程密钥过滤位于独立 `aioncore` 仓库。仅编译桌面源码不会更新已有 `resources/bundled-openh3-core` 二进制。更新 Core bundle 的版本/摘要并重新执行打包验证，不要用旧 Core 冒充完整功能。
+3. 审核每项媒体的作者、许可和来源，确认再分发权；模型卡封面与模板、展示作品执行相同的授权门禁。旧内置预览带明确的待审标记，发布器会拒绝，不能以占位授权替换。没有新展示作品时列表可为空。
+4. **必须同时交付配套 Core**：HTTP 中继、WebUI 认证和子进程密钥过滤现已集成到主仓库 `core/`。使用默认本地 Core 源构建，确认 bundle 记录的真实版本、构建来源和摘要。仅编译桌面源码不会替换旧 Core，不要用旧二进制冒充完整功能。
 
 ### 编辑、校验与预览
 
@@ -91,3 +91,13 @@ node scripts/content-catalog/preview.mjs --after .runtime/content-preview/catalo
 配套 Core 的内容认证/CSRF/权限中继 3 项集成测试和内部凭据过滤 2 项测试通过，`cargo check` 与格式检查通过。但 affected-crate 整体测试并未全绿：未改动的 `session_skill` 存在旧品牌变量与 CRLF 断言失败，runtime 的既有 Unix 命令/路径 fixture 在 Windows 上有 13 项失败；Clippy 被未改动的 `openh3-extension/src/skill_view.rs` 嵌套 `if` 阻断。它们不计作本次通过项，也未借此修改无关代码。
 
 此次是源码提交验收，不是正式发布验收。公钥/签名保护环境、媒体授权审批、新 Core bundle 以及真实覆盖安装和各平台发行验收仍须完成。
+
+### 当前单仓库验收（进行中）
+
+以上历史审查针对旧双仓库树，不能作为当前主线或正式发布的结论。当前基于 `pigq/OpenH3` 主线 `787fd3e86` 集成，保留全部 8 个模型家族及原有真实预览/播放交互，目录更新不改写用户安装的模型。内置导出同步覆盖这 8 个家族与 52 个模板。
+
+正式内容签名密钥、媒体再分发授权和上架审批资料尚未准备。客户端保持随包内置库及未配置的签名同步状态，不以测试密钥、空发布或虚构许可代替验收。配套 release Core、实际安装覆盖升级及平台范围仍须逐项验证；通过源码测试不代表正式发布验收完成。
+
+当前集成已通过 Desktop 的 lint（0 error）、格式、TypeScript、i18n 与完整 Vitest 门禁：618 个 suite、5853 项通过，另有 1 个 suite、9 项按既有条件跳过。跨进程内容测试使用真实 Core 执行，未以默认跳过代替通过。运行使用现有 CI 配置并限制进程为 4 个逻辑 CPU，未增加测试超时或削弱断言。Vite 生产构建亦已通过。
+
+Core 的格式、Clippy 和迁移不可变检查通过。首次 workspace 测试仍有 2 项失败：既有广播 fixture 在订阅前发出了事件，现改用已有 gate 并通过 agent 库全部 981 项；损坏数据库备份遇到 Windows 文件占用，未改生产逻辑，独立重跑该 suite 的 22 项通过。完整 workspace 正在重新验证，此处不将首次全量结果记作全绿。
