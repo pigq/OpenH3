@@ -108,9 +108,20 @@ it('removes known generated HTML without hiding unrelated source examples', () =
 });
 
 it('keeps an asynchronous video job visible through running and failure even after tool completion', async () => {
-  mocks.get.mockResolvedValue({ id, status: 'queued', progress: 0, artifacts: [] });
+  const queuedJob = { id, status: 'queued', progress: 0, artifacts: [] };
+  let resolveJob!: (job: typeof queuedJob) => void;
+  mocks.get.mockReturnValue(
+    new Promise<typeof queuedJob>((resolve) => {
+      resolveJob = resolve;
+    })
+  );
   const view = render(<H3ToolResults messages={[message]} />);
-  await waitFor(() => expect(view.getByRole('status').textContent).toContain('queued'));
+  expect(mocks.get).toHaveBeenCalledWith(id);
+  expect(view.getByRole('status').textContent).toContain('loading');
+  await act(async () => {
+    resolveJob(queuedJob);
+  });
+  expect(view.getByRole('status').textContent).toContain('queued');
   const update = mocks.events.mock.calls[0][1];
   act(() => update({ id, status: 'running', progress: 0.4, artifacts: [] }));
   expect(view.getByRole('status').textContent).toContain('running');
