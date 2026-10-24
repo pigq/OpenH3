@@ -233,10 +233,32 @@ export class CreationOperations {
     return next;
   }
   private flush(): void {
-    fs.writeFileSync(
-      `${this.filename}.tmp`,
-      JSON.stringify({ operations: [...this.operations.values()], requests: [...this.requests.entries()] })
-    );
-    fs.renameSync(`${this.filename}.tmp`, this.filename);
+    const temporary = `${this.filename}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    try {
+      fs.writeFileSync(
+        temporary,
+        JSON.stringify({ operations: [...this.operations.values()], requests: [...this.requests.entries()] }),
+        { flag: 'wx', mode: 0o600 }
+      );
+      for (let attempt = 0; ; attempt++) {
+        try {
+          fs.renameSync(temporary, this.filename);
+          break;
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (process.platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(code ?? '') || attempt >= 5)
+            throw error;
+          // Windows may briefly refuse replacement even after our handles close.
+          // Retry the completed file; never delete the last committed state.
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10 * (attempt + 1));
+        }
+      }
+    } finally {
+      try {
+        fs.rmSync(temporary, { force: true });
+      } catch {
+        // Cleanup must not mask the persistence error or remove the live file.
+      }
+    }
   }
 }

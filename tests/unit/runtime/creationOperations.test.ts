@@ -50,6 +50,74 @@ function fixture() {
 afterEach(() => directories.splice(0).forEach((directory) => fs.rmSync(directory, { recursive: true, force: true })));
 
 describe('creation installation continuation', () => {
+  it('still cancels a submitted job after a transient job-ID persistence failure', async () => {
+    const f = fixture();
+    f.ready();
+    const operation = f.operations.request(requestId, { prompt: 'Original' });
+    f.operations.authorize(operation.id, 'conversation-1', consent);
+    await f.operations.start(operation.id, requestId);
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    const originalRename = fs.renameSync;
+    let writes = 0;
+    const rename = vi.spyOn(fs, 'renameSync').mockImplementation((source, target) => {
+      if (++writes === 3) throw Object.assign(new Error('job ID temporarily locked'), { code: 'EPERM' });
+      originalRename(source, target);
+    });
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    try {
+      await f.operations.cancelConversation('conversation-1');
+      expect(f.ports.cancelJob).toHaveBeenCalledExactlyOnceWith(operation.id);
+      expect(f.operations.get(operation.id).state).toBe('cancelled');
+      expect(JSON.parse(fs.readFileSync(f.filename, 'utf8')).operations[0].state).toBe('cancelled');
+    } finally {
+      Object.defineProperty(process, 'platform', originalPlatform);
+      rename.mockRestore();
+    }
+  });
+
+  it.each(['EPERM', 'EACCES', 'EBUSY'])('retries a transient Windows %s without deleting committed state', (code) => {
+    const f = fixture();
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    const rename = vi.spyOn(fs, 'renameSync').mockImplementationOnce(() => {
+      expect(JSON.parse(fs.readFileSync(f.filename, 'utf8')).operations).toEqual([]);
+      throw Object.assign(new Error('temporarily locked'), { code });
+    });
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    try {
+      const operation = f.operations.request(requestId, { prompt: 'Persist after retry' });
+      expect(rename.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(JSON.parse(fs.readFileSync(f.filename, 'utf8')).operations).toEqual([operation]);
+      expect(fs.readdirSync(path.dirname(f.filename))).toEqual(['operations.json']);
+    } finally {
+      Object.defineProperty(process, 'platform', originalPlatform);
+      rename.mockRestore();
+    }
+  });
+
+  it.each([
+    ['win32', 'EPERM', 6],
+    ['win32', 'ENOSPC', 1],
+    ['linux', 'EPERM', 1],
+  ] as const)('bounds %s %s retries and preserves the previous file', (platform, code, attempts) => {
+    const f = fixture();
+    const committed = fs.readFileSync(f.filename, 'utf8');
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    const failure = Object.assign(new Error('cannot replace state'), { code });
+    const rename = vi.spyOn(fs, 'renameSync').mockImplementation(() => {
+      throw failure;
+    });
+    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+    try {
+      expect(() => f.operations.request(requestId, { prompt: 'Not committed' })).toThrow(failure);
+      expect(rename).toHaveBeenCalledTimes(attempts);
+      expect(fs.readFileSync(f.filename, 'utf8')).toBe(committed);
+      expect(fs.readdirSync(path.dirname(f.filename))).toEqual(['operations.json']);
+    } finally {
+      Object.defineProperty(process, 'platform', originalPlatform);
+      rename.mockRestore();
+    }
+  });
+
   it('does not apply an old failed setup state during asynchronous installer preflight', async () => {
     const f = fixture();
     f.phase('failed');
