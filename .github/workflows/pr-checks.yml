@@ -385,6 +385,7 @@ jobs:
           Write-Host "BUILD TEST: ${{ matrix.platform }}"
           Write-Host "=========================================="
           node scripts/build-with-builder.js x64 --win --x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Write-Host "✓Build test passed for ${{ matrix.platform }}"
         env:
           NODE_OPTIONS: '--max-old-space-size=8192'

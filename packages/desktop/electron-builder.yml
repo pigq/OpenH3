@@ -177,6 +177,7 @@ dmg:
       type: link
       path: /Applications
 
+beforePack: packages/shared-scripts/src/prepare-windows-media.js
 afterPack: scripts/afterPack.js
 afterSign: scripts/afterSign.js
 
