@@ -98,7 +98,7 @@ node scripts/content-catalog/preview.mjs --after .runtime/content-preview/catalo
 
 正式内容签名密钥已于 2026-10-24 根据维护者授权生成并配置，详见下节。媒体再分发授权和上架审批资料尚未准备，尚未发布官方远端内容，客户端继续使用随包内置库。签名密钥就绪不代替内容授权、配套 release Core、实际安装覆盖升级及各平台发行验收；通过源码测试不代表正式发布验收完成。
 
-当前集成已通过 Desktop 的 lint（0 error）、格式、TypeScript、i18n 与完整 Vitest 门禁：618 个 suite、5853 项通过，另有 1 个 suite、9 项按既有条件跳过。跨进程内容测试使用真实 Core 执行，未以默认跳过代替通过。运行使用现有 CI 配置并限制进程为 4 个逻辑 CPU，未增加测试超时或削弱断言。Vite 生产构建亦已通过。
+配置正式公钥后，当前集成再次通过 Desktop 的 lint（0 error）、格式、TypeScript、i18n 与完整 Vitest 门禁：618 个 suite、5854 项通过，另有 1 个 suite、9 项按既有条件跳过。跨进程内容测试使用本次构建的 release Core 执行，未以默认跳过代替通过。运行使用现有 CI 配置并限制进程为 4 个逻辑 CPU，未增加测试超时或削弱断言。Vite 生产构建亦已通过。
 
 Core 的格式、Clippy 和迁移不可变检查通过。首次 workspace 测试仍有 2 项失败：既有广播 fixture 在订阅前发出了事件，现改用已有 gate 并通过 agent 库全部 981 项；损坏数据库备份遇到 Windows 文件占用，未改生产逻辑，独立重跑该 suite 的 22 项通过。完整 workspace 正在重新验证，此处不将首次全量结果记作全绿。
 
@@ -110,3 +110,11 @@ Core 的格式、Clippy 和迁移不可变检查通过。首次 workspace 测试
 - GitHub `official-content` environment 已配置 `CONTENT_SIGNING_PRIVATE_KEY`，上传前使用 GitHub environment 公钥通过 libsodium sealed box 加密；不是仓库级 secret。
 - 环境仅允许 `main` **分支**（不允许同名 tag），必须由 `pigq` 审批，管理员不能跳过。当前采用单维护者审批，允许发起人本人审批，并非双人复核；增加独立审核人后再启用禁止自审。
 - 未触发内容发布 workflow，未创建 `content-stable`/`content-snapshots` 发布来代替未完成的媒体授权。发布前先将公钥随客户端交付，再使用匹配 key ID 签名；轮换同样先交付新公钥再切换 secret。
+
+### 实际 Windows standalone 产物验证（2026-10-24）
+
+已使用规范打包脚本生成并解包 `openh3-web-3.0.0-win-x86_64.tar.gz`，SHA256 为 `7192f1c91136d096ba6371c9a45c24d488d4525b6da640218ca072c1ab5af339`。随包 Core 为本次主仓库源码实际构建的 release `0.2.2`，SHA256 为 `9d5401b0c227797ba3664e346942ac9b573a7e8186957c769686f939f3753682`，与 Cargo 产物一致；不是旧二进制替代或已发布 Release 的证明。
+
+从真实 tarball 启动，在独立资料目录验证了生产 SPA、首次生成密码后登录、匿名拒绝、CSRF、8 个模型家族与 52 个模板、正式公钥指纹、内置离线回退、媒体摘要与 Range/HEAD、同步设置。重启同一程序后，原密码、设置、会话标记和用户模型哨兵文件均保留。此处验证的是 standalone 进程重启持久化，**不是已安装客户端从旧版自动覆盖升级**。
+
+解包后的 2496 个文件逐字节扫描未检出本次正式私钥的 PEM、DER、Ed25519 seed 或 GitHub token 格式；196 个许可类文件已生成清单，不等于媒体授权和完整第三方再分发材料已通过。未在维护者实际安装或资料目录执行安装器，也未发布这些验收产物。
