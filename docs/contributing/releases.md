@@ -96,8 +96,17 @@ node scripts/content-catalog/preview.mjs --after .runtime/content-preview/catalo
 
 以上历史审查针对旧双仓库树，不能作为当前主线或正式发布的结论。当前基于 `pigq/OpenH3` 主线 `787fd3e86` 集成，保留全部 8 个模型家族及原有真实预览/播放交互，目录更新不改写用户安装的模型。内置导出同步覆盖这 8 个家族与 52 个模板。
 
-正式内容签名密钥、媒体再分发授权和上架审批资料尚未准备。客户端保持随包内置库及未配置的签名同步状态，不以测试密钥、空发布或虚构许可代替验收。配套 release Core、实际安装覆盖升级及平台范围仍须逐项验证；通过源码测试不代表正式发布验收完成。
+正式内容签名密钥已于 2026-10-24 根据维护者授权生成并配置，详见下节。媒体再分发授权和上架审批资料尚未准备，尚未发布官方远端内容，客户端继续使用随包内置库。签名密钥就绪不代替内容授权、配套 release Core、实际安装覆盖升级及各平台发行验收；通过源码测试不代表正式发布验收完成。
 
 当前集成已通过 Desktop 的 lint（0 error）、格式、TypeScript、i18n 与完整 Vitest 门禁：618 个 suite、5853 项通过，另有 1 个 suite、9 项按既有条件跳过。跨进程内容测试使用真实 Core 执行，未以默认跳过代替通过。运行使用现有 CI 配置并限制进程为 4 个逻辑 CPU，未增加测试超时或削弱断言。Vite 生产构建亦已通过。
 
 Core 的格式、Clippy 和迁移不可变检查通过。首次 workspace 测试仍有 2 项失败：既有广播 fixture 在订阅前发出了事件，现改用已有 gate 并通过 agent 库全部 981 项；损坏数据库备份遇到 Windows 文件占用，未改生产逻辑，独立重跑该 suite 的 22 项通过。完整 workspace 正在重新验证，此处不将首次全量结果记作全绿。
+
+### 正式内容签名配置（2026-10-24）
+
+- 活跃 key ID：`openh3-content-20261024`；算法 Ed25519，公钥为 SPKI PEM，仅公钥随源码和客户端交付。
+- 公钥 SPKI DER 的 SHA256：`1decb9f5ca9eac04dc41c3509dd78e22ea5c7e3ee51ce86064f486607f9cbf41`。
+- 私钥以 PKCS8 PEM 保存在维护者本机受限目录；关闭目录继承，仅当前 Windows 用户与 SYSTEM 可访问。私钥不进入 Git、日志或安装包，另行保管加密离线备份。
+- GitHub `official-content` environment 已配置 `CONTENT_SIGNING_PRIVATE_KEY`，上传前使用 GitHub environment 公钥通过 libsodium sealed box 加密；不是仓库级 secret。
+- 环境仅允许 `main` **分支**（不允许同名 tag），必须由 `pigq` 审批，管理员不能跳过。当前采用单维护者审批，允许发起人本人审批，并非双人复核；增加独立审核人后再启用禁止自审。
+- 未触发内容发布 workflow，未创建 `content-stable`/`content-snapshots` 发布来代替未完成的媒体授权。发布前先将公钥随客户端交付，再使用匹配 key ID 签名；轮换同样先交付新公钥再切换 secret。

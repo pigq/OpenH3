@@ -12,10 +12,11 @@ on:
       key_id:
         description: ID in the client-bundled trusted keyring
         required: true
+        default: openh3-content-20261024
       min_client_version:
         description: Minimum compatible client version
         required: true
-        default: '2.2.2'
+        default: '3.0.0'
       rollback_reason:
         description: Optional audited reason for intentionally re-publishing an older payload with a higher sequence
         required: false
