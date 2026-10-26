@@ -246,7 +246,7 @@ jobs:
     with:
       ref: ${{ github.sha }}
       matrix: '{"include":[{"platform":"windows-x64","os":"windows-2022","arch":"x64","artifact-name":"windows-x64-installed-upgrade-build","command":"node scripts/build-with-builder.js x64 --win --x64"}]}'
-      skip_code_quality: false
+      skip_code_quality: ${{ inputs.skip_code_quality }}
       append_commit_hash: false
       upload_installers_only: false
       acceptance_provenance: true
