@@ -131,5 +131,12 @@
     "changed": "Alterado",
     "removed": "Retirado",
     "linkUnavailable": "O modelo vinculado foi retirado, sua revisão não corresponde ou é necessário atualizar o cliente. Esta obra é apenas para visualização."
-  }
+  },
+  "sidebarAvailable": "Atualização disponível",
+  "sidebarDownloading": "Baixando {{percent}}%",
+  "sidebarRestart": "Reiniciar e atualizar",
+  "sidebarRetry": "Tentar novamente",
+  "openInstaller": "Instalação manual (alternativa)",
+  "confirmInstall": "Confirmar instalação",
+  "confirmInstallDescription": "O aplicativo será fechado para instalar a atualização. As tarefas em andamento podem ser interrompidas. Conclua seu trabalho antes de continuar."
 }

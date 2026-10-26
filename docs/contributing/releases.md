@@ -81,3 +81,25 @@ node scripts/content-catalog/preview.mjs --after .runtime/content-preview/catalo
 - `sourceConfigured` 只说明客户端有受信任公钥，不代表远端频道已发布或媒体已获授权。当前媒体再分发授权及逐项上架审批材料尚未准备，本次不发布官方远端内容；频道未发布、请求失败或验签失败时保留随包内置库或上一份已验证缓存，不退化为无签名同步。
 - 内置库保留全部 8 个受支持模型家族、52 个模板和原有真实预览/播放；模型由用户自行下载和管理。作品卡区仅接受官方模板与审核上架展示，用户生成结果不混入官方目录。
 - 正式私钥离线加密备份及真实旧版 Windows 覆盖升级验收仍须完成。原完整 feature 树的历史测试和产物记录不作为本次独立内容分支已通过验收的证据；新分支须重新构建配套 Core 并执行跨进程内容测试。
+
+## 左下角更新入口（下一个客户端版本）
+
+桌面客户端启动后延迟 30 秒静默检查，此后每 6 小时检查；已有下载缓存可先验证并恢复。发现新版本后在设置旁显示更新入口，用户点击才下载，下载完成后确认安装。普通退出不会自动安装。WebUI 不挂载桌面更新控制器。
+
+发布时须验证当前配置更新源能提供匹配版本、平台、架构的元数据与安装包，校验信息必须一致。无兼容安装包时回退到发布页，不显示无效下载操作。安装包回退明确显示“打开安装包”，不承诺自动重启。
+
+验收至少覆盖：无更新、发现更新但不弹窗、下载进度与失败重试、关闭详情保留入口、确认取消不安装、确认后升级、撤回版本后入口消失。单元测试通过不等同于安装包升级成功；仍需独立 Windows 安装环境实测。
+
+### 确认后的静默覆盖安装
+
+正常自动更新调用 `quitAndInstall(true, true)`：Windows 安装器接收 `--updated /S --force-run`，在原安装位置替换程序并重启，不展示安装向导。首次安装仍保留向导；普通退出仍不安装更新。提权安装仍可能出现系统授权窗口。
+
+NSIS 明确配置 `deleteAppDataOnUninstall: false`，保留现有安装 GUID 和用户资料目录，不通过卸载清数据再安装实现更新。自动更新不可用时，完整安装包入口标为“手动安装（备用）”，不冒充自动更新。
+
+回归检查使用已安装的 NsisUpdater 实现验证实际启动参数，并验证停后端后才交接安装器。仍须在独立 Windows 测试用户中，从旧安装包升级至新包，核对配置、数据库、历史记录与文件，不能用单元测试代替此步骤。
+
+### Desktop update source
+
+Desktop updates use only GitHub Releases in `pigq/OpenH3`. Publish the draft release after uploading installers, blockmaps and all platform/architecture `latest*.yml` files. The native GitHub updater reads these manifests; manual checks use the GitHub Releases API and preserve asset download URLs. Drafts are excluded, prereleases require opt-in, and older versions are not installed. GitHub failures can be retried; there is no upstream CDN fallback.
+
+The normal flow is: download in the background → confirm restart and update → silent replacement and restart. Existing configuration and user data are retained. Manual installer fallback remains a separately labelled action.

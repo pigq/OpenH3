@@ -222,6 +222,24 @@ describe('release packaging configuration', () => {
     expect(workflow).toContain('steps.existing-release.outputs.published');
   });
 
+  it('does not bring the installer wizard forward for silent updates', () => {
+    const source = readProjectFile('resources/windows/installer-update-verify.nsh');
+    const macro = source.split('!macro AIONUI_BRING_UPDATED_INSTALLER_TO_FRONT')[1].split('!macroend')[0];
+    expect(macro).toContain('${IfNot} ${Silent}');
+    expect(macro.indexOf('BringToFront')).toBeGreaterThan(macro.indexOf('${IfNot} ${Silent}'));
+  });
+
+  it('preserves user data and installation identity for in-place Windows updates', () => {
+    const config = readProjectFile('packages/desktop/electron-builder.yml');
+    const nsis = yamlBlock(config, 'nsis');
+    expect(nsis).toContain('deleteAppDataOnUninstall: false');
+    expect(nsis).toContain('guid: f3bfde38-8429-545c-a4e9-a078d87dee6c');
+    expect(nsis).toContain('oneClick: false');
+    const updater = readProjectFile('packages/desktop/src/process/services/autoUpdaterService.ts');
+    expect(updater).toContain('autoUpdater.autoInstallOnAppQuit = false');
+    expect(updater).not.toContain("app.setPath('userData'");
+  });
+
   it('keeps mac zip artifacts enabled', () => {
     const config = readProjectFile('packages/desktop/electron-builder.yml');
     const macBlock = yamlBlock(config, 'mac');

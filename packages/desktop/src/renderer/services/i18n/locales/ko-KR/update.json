@@ -131,5 +131,12 @@
     "changed": "변경",
     "removed": "게시 중단",
     "linkUnavailable": "연결된 템플릿의 게시가 중단되었거나 리비전이 일치하지 않거나 클라이언트 업데이트가 필요합니다. 이 작품은 보기 전용입니다."
-  }
+  },
+  "sidebarAvailable": "업데이트 가능",
+  "sidebarDownloading": "다운로드 중 {{percent}}%",
+  "sidebarRestart": "재시작 및 업데이트",
+  "sidebarRetry": "업데이트 재시도",
+  "openInstaller": "수동 설치 (대체)",
+  "confirmInstall": "설치 확인",
+  "confirmInstallDescription": "업데이트 설치를 위해 앱이 종료됩니다. 실행 중인 작업이 중단될 수 있습니다. 작업을 완료한 후 계속하세요."
 }

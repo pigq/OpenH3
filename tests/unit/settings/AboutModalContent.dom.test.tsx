@@ -62,8 +62,14 @@ vi.mock('@/renderer/components/settings/SettingsModal/contents/FeedbackReportMod
   default: () => null,
 }));
 
+import { initialUpdateNotificationState } from '@/renderer/components/settings/updateNotificationState';
 import AboutModalContent from '@/renderer/components/settings/SettingsModal/contents/AboutModalContent';
-import { setUpdateReadyState } from '@/renderer/components/settings/updateReadyState';
+import {
+  UpdateInstallConfirmation,
+  dismissUpdateInstallConfirmation,
+  setUpdateReadyState,
+  setSidebarUpdateState,
+} from '@/renderer/components/settings/updateReadyState';
 
 describe('AboutModalContent update ready state', () => {
   beforeEach(() => {
@@ -78,13 +84,33 @@ describe('AboutModalContent update ready state', () => {
 
   afterEach(() => {
     setUpdateReadyState({ ready: false, version: '' });
+    setSidebarUpdateState(null);
+    dismissUpdateInstallConfirmation();
     cleanup();
     vi.clearAllMocks();
     vi.unstubAllGlobals();
   });
 
+  it('does not start another check while the update is downloading', () => {
+    setSidebarUpdateState({ ...initialUpdateNotificationState, status: 'downloading' });
+    render(
+      <>
+        <AboutModalContent />
+        <UpdateInstallConfirmation />
+      </>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'settings.checkForUpdates' }));
+    expect(mocks.autoUpdateCheckMock).not.toHaveBeenCalled();
+    expect(mocks.updateCheckMock).not.toHaveBeenCalled();
+  });
+
   it('replaces check update with ready-to-install when an update package is ready', async () => {
-    render(<AboutModalContent />);
+    render(
+      <>
+        <AboutModalContent />
+        <UpdateInstallConfirmation />
+      </>
+    );
 
     expect(screen.getByRole('button', { name: 'settings.checkForUpdates' })).toBeInTheDocument();
 
@@ -100,6 +126,8 @@ describe('AboutModalContent update ready state', () => {
     });
 
     fireEvent.click(await screen.findByRole('button', { name: '2.1.14 已就绪, 立即安装' }));
+    expect(mocks.quitAndInstallMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('update.confirmInstall'));
 
     expect(mocks.quitAndInstallMock).toHaveBeenCalledTimes(1);
   });
@@ -113,7 +141,12 @@ describe('AboutModalContent update ready state', () => {
         })
     );
 
-    render(<AboutModalContent />);
+    render(
+      <>
+        <AboutModalContent />
+        <UpdateInstallConfirmation />
+      </>
+    );
 
     await act(async () => {
       window.dispatchEvent(
@@ -127,6 +160,8 @@ describe('AboutModalContent update ready state', () => {
     });
 
     fireEvent.click(await screen.findByRole('button', { name: '2.1.14 已就绪, 立即安装' }));
+    expect(mocks.quitAndInstallMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('update.confirmInstall'));
 
     expect(await screen.findByRole('button', { name: '准备安装...' })).toBeDisabled();
     expect(mocks.quitAndInstallMock).toHaveBeenCalledTimes(1);
@@ -159,7 +194,12 @@ describe('AboutModalContent update ready state', () => {
     const availableListener = vi.fn();
     window.addEventListener('aionui-update-available', availableListener);
 
-    render(<AboutModalContent />);
+    render(
+      <>
+        <AboutModalContent />
+        <UpdateInstallConfirmation />
+      </>
+    );
     fireEvent.click(screen.getByRole('button', { name: 'settings.checkForUpdates' }));
 
     await waitFor(() => {
@@ -177,7 +217,12 @@ describe('AboutModalContent update ready state', () => {
     const availableListener = vi.fn();
     window.addEventListener('aionui-update-available', availableListener);
 
-    render(<AboutModalContent />);
+    render(
+      <>
+        <AboutModalContent />
+        <UpdateInstallConfirmation />
+      </>
+    );
     fireEvent.click(screen.getByRole('button', { name: 'settings.checkForUpdates' }));
 
     await waitFor(() => {

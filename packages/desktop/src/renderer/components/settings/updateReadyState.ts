@@ -4,6 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { createElement, useSyncExternalStore } from 'react';
+import { Modal } from '@arco-design/web-react';
+import type { UpdateNotificationState } from './updateNotificationState';
+
 export const UPDATE_READY_STATE_EVENT = 'openh3-update-ready-state-changed';
 export const LEGACY_UPDATE_READY_STATE_EVENT = 'aionui-update-ready-state-changed';
 
@@ -43,4 +47,63 @@ export const subscribeUpdateReadyState = (listener: (state: UpdateReadyState) =>
     window.removeEventListener(UPDATE_READY_STATE_EVENT, handler);
     window.removeEventListener(LEGACY_UPDATE_READY_STATE_EVENT, handler);
   };
+};
+
+const sidebarListeners = new Set<() => void>();
+let sidebarState: UpdateNotificationState | null = null;
+export const SIDEBAR_UPDATE_ACTION_EVENT = 'openh3-sidebar-update-action';
+export const getSidebarUpdateState = () => sidebarState;
+export const setSidebarUpdateState = (state: UpdateNotificationState | null) => {
+  sidebarState = state;
+  sidebarListeners.forEach((listener) => listener());
+};
+export const subscribeSidebarUpdateState = (listener: () => void) => {
+  sidebarListeners.add(listener);
+  return () => {
+    sidebarListeners.delete(listener);
+  };
+};
+export const requestSidebarUpdateAction = () => window.dispatchEvent(new Event(SIDEBAR_UPDATE_ACTION_EVENT));
+
+type InstallConfirmation = {
+  labels: { title: string; content: string; okText: string; cancelText: string };
+  install: () => void;
+};
+let confirmation: InstallConfirmation | null = null;
+const confirmationListeners = new Set<() => void>();
+const notifyConfirmation = () => confirmationListeners.forEach((listener) => listener());
+export const dismissUpdateInstallConfirmation = () => {
+  confirmation = null;
+  notifyConfirmation();
+};
+/** All install entry points share one confirmation rendered within the app tree. */
+export const confirmUpdateInstall = (labels: InstallConfirmation['labels'], install: () => void) => {
+  if (confirmation) return;
+  confirmation = { labels, install };
+  notifyConfirmation();
+};
+const subscribeConfirmation = (listener: () => void) => {
+  confirmationListeners.add(listener);
+  return () => {
+    confirmationListeners.delete(listener);
+  };
+};
+export const UpdateInstallConfirmation = () => {
+  const current = useSyncExternalStore(subscribeConfirmation, () => confirmation);
+  if (!current) return null;
+  return createElement(
+    Modal,
+    {
+      visible: true,
+      title: current.labels.title,
+      okText: current.labels.okText,
+      cancelText: current.labels.cancelText,
+      onOk: () => {
+        dismissUpdateInstallConfirmation();
+        current.install();
+      },
+      onCancel: dismissUpdateInstallConfirmation,
+    },
+    current.labels.content
+  );
 };

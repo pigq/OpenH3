@@ -13,6 +13,48 @@ import {
 } from '@/renderer/components/settings/updateNotificationState';
 
 describe('updateNotificationReducer', () => {
+  it('adopts a deduplicated manual task only for the matching pending request', () => {
+    const pending = updateNotificationReducer(initialUpdateNotificationState, {
+      type: 'manualDownloadStarted',
+      downloadId: 'new-request',
+    }).state;
+    const attached = updateNotificationReducer(pending, {
+      type: 'manualDownloadReady',
+      requestId: 'new-request',
+      downloadId: 'existing-task',
+      filePath: '/tmp/update.exe',
+    }).state;
+    expect(attached.activeTask).toEqual({ kind: 'manual', id: 'existing-task' });
+    const completed = updateNotificationReducer(attached, {
+      type: 'manualProgress',
+      downloadId: 'existing-task',
+      status: 'completed',
+      progress: { percent: 100, transferred: 100, total: 100, speed: '' },
+      filePath: '/tmp/update.exe',
+    }).state;
+    expect(completed.status).toBe('downloaded');
+    const cancelled = updateNotificationReducer(pending, { type: 'cancelDownloadRequested' }).state;
+    expect(
+      updateNotificationReducer(cancelled, {
+        type: 'manualDownloadReady',
+        requestId: 'new-request',
+        downloadId: 'existing-task',
+        filePath: '/tmp/update.exe',
+      }).state
+    ).toBe(cancelled);
+    const otherRequest = updateNotificationReducer(pending, {
+      type: 'manualDownloadStarted',
+      downloadId: 'other-request',
+    }).state;
+    expect(
+      updateNotificationReducer(otherRequest, {
+        type: 'manualDownloadReady',
+        requestId: 'new-request',
+        downloadId: 'existing-task',
+        filePath: '/tmp/update.exe',
+      }).state
+    ).toBe(otherRequest);
+  });
   it('opens the notification when auto-update reports an available version', () => {
     const result = updateNotificationReducer(initialUpdateNotificationState, {
       type: 'autoStatusAvailable',

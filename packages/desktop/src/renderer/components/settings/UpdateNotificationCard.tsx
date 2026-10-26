@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { isElectronDesktop } from '@/renderer/utils/platform';
+import { UpdateInstallConfirmation } from './updateReadyState';
 import MarkdownView from '@/renderer/components/Markdown';
 import { useFeedback } from '@/renderer/hooks/context/FeedbackContext';
 import { Button, Modal, Progress } from '@arco-design/web-react';
@@ -169,7 +171,7 @@ const UpdateNotificationCard: React.FC = () => {
             {t('update.later')}
           </Button>
           <Button type='primary' size='small' className={ACTION_BTN_CLASS} onClick={actions.quitAndInstall}>
-            {t('update.restartNow')}
+            {state.downloadPath ? t('update.openInstaller') : t('update.restartNow')}
           </Button>
         </>
       );
@@ -241,7 +243,11 @@ const UpdateNotificationCard: React.FC = () => {
             {t('update.later')}
           </Button>
           <Button type='primary' size='small' className={ACTION_BTN_CLASS} onClick={actions.startDownload}>
-            {t('update.downloadButton')}
+            {state.autoUpdateAvailable
+              ? t('update.downloadButton')
+              : state.updateInfo?.recommendedAsset
+                ? t('update.manualInstall')
+                : t('update.goToRelease')}
           </Button>
         </>
       );
@@ -340,4 +346,12 @@ const UpdateNotificationCard: React.FC = () => {
   );
 };
 
-export default UpdateNotificationCard;
+export default function UpdateNotification() {
+  if (!isElectronDesktop()) return null;
+  return (
+    <>
+      <UpdateNotificationCard />
+      <UpdateInstallConfirmation />
+    </>
+  );
+}

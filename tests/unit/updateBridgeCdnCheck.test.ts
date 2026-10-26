@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/common/platform/bridge', () => ({
   bridge: {
@@ -87,28 +87,6 @@ afterAll(() => {
   Object.defineProperty(process, 'arch', { value: realArch, configurable: true });
 });
 
-const CDN_YML = `version: 2.1.45
-files:
-  - url: AionUi-2.1.45-mac-arm64.zip
-    size: 100
-  - url: AionUi-2.1.45-mac-arm64.dmg
-    size: 200
-path: AionUi-2.1.45-mac-arm64.zip
-releaseDate: '2026-07-31T14:45:19.381Z'
-`;
-
-const GITHUB_RELEASES = [
-  {
-    tag_name: 'v2.1.45',
-    name: 'v2.1.45',
-    body: 'changelog body',
-    html_url: 'https://github.com/iOfficeAI/AionUi/releases/tag/v2.1.45',
-    prerelease: false,
-    draft: false,
-    assets: [],
-  },
-];
-
 const getCheckHandler = async () => {
   vi.resetModules();
   const { initUpdateBridge } = await import('@process/bridge/updateBridge');
@@ -120,98 +98,64 @@ const getCheckHandler = async () => {
   return lastCall[0];
 };
 
-type FetchScenario = {
-  cdn?: () => Promise<Response> | Response;
-  github?: () => Promise<Response> | Response;
-};
-
-const stubFetch = (scenario: FetchScenario) => {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-    const url = String(input);
-    if (url.startsWith('https://static.aionui.com/releases/latest')) {
-      if (!scenario.cdn) throw new Error('unexpected CDN request');
-      return scenario.cdn();
-    }
-    if (url.startsWith('https://api.github.com/')) {
-      if (!scenario.github) throw new Error('github unreachable');
-      return scenario.github();
-    }
-    throw new Error(`unexpected fetch: ${url}`);
-  });
-  vi.stubGlobal('fetch', fetchMock);
-  return fetchMock;
-};
-
-const ymlResponse = (body: string) => new Response(body, { status: 200 });
-const jsonResponse = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
-
-describe('update.check CDN-first', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it('reports an update from the CDN manifest and attaches GitHub notes', async () => {
-    stubFetch({ cdn: () => ymlResponse(CDN_YML), github: () => jsonResponse(GITHUB_RELEASES) });
-    const handler = await getCheckHandler();
-    const res = await handler({});
-    expect(res.success).toBe(true);
-    expect(res.data?.updateAvailable).toBe(true);
-    expect(res.data?.latest?.version).toBe('2.1.45');
-    expect(res.data?.latest?.body).toBe('changelog body');
-    expect(res.data?.latest?.htmlUrl).toBe('https://github.com/iOfficeAI/AionUi/releases/tag/v2.1.45');
-    expect(res.data?.latest?.recommendedAsset?.url).toBe(
-      'https://static.aionui.com/releases/2.1.45/AionUi-2.1.45-mac-arm64.dmg'
+const release = (tag_name = 'v2.1.45', extra = {}) => ({
+  tag_name,
+  html_url: 'https://github.com/pigq/OpenH3/releases/tag/' + tag_name,
+  body: 'notes',
+  draft: false,
+  prerelease: false,
+  assets: [
+    {
+      name: 'OpenH3-mac-arm64.dmg',
+      browser_download_url: 'https://github.com/pigq/OpenH3/releases/download/' + tag_name + '/OpenH3-mac-arm64.dmg',
+      size: 12,
+    },
+  ],
+  ...extra,
+});
+describe('GitHub-only update checks', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const serve = (data: unknown, status = 200) =>
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(data), { status }))
     );
+  it('uses the fixed repository and original asset URL', async () => {
+    serve([release()]);
+    const result = await (await getCheckHandler())({ repo: 'other/repo' });
+    expect(result.success).toBe(true);
+    expect(result.data?.updateAvailable).toBe(true);
+    expect(result.data?.latest?.body).toBe('notes');
+    expect(result.data?.latest?.assets[0].url).toContain('/pigq/OpenH3/releases/download/v2.1.45/');
+    expect(result.data?.latest?.assets[0].fallbackUrl).toBeUndefined();
+    expect(fetch).toHaveBeenCalledWith('https://api.github.com/repos/pigq/OpenH3/releases', expect.anything());
   });
-
-  it('succeeds without notes when GitHub is unreachable', async () => {
-    stubFetch({ cdn: () => ymlResponse(CDN_YML) });
-    const handler = await getCheckHandler();
-    const res = await handler({});
-    expect(res.success).toBe(true);
-    expect(res.data?.updateAvailable).toBe(true);
-    expect(res.data?.latest?.body).toBeUndefined();
-    expect(res.data?.latest?.htmlUrl).toBe('');
-    expect(res.data?.latest?.assets.length).toBeGreaterThan(0);
+  it('filters drafts, invalid tags and prereleases and sorts semver', async () => {
+    serve([
+      release('v9.0.0', { draft: true }),
+      release('invalid'),
+      release('v3.0.0-beta.1', { prerelease: true }),
+      release('v2.1.41'),
+      release(),
+    ]);
+    const result = await (await getCheckHandler())({});
+    expect(result.data?.latest?.version).toBe('2.1.45');
   });
-
-  it('ignores GitHub releases that do not match the CDN version', async () => {
-    stubFetch({
-      cdn: () => ymlResponse(CDN_YML),
-      github: () => jsonResponse([{ ...GITHUB_RELEASES[0], tag_name: 'v9.9.9' }]),
-    });
-    const handler = await getCheckHandler();
-    const res = await handler({});
-    expect(res.success).toBe(true);
-    expect(res.data?.latest?.body).toBeUndefined();
+  it('allows opted-in prereleases', async () => {
+    serve([release(), release('v3.0.0-beta.1', { prerelease: true })]);
+    expect((await (await getCheckHandler())({ includePrerelease: true })).data?.latest?.version).toBe('3.0.0-beta.1');
   });
-
-  it('reports up-to-date when CDN version equals current version', async () => {
-    stubFetch({
-      cdn: () => ymlResponse(CDN_YML.replace(/2\.1\.45/g, '2.1.40')),
-      github: () => jsonResponse([]),
-    });
-    const handler = await getCheckHandler();
-    const res = await handler({});
-    expect(res.success).toBe(true);
-    expect(res.data?.updateAvailable).toBe(false);
+  it('does not downgrade', async () => {
+    serve([release('v1.0.0')]);
+    expect((await (await getCheckHandler())({})).data?.updateAvailable).toBe(false);
   });
-
-  it('fails the check when the CDN manifest request fails', async () => {
-    stubFetch({ cdn: () => new Response('nope', { status: 502 }), github: () => jsonResponse(GITHUB_RELEASES) });
-    const handler = await getCheckHandler();
-    const res = await handler({});
-    expect(res.success).toBe(false);
+  it('handles empty releases', async () => {
+    serve([]);
+    expect((await (await getCheckHandler())({})).data?.updateAvailable).toBe(false);
   });
-
-  it('fails the check when the CDN manifest is malformed', async () => {
-    stubFetch({ cdn: () => ymlResponse('not: [valid'), github: () => jsonResponse(GITHUB_RELEASES) });
-    const handler = await getCheckHandler();
-    const res = await handler({});
-    expect(res.success).toBe(false);
+  it('fails without another source when GitHub fails', async () => {
+    serve({}, 503);
+    expect((await (await getCheckHandler())({})).success).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 });

@@ -131,5 +131,12 @@
     "changed": "Changed",
     "removed": "Withdrawn",
     "linkUnavailable": "The linked template was withdrawn, its revision does not match, or a client update is required. This work is view-only."
-  }
+  },
+  "sidebarAvailable": "Update available",
+  "sidebarDownloading": "Downloading {{percent}}%",
+  "sidebarRestart": "Restart & update",
+  "sidebarRetry": "Retry update",
+  "openInstaller": "Manual install (fallback)",
+  "confirmInstall": "Confirm installation",
+  "confirmInstallDescription": "The app will close to install the update. Running tasks may be interrupted. Finish your work before continuing."
 }

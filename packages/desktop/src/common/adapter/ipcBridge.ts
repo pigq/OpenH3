@@ -740,7 +740,7 @@ export const application = {
 // ---------------------------------------------------------------------------
 
 export const update = {
-  open: bridge.buildEmitter<{ source?: 'menu' | 'about' | 'tray' }>('update.open'),
+  open: bridge.buildEmitter<{ source?: 'menu' | 'about' | 'tray' | 'startup' }>('update.open'),
   check: bridge.buildProvider<IBridgeResponse<UpdateCheckResult>, UpdateCheckRequest>('update.check'),
   consumeInstallerLastFailure: bridge.buildProvider<IBridgeResponse<InstallerLastFailureMarker | null>, void>(
     'update.installer-last-failure.consume'

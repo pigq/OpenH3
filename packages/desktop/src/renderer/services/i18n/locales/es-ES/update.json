@@ -131,5 +131,12 @@
     "changed": "Modificado",
     "removed": "Retirado",
     "linkUnavailable": "La plantilla vinculada se retiró, su revisión no coincide o requiere actualizar el cliente. Esta obra solo se puede ver."
-  }
+  },
+  "sidebarAvailable": "Actualización disponible",
+  "sidebarDownloading": "Descargando {{percent}}%",
+  "sidebarRestart": "Reiniciar y actualizar",
+  "sidebarRetry": "Reintentar actualización",
+  "openInstaller": "Instalación manual (alternativa)",
+  "confirmInstall": "Confirmar instalación",
+  "confirmInstallDescription": "La aplicación se cerrará para instalar la actualización. Las tareas en curso pueden interrumpirse. Termine su trabajo antes de continuar."
 }

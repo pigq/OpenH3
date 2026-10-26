@@ -6,9 +6,9 @@
 
 export interface GitHubReleaseAsset {
   name: string;
-  /** Primary download URL — rewritten to CDN for faster download. */
+  /** Original GitHub release asset download URL. */
   url: string;
-  /** Original GitHub download URL — used as fallback when CDN fails. */
+  /** Optional alternative URL; subject to the same GitHub host allowlist. */
   fallbackUrl?: string;
   size: number;
   contentType?: string;
@@ -35,7 +35,7 @@ export interface UpdateCheckResult {
 
 export interface UpdateCheckRequest {
   includePrerelease?: boolean;
-  /** Defaults to pigq/OpenH3 when omitted. */
+  /** Legacy field; the main process pins all checks to pigq/OpenH3. */
   repo?: string;
 }
 
@@ -43,7 +43,7 @@ export interface UpdateDownloadRequest {
   /** Optional caller-provided id so renderer can match progress events immediately. */
   downloadId?: string;
   url: string;
-  /** Fallback URL tried when the primary URL fails (e.g. CDN down). */
+  /** Optional allowlisted fallback URL tried when the primary URL fails. */
   fallbackUrl?: string;
   file_name?: string;
 }

@@ -131,5 +131,12 @@
     "changed": "変更",
     "removed": "公開終了",
     "linkUnavailable": "関連テンプレートが公開終了、リビジョン不一致、またはクライアントの更新が必要です。この作品は閲覧専用です。"
-  }
+  },
+  "sidebarAvailable": "更新あり",
+  "sidebarDownloading": "ダウンロード中 {{percent}}%",
+  "sidebarRestart": "再起動して更新",
+  "sidebarRetry": "更新を再試行",
+  "openInstaller": "手動インストール（代替）",
+  "confirmInstall": "インストールを確認",
+  "confirmInstallDescription": "更新のためアプリを終了します。実行中のタスクが中断される場合があります。作業を完了してから続行してください。"
 }

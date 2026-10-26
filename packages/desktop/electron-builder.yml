@@ -139,6 +139,8 @@ win:
 nsis:
   # Preserve the existing installation identity while separating taskbar grouping.
   guid: f3bfde38-8429-545c-a4e9-a078d87dee6c
+  # Keep profiles and databases outside the application replacement lifecycle.
+  deleteAppDataOnUninstall: false
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true

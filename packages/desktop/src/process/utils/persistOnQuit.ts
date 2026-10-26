@@ -29,9 +29,15 @@ const ensureHandlerInstalled = (): void => {
     if (pending.size === 0) return;
     flushing = true;
     event.preventDefault();
-    Promise.allSettled(pending).finally(() => {
+    void (async () => {
+      // Writes registered while a batch settles must also finish before retrying quit.
+      while (pending.size > 0) {
+        await Promise.allSettled(pending);
+      }
+      // A reentrant before-quit listener may register another batch.
+      flushing = false;
       app.quit();
-    });
+    })();
   });
 };
 

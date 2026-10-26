@@ -4,10 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useSyncExternalStore } from 'react';
+import {
+  getSidebarUpdateState,
+  subscribeSidebarUpdateState,
+  requestSidebarUpdateAction,
+} from '@/renderer/components/settings/updateReadyState';
+import { isElectronDesktop } from '@/renderer/utils/platform';
 import { useTranslation } from 'react-i18next';
-import { Tooltip } from '@arco-design/web-react';
-import { ArrowCircleLeft, CloseOne, Moon, SettingTwo, SunOne } from '@icon-park/react';
+import { Button, Tooltip } from '@arco-design/web-react';
+import { ArrowCircleLeft, CloseOne, Download, Moon, SettingTwo, SunOne } from '@icon-park/react';
 import classNames from 'classnames';
 import { iconColors } from '@renderer/styles/colors';
 import type { SiderTooltipProps } from '@renderer/utils/ui/siderTooltip';
@@ -36,6 +42,22 @@ const SiderFooter: React.FC<SiderFooterProps> = ({
   onLogoutClick,
 }) => {
   const { t } = useTranslation();
+  const update = useSyncExternalStore(subscribeSidebarUpdateState, getSidebarUpdateState);
+  const showUpdate =
+    isElectronDesktop() &&
+    update &&
+    ['available', 'downloading', 'downloaded', 'preparing-install', 'error'].includes(update.status) &&
+    Boolean(update.autoUpdateInfo?.version || update.updateInfo?.version);
+  const updateLabel =
+    update?.status === 'downloading'
+      ? t('update.sidebarDownloading', { percent: update.progress.percent })
+      : update?.status === 'downloaded'
+        ? t(update.downloadPath ? 'update.openInstaller' : 'update.sidebarRestart')
+        : update?.status === 'preparing-install'
+          ? t('update.preparingInstall')
+          : update?.status === 'error'
+            ? t('update.sidebarRetry')
+            : t(update?.autoUpdateAvailable ? 'update.sidebarAvailable' : 'update.manualInstall');
 
   const settingsIcon = isSettings ? (
     <ArrowCircleLeft
@@ -79,6 +101,42 @@ const SiderFooter: React.FC<SiderFooterProps> = ({
             </span>
           </div>
         </Tooltip>
+        {showUpdate && (
+          <Tooltip
+            {...siderTooltipProps}
+            content={updateLabel + ' · ' + (update.autoUpdateInfo?.version || update.updateInfo?.version)}
+            position='top'
+          >
+            <Button
+              type='text'
+              size='small'
+              aria-label={updateLabel}
+              disabled={update.status === 'preparing-install'}
+              onClick={requestSidebarUpdateAction}
+              className={classNames(
+                'shrink-0 !h-34px !rounded-8px !text-[rgb(var(--primary-6))]',
+                collapsed ? '!w-full' : '!max-w-140px !px-8px'
+              )}
+              icon={
+                <span className='relative inline-flex'>
+                  <Download size='16' />
+                  {update.status === 'available' && (
+                    <span
+                      aria-hidden='true'
+                      className='absolute -top-2px -end-2px w-5px h-5px rd-full bg-[rgb(var(--primary-6))]'
+                    />
+                  )}
+                </span>
+              }
+            >
+              {!collapsed && (
+                <span className='block truncate' aria-live='polite'>
+                  {updateLabel}
+                </span>
+              )}
+            </Button>
+          </Tooltip>
+        )}
         {showLogout && onLogoutClick && (
           <Tooltip {...siderTooltipProps} content={t('settings.googleLogout')} position='right'>
             <div

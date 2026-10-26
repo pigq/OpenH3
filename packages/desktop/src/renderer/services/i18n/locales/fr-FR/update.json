@@ -131,5 +131,12 @@
     "changed": "Modifié",
     "removed": "Retiré",
     "linkUnavailable": "Le modèle associé a été retiré, sa révision ne correspond pas ou une mise à jour du client est nécessaire. Cette œuvre est uniquement consultable."
-  }
+  },
+  "sidebarAvailable": "Mise à jour",
+  "sidebarDownloading": "Téléchargement {{percent}}%",
+  "sidebarRestart": "Redémarrer et mettre à jour",
+  "sidebarRetry": "Réessayer",
+  "openInstaller": "Installation manuelle (secours)",
+  "confirmInstall": "Confirmer l’installation",
+  "confirmInstallDescription": "L’application va se fermer pour installer la mise à jour. Les tâches en cours peuvent être interrompues. Terminez votre travail avant de continuer."
 }

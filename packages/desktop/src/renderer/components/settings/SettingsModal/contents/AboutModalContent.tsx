@@ -23,6 +23,9 @@ import { IS_DISCONTINUED_BUILD } from '@/renderer/utils/discontinuedBuild';
 import { OPEN_MIGRATION_DIALOG_EVENT } from '@/renderer/components/settings/UpdateMigrationDialog';
 import openh3Logo from '@/renderer/assets/logos/brand/openh3-logo.png';
 import {
+  confirmUpdateInstall,
+  getSidebarUpdateState,
+  requestSidebarUpdateAction,
   getUpdateReadyState,
   setUpdateReadyState,
   subscribeUpdateReadyState,
@@ -80,18 +83,35 @@ const AboutModalContent: React.FC = () => {
 
     if (updateReadyState.ready) {
       if (updateReadyState.preparing) return;
-      if (updateReadyState.filePath) {
-        void ipcBridge.shell.openFile.invoke(updateReadyState.filePath);
-        return;
-      }
-      setUpdateReadyState({ ...updateReadyState, preparing: true });
-      void ipcBridge.autoUpdate.quitAndInstall.invoke().catch(() => {
-        Message.error(t('update.errors.prepareInstallFailed'));
-        setUpdateReadyState({ ...updateReadyState, preparing: false });
-      });
+      confirmUpdateInstall(
+        {
+          title: t('update.readyToInstall'),
+          content: t('update.confirmInstallDescription'),
+          okText: t('update.confirmInstall'),
+          cancelText: t('update.cancel'),
+        },
+        () => {
+          if (updateReadyState.filePath) {
+            void ipcBridge.shell.openFile
+              .invoke(updateReadyState.filePath)
+              .catch(() => Message.error(t('update.errors.prepareInstallFailed')));
+            return;
+          }
+          setUpdateReadyState({ ...updateReadyState, preparing: true });
+          void ipcBridge.autoUpdate.quitAndInstall.invoke().catch(() => {
+            Message.error(t('update.errors.prepareInstallFailed'));
+            setUpdateReadyState({ ...updateReadyState, preparing: false });
+          });
+        }
+      );
       return;
     }
 
+    const activeUpdate = getSidebarUpdateState();
+    if (activeUpdate?.status === 'downloading' || activeUpdate?.status === 'preparing-install') {
+      requestSidebarUpdateAction();
+      return;
+    }
     if (checking) return;
     setChecking(true);
     try {

@@ -97,6 +97,7 @@ export type UpdateNotificationEvent =
     }
   | {
       type: 'checkAvailable';
+      silent?: boolean;
       currentVersion: string;
       updateInfo: UpdateReleaseInfo | null;
       releasePageUrl: string;
@@ -105,6 +106,7 @@ export type UpdateNotificationEvent =
     }
   | {
       type: 'checkUpToDate';
+      silent?: boolean;
       currentVersion: string;
       updateInfo: UpdateReleaseInfo | null;
       releasePageUrl: string;
@@ -131,6 +133,7 @@ export type UpdateNotificationEvent =
     }
   | {
       type: 'manualDownloadReady';
+      requestId: string;
       downloadId: string;
       filePath: string;
     }
@@ -280,7 +283,7 @@ export const updateNotificationReducer = (
       return {
         state: {
           ...state,
-          visible: true,
+          visible: event.silent ? state.visible : true,
           status: 'available',
           currentVersion: event.currentVersion,
           updateInfo: event.updateInfo,
@@ -299,8 +302,11 @@ export const updateNotificationReducer = (
       return {
         state: {
           ...state,
-          visible: true,
+          visible: event.silent ? state.visible : true,
           status: 'upToDate',
+          autoUpdateAvailable: false,
+          autoUpdateInfo: null,
+          downloadPath: '',
           currentVersion: event.currentVersion,
           updateInfo: event.updateInfo,
           releasePageUrl: event.releasePageUrl,
@@ -426,6 +432,7 @@ export const updateNotificationReducer = (
         effects: [],
       };
     case 'manualDownloadReady':
+      if (state.activeTask?.kind !== 'manual' || state.activeTask.id !== event.requestId) return { state, effects: [] };
       return {
         state: {
           ...state,

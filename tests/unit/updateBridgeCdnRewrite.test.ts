@@ -6,6 +6,33 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+it('never recommends an installer for another OS or an unqualified archive', async () => {
+  const { pickRecommendedAsset } = await import('@/process/bridge/updateBridge');
+  const asset = (name: string) => ({
+    name,
+    url: `https://github.com/pigq/OpenH3/releases/download/v3.0.0/${name}`,
+    size: 1,
+  });
+  for (const platform of ['win32', 'darwin', 'linux'] as const) {
+    const incompatible =
+      platform === 'win32'
+        ? ['OpenH3-mac-x64.zip', 'OpenH3-mac-x64.dmg']
+        : ['OpenH3-win-x64.exe', 'OpenH3-win-x64.zip'];
+    expect(
+      pickRecommendedAsset([...incompatible.map(asset), asset('source.zip')], { platform, arch: 'x64' })
+    ).toBeUndefined();
+  }
+  expect(pickRecommendedAsset([asset('OpenH3-3.0.0.exe')], { platform: 'win32', arch: 'x64' })?.name).toBe(
+    'OpenH3-3.0.0.exe'
+  );
+  expect(pickRecommendedAsset([asset('OpenH3-3.0.0.dmg')], { platform: 'darwin', arch: 'arm64' })?.name).toBe(
+    'OpenH3-3.0.0.dmg'
+  );
+  expect(pickRecommendedAsset([asset('OpenH3-linux-x64.zip')], { platform: 'linux', arch: 'x64' })?.name).toBe(
+    'OpenH3-linux-x64.zip'
+  );
+});
+
 vi.mock('@/common/platform/bridge', () => ({
   bridge: {
     buildProvider: vi.fn(() => {
@@ -71,28 +98,26 @@ const makeGitHubReleaseResponse = () => [
     tag_name: 'v1.9.22',
     name: 'v1.9.22',
     body: 'release notes',
-    html_url: 'https://github.com/iOfficeAI/AionUi/releases/tag/v1.9.22',
+    html_url: 'https://github.com/pigq/OpenH3/releases/tag/v1.9.22',
     published_at: '2026-04-29T00:00:00Z',
     prerelease: false,
     draft: false,
     assets: [
       {
         name: 'AionUi-1.9.22-mac-arm64.dmg',
-        browser_download_url:
-          'https://github.com/iOfficeAI/AionUi/releases/download/v1.9.22/AionUi-1.9.22-mac-arm64.dmg',
+        browser_download_url: 'https://github.com/pigq/OpenH3/releases/download/v1.9.22/AionUi-1.9.22-mac-arm64.dmg',
         size: 123,
         content_type: 'application/x-apple-diskimage',
       },
       {
         name: 'AionUi-1.9.22-win-x64.exe',
-        browser_download_url: 'https://github.com/iOfficeAI/AionUi/releases/download/v1.9.22/AionUi-1.9.22-win-x64.exe',
+        browser_download_url: 'https://github.com/pigq/OpenH3/releases/download/v1.9.22/AionUi-1.9.22-win-x64.exe',
         size: 456,
         content_type: 'application/vnd.microsoft.portable-executable',
       },
       {
         name: 'AionUi-1.9.22-linux-amd64.deb',
-        browser_download_url:
-          'https://github.com/iOfficeAI/AionUi/releases/download/v1.9.22/AionUi-1.9.22-linux-amd64.deb',
+        browser_download_url: 'https://github.com/pigq/OpenH3/releases/download/v1.9.22/AionUi-1.9.22-linux-amd64.deb',
         size: 789,
       },
     ],
@@ -134,26 +159,10 @@ const makeDeferred = () => {
   return { promise, resolve, reject };
 };
 
-// The check flow is CDN-first: the channel yml is the authoritative source of
-// version + assets, GitHub only enriches release notes. Serve both hosts.
-const CDN_CHANNEL_YML = `version: 1.9.22
-files:
-  - url: AionUi-1.9.22-mac-arm64.dmg
-    size: 123
-  - url: AionUi-1.9.22-win-x64.exe
-    size: 456
-  - url: AionUi-1.9.22-linux-amd64.deb
-    size: 789
-path: AionUi-1.9.22-mac-arm64.dmg
-releaseDate: '2026-04-29T00:00:00Z'
-`;
-
 const stubCdnAndGitHubFetch = () => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url.startsWith('https://static.aionui.com/releases/latest')) {
-      return new Response(CDN_CHANNEL_YML, { status: 200 });
-    }
+
     if (url.startsWith('https://api.github.com/')) {
       return new Response(JSON.stringify(makeGitHubReleaseResponse()), { status: 200 });
     }
@@ -163,17 +172,17 @@ const stubCdnAndGitHubFetch = () => {
   return fetchMock;
 };
 
-describe('updateBridge CDN URL rewriting', () => {
+describe('updateBridge GitHub asset URLs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('rewrites asset.url to the CDN path and keeps GitHub URL in fallbackUrl', async () => {
+  it('preserves GitHub asset URLs without a CDN fallback', async () => {
     const fetchMock = stubCdnAndGitHubFetch();
 
     try {
       const handler = await getCheckHandler();
-      const result = await handler({ repo: 'iOfficeAI/AionUi' });
+      const result = await handler({ repo: 'pigq/OpenH3' });
 
       expect(result.success).toBe(true);
       expect(result.data?.currentVersion).toBe('1.0.0');
@@ -182,36 +191,38 @@ describe('updateBridge CDN URL rewriting', () => {
 
       const macAsset = assets.find((a: { name: string }) => a.name === 'AionUi-1.9.22-mac-arm64.dmg');
       expect(macAsset).toBeDefined();
-      expect(macAsset?.url).toBe('https://static.aionui.com/releases/1.9.22/AionUi-1.9.22-mac-arm64.dmg');
-      expect(macAsset?.fallbackUrl).toBe(
-        'https://github.com/iOfficeAI/AionUi/releases/download/v1.9.22/AionUi-1.9.22-mac-arm64.dmg'
+      expect(macAsset?.url).toBe(
+        'https://github.com/pigq/OpenH3/releases/download/v1.9.22/AionUi-1.9.22-mac-arm64.dmg'
       );
+      expect(macAsset?.fallbackUrl).toBeUndefined();
 
       const linuxAsset = assets.find((a: { name: string }) => a.name === 'AionUi-1.9.22-linux-amd64.deb');
-      expect(linuxAsset?.url).toBe('https://static.aionui.com/releases/1.9.22/AionUi-1.9.22-linux-amd64.deb');
+      expect(linuxAsset?.url).toBe(
+        'https://github.com/pigq/OpenH3/releases/download/v1.9.22/AionUi-1.9.22-linux-amd64.deb'
+      );
       expect(fetchMock).toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
     }
   });
 
-  it('uses the normalized version (no v prefix) in the CDN path', async () => {
+  it('preserves the release tag in the GitHub download URL', async () => {
     stubCdnAndGitHubFetch();
 
     try {
       const handler = await getCheckHandler();
-      const result = await handler({ repo: 'iOfficeAI/AionUi' });
+      const result = await handler({ repo: 'pigq/OpenH3' });
       const asset = result.data?.latest?.assets?.[0];
-      expect(asset?.url).toMatch(/^https:\/\/static\.aionui\.com\/releases\/1\.9\.22\//);
-      expect(asset?.url).not.toMatch(/\/v1\.9\.22\//);
+      expect(asset?.url).toContain('/pigq/OpenH3/releases/download/v1.9.22/');
+      expect(asset?.fallbackUrl).toBeUndefined();
     } finally {
       vi.unstubAllGlobals();
     }
   });
 });
 
-describe('updateBridge allowlist includes CDN host', () => {
-  it('accepts static.aionui.com URLs for download', async () => {
+describe('updateBridge GitHub-only download allowlist', () => {
+  it('rejects the retired update CDN', async () => {
     vi.resetModules();
     vi.clearAllMocks();
 
@@ -243,8 +254,8 @@ describe('updateBridge allowlist includes CDN host', () => {
         file_name: 'AionUi-1.9.22-mac-arm64.dmg',
       });
 
-      expect(result.success).toBe(true);
-      expect(result.data?.downloadId).toBe('manual-download-1');
+      expect(result.success).toBe(false);
+      expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
     }
@@ -313,7 +324,7 @@ describe('autoUpdate quitAndInstall lifecycle', () => {
     cleanup.resolve();
     await installPromise;
 
-    expect(autoUpdater.quitAndInstall).toHaveBeenCalledWith(false, true);
+    expect(autoUpdater.quitAndInstall).toHaveBeenCalledWith(true, true);
   });
 
   it('does not start the installer when the pre-install cleanup fails', async () => {

@@ -24,7 +24,7 @@ import {
   recordAutoUpdateQuitAndInstall,
   recordAutoUpdateStatus,
 } from './autoUpdateDiagnostics';
-import { buildCdnFeedOptions } from './updateFeed';
+import { buildGitHubFeedOptions } from './updateFeed';
 
 const FORCE_DEV_AUTO_UPDATE_ENV = 'AIONUI_FORCE_DEV_AUTO_UPDATE';
 const DEBUG_AUTO_UPDATE_CURRENT_VERSION_ENV = 'AIONUI_DEBUG_AUTO_UPDATE_CURRENT_VERSION';
@@ -129,9 +129,9 @@ class AutoUpdaterService extends EventEmitter {
 
     // Disable auto-download for manual control
     autoUpdater.autoDownload = false;
-    autoUpdater.autoInstallOnAppQuit = true;
+    autoUpdater.autoInstallOnAppQuit = false;
     this.configureDevAutoUpdateDebug();
-    const cdnFeedOptions = buildCdnFeedOptions();
+    const githubFeedOptions = buildGitHubFeedOptions();
 
     // Set the correct update channel based on platform and architecture before
     // any update checks are performed
@@ -140,11 +140,11 @@ class AutoUpdaterService extends EventEmitter {
       autoUpdater.channel = channel;
       log.info(`Update channel set to: ${channel}`);
     }
-    autoUpdater.setFeedURL(cdnFeedOptions);
-    log.info('Update feed set to CDN provider');
-    log.debug('[auto-update] CDN feed configured', {
-      provider: cdnFeedOptions.provider,
-      url: cdnFeedOptions.url,
+    autoUpdater.setFeedURL(githubFeedOptions);
+    log.info('Update feed set to GitHub provider');
+    log.debug('[auto-update] GitHub feed configured', {
+      provider: githubFeedOptions.provider,
+      url: 'https://github.com/pigq/OpenH3/releases',
       channel: channel ?? 'latest',
       platform: process.platform,
       arch: process.arch,
@@ -194,10 +194,10 @@ class AutoUpdaterService extends EventEmitter {
    */
   private ensureDevUpdateConfig(): void {
     try {
-      const cdnFeedOptions = buildCdnFeedOptions();
       const devConfig = [
-        'provider: generic',
-        `url: ${cdnFeedOptions.url}`,
+        'provider: github',
+        'owner: pigq',
+        'repo: OpenH3',
         'updaterCacheDirName: com.openh3.app',
         '',
       ].join('\n');
@@ -585,6 +585,14 @@ class AutoUpdaterService extends EventEmitter {
     }, MAC_NATIVE_INSTALL_READY_TIMEOUT_MS);
 
     this._nativeInstallReadyWait = { promise, reject: rejectWait, resolve: resolveWait, startedAt, timer };
+    // With autoInstallOnAppQuit disabled, MacUpdater has only prepared its local
+    // feed. Start native staging after explicit confirmation, without arming its
+    // quitAndInstall listener until readiness and pre-install cleanup complete.
+    try {
+      nativeAutoUpdater.checkForUpdates();
+    } catch (error) {
+      void this.handleNativeInstallError(error instanceof Error ? error : new Error('Native update staging failed'));
+    }
     return promise;
   }
 
@@ -618,7 +626,7 @@ class AutoUpdaterService extends EventEmitter {
 
       if (this._allowPrerelease) {
         log.info('Skipping electron-updater check for prerelease manual mode');
-        log.debug('[auto-update] CDN stable feed skipped because prerelease mode is handled by GitHub API');
+        log.debug('[auto-update] GitHub stable feed skipped because prerelease mode is handled by GitHub API');
         return { success: true };
       }
 
@@ -632,7 +640,7 @@ class AutoUpdaterService extends EventEmitter {
       // When isUpdateAvailable is false, updateInfoAndProvider is NOT set internally,
       // so a subsequent downloadUpdate() call would fail with "Please check update first".
       if (!result.isUpdateAvailable) {
-        log.debug('[auto-update] no update available from CDN feed', {
+        log.debug('[auto-update] no update available from GitHub feed', {
           version: result.updateInfo.version,
         });
         return { success: true };
@@ -651,7 +659,7 @@ class AutoUpdaterService extends EventEmitter {
         });
         return { success: true };
       }
-      log.debug('[auto-update] update available from CDN feed', {
+      log.debug('[auto-update] update available from GitHub feed', {
         version: result.updateInfo.version,
         releaseDate: result.updateInfo.releaseDate,
       });
@@ -679,6 +687,11 @@ class AutoUpdaterService extends EventEmitter {
         throw new Error('AutoUpdaterService not initialized');
       }
 
+      // Avoid a startup network check unless an already-downloaded package may exist.
+      const helper = await (autoUpdater as unknown as AutoUpdaterCacheAccess).getOrCreateDownloadHelper?.();
+      if (!helper || !fs.existsSync(path.join(helper.cacheDirForPendingUpdate, 'update-info.json'))) {
+        return { success: true, data: { ready: false } };
+      }
       const checkResult = await this.checkForUpdates();
       if (!checkResult.success || !checkResult.updateInfo) {
         return {
@@ -869,10 +882,23 @@ class AutoUpdaterService extends EventEmitter {
     log.info('Quitting and installing update...');
     try {
       this.moveCwdOutOfInstallDirForWindowsHandoff();
-      // The first argument maps to electron-updater's silent installer flag.
-      // User-clicked "install now" should show NSIS progress/completion pages;
-      // autoInstallOnAppQuit remains true for background app-quit installs.
-      autoUpdater.quitAndInstall(false, true);
+      // Confirmation is handled by the renderer. Apply in place without an installer
+      // wizard, then restart. NSIS receives --updated /S --force-run; no data reset.
+      // BaseUpdater can reject synchronously via an error event without throwing.
+      // Only observe this call; asynchronous installer failures remain updater-owned.
+      let handoffError: Error | undefined;
+      const captureHandoffError = (error: unknown): void => {
+        handoffError ??= error instanceof Error ? error : new Error('Auto-updater rejected the install handoff');
+      };
+      autoUpdater.on('error', captureHandoffError);
+      try {
+        autoUpdater.quitAndInstall(true, true);
+      } finally {
+        autoUpdater.removeListener('error', captureHandoffError);
+      }
+      if (handoffError) {
+        throw handoffError;
+      }
       recordAutoUpdateQuitAndInstall(this.getAutoUpdateDiagnosticOptions());
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -894,9 +920,11 @@ class AutoUpdaterService extends EventEmitter {
     // behavior + close-to-tray). This leaves the process alive and Squirrel
     // cannot finish replacing the app bundle. Force-exit after a short delay
     // to let Squirrel receive the install signal.
-    setTimeout(() => {
-      app.exit(0);
-    }, 1000);
+    if (process.platform === 'darwin') {
+      setTimeout(() => {
+        app.exit(0);
+      }, 1000);
+    }
   }
 
   /**
@@ -915,3 +943,16 @@ class AutoUpdaterService extends EventEmitter {
 
 // Singleton instance
 export const autoUpdaterService = new AutoUpdaterService();
+
+/** Schedule silent checks; the window owner must dispose this on close. */
+export const scheduleUpdateChecks = (check: () => void): (() => void) => {
+  let interval: ReturnType<typeof setInterval> | undefined;
+  const startup = setTimeout(() => {
+    check();
+    interval = setInterval(check, 6 * 60 * 60 * 1000);
+  }, 30_000);
+  return () => {
+    clearTimeout(startup);
+    clearInterval(interval);
+  };
+};

@@ -15,9 +15,10 @@ import type {
 } from '@/common/update/updateTypes';
 
 const mocks = vi.hoisted(() => ({
+  desktop: true,
   manualProgressHandler: null as ((evt: UpdateDownloadProgressEvent) => void) | null,
   autoStatusHandler: null as ((evt: AutoUpdateStatus) => void) | null,
-  updateOpenHandler: null as ((evt: { source?: 'menu' | 'about' | 'tray' }) => void) | null,
+  updateOpenHandler: null as ((evt: { source?: 'menu' | 'about' | 'tray' | 'startup' }) => void) | null,
   autoUpdateCheckMock: vi.fn(),
   autoUpdateRestoreDownloadedMock: vi.fn(),
   autoUpdateDownloadMock: vi.fn(),
@@ -32,6 +33,8 @@ const mocks = vi.hoisted(() => ({
   shellOpenFileMock: vi.fn(),
   shellShowItemInFolderMock: vi.fn(),
 }));
+
+vi.mock('@/renderer/utils/platform', () => ({ isElectronDesktop: () => mocks.desktop }));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'en-US' } }),
@@ -72,7 +75,7 @@ vi.mock('@/common', () => ({
         }),
       },
       open: {
-        on: vi.fn((handler: (evt: { source?: 'menu' | 'about' | 'tray' }) => void) => {
+        on: vi.fn((handler: (evt: { source?: 'menu' | 'about' | 'tray' | 'startup' }) => void) => {
           mocks.updateOpenHandler = handler;
           return vi.fn();
         }),
@@ -86,16 +89,21 @@ vi.mock('@/common', () => ({
   },
 }));
 
+import { getSidebarUpdateState, requestSidebarUpdateAction } from '@/renderer/components/settings/updateReadyState';
+import SiderFooter from '@/renderer/components/layout/Sider/SiderFooter';
 import UpdateNotificationCard from '@/renderer/components/settings/UpdateNotificationCard';
 
 describe('UpdateNotificationCard', () => {
   beforeEach(() => {
+    mocks.desktop = true;
     vi.stubGlobal('__APP_VERSION__', '2.1.15');
     mocks.manualProgressHandler = null;
     mocks.autoStatusHandler = null;
     mocks.updateOpenHandler = null;
     mocks.autoUpdateCheckMock.mockResolvedValue({ success: true });
     mocks.autoUpdateRestoreDownloadedMock.mockResolvedValue({ success: true, data: { ready: false } });
+    mocks.shellOpenExternalMock.mockResolvedValue(undefined);
+    mocks.shellOpenFileMock.mockResolvedValue(undefined);
     mocks.autoUpdateDownloadMock.mockResolvedValue({ success: true });
     mocks.autoUpdateCancelDownloadMock.mockResolvedValue({ success: true });
     mocks.autoUpdateQuitAndInstallMock.mockResolvedValue(undefined);
@@ -137,6 +145,287 @@ describe('UpdateNotificationCard', () => {
     cleanup();
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it('does not mount updater IPC in WebUI', () => {
+    mocks.desktop = false;
+    render(<UpdateNotificationCard />);
+    expect(mocks.autoUpdateRestoreDownloadedMock).not.toHaveBeenCalled();
+    expect(mocks.autoStatusHandler).toBeNull();
+  });
+
+  it('does not replay availability discovered during cached restore as a popup', async () => {
+    let resolve!: (value: unknown) => void;
+    mocks.autoUpdateRestoreDownloadedMock.mockImplementation(
+      () =>
+        new Promise((r) => {
+          resolve = r;
+        })
+    );
+    render(<UpdateNotificationCard />);
+    await act(async () => {
+      mocks.autoStatusHandler?.({ status: 'available', version: '2.2.0' });
+    });
+    await act(async () => {
+      resolve({ success: true, data: { ready: false } });
+    });
+    expect(screen.queryByTestId('update-notification-card')).not.toBeInTheDocument();
+  });
+
+  it('silently discovers updates and keeps the entry after dismissing details', async () => {
+    render(
+      <>
+        <UpdateNotificationCard />
+        <SiderFooter
+          isMobile={false}
+          isSettings={false}
+          theme='light'
+          siderTooltipProps={{}}
+          onSettingsClick={() => {}}
+          onThemeToggle={() => {}}
+        />
+      </>
+    );
+    expect(screen.queryByRole('button', { name: 'update.manualInstall' })).not.toBeInTheDocument();
+    await act(async () => {
+      mocks.updateOpenHandler?.({ source: 'startup' });
+    });
+    expect(screen.queryByTestId('update-notification-card')).not.toBeInTheDocument();
+    expect(getSidebarUpdateState()?.status).toBe('available');
+    fireEvent.click(screen.getByRole('button', { name: 'update.manualInstall' }));
+    await act(async () => {
+      requestSidebarUpdateAction();
+    });
+    expect(mocks.updateDownloadMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('update-notification-card')).toBeInTheDocument();
+    await act(async () => {
+      mocks.manualProgressHandler?.({
+        downloadId: mocks.updateDownloadMock.mock.calls[0][0].downloadId,
+        status: 'completed',
+        receivedBytes: 123,
+        file_path: '/tmp/update.exe',
+      });
+    });
+    fireEvent.click(screen.getByText('update.later'));
+    expect(getSidebarUpdateState()?.status).toBe('downloaded');
+    expect(screen.queryByTestId('update-notification-card')).not.toBeInTheDocument();
+  });
+
+  it('keeps a collapsed sidebar entry accessible and routes missing installers to Releases', async () => {
+    const release = await mocks.updateCheckMock();
+    release.data.latest.recommendedAsset = undefined;
+    mocks.updateCheckMock.mockResolvedValue(release);
+    render(
+      <>
+        <UpdateNotificationCard />
+        <SiderFooter
+          collapsed
+          isMobile={false}
+          isSettings={false}
+          theme='dark'
+          siderTooltipProps={{}}
+          onSettingsClick={() => {}}
+          onThemeToggle={() => {}}
+        />
+      </>
+    );
+    await act(async () => {
+      mocks.updateOpenHandler?.({ source: 'startup' });
+    });
+    const button = screen.getByRole('button', { name: 'update.manualInstall' });
+    expect(button).not.toHaveTextContent('update.manualInstall');
+    fireEvent.click(button);
+    expect(mocks.updateDownloadMock).not.toHaveBeenCalled();
+    expect(mocks.shellOpenExternalMock).toHaveBeenCalledWith(release.data.latest.htmlUrl);
+    expect(screen.getByText('update.goToRelease')).toBeInTheDocument();
+  });
+
+  it('recovers from rejected manual download and can retry', async () => {
+    mocks.updateDownloadMock.mockRejectedValue(new Error('download offline'));
+    render(<UpdateNotificationCard />);
+    await act(async () => {
+      mocks.updateOpenHandler?.({ source: 'startup' });
+    });
+    await act(async () => {
+      requestSidebarUpdateAction();
+    });
+    expect(getSidebarUpdateState()?.status).toBe('error');
+    expect(screen.getByText('Error: download offline')).toBeInTheDocument();
+    await act(async () => {
+      requestSidebarUpdateAction();
+    });
+    expect(getSidebarUpdateState()?.status).toBe('available');
+  });
+
+  it('does not check during a download or after unmount', async () => {
+    const { unmount } = render(<UpdateNotificationCard />);
+    await act(async () => {
+      mocks.updateOpenHandler?.({ source: 'startup' });
+    });
+    await act(async () => {
+      requestSidebarUpdateAction();
+    });
+    const checks = mocks.autoUpdateCheckMock.mock.calls.length;
+    await act(async () => {
+      mocks.updateOpenHandler?.({ source: 'startup' });
+    });
+    expect(mocks.autoUpdateCheckMock).toHaveBeenCalledTimes(checks);
+    unmount();
+    expect(getSidebarUpdateState()).toBeNull();
+  });
+
+  it('ignores stale manual download responses after cancellation', async () => {
+    let resolve!: (value: unknown) => void;
+    mocks.updateDownloadMock.mockImplementation(
+      () =>
+        new Promise((r) => {
+          resolve = r;
+        })
+    );
+    render(<UpdateNotificationCard />);
+    await act(async () => {
+      mocks.updateOpenHandler?.({ source: 'startup' });
+    });
+    await act(async () => {
+      requestSidebarUpdateAction();
+    });
+    fireEvent.click(screen.getByLabelText('update.cancel'));
+    await act(async () => {
+      resolve({ success: true, data: { downloadId: 'old', file_path: '/tmp/stale.exe' } });
+    });
+    expect(getSidebarUpdateState()?.downloadPath).toBe('');
+    expect(getSidebarUpdateState()?.status).toBe('available');
+    expect(mocks.updateCancelDownloadMock).toHaveBeenCalledWith({ downloadId: 'old' });
+  });
+
+  it('replays a deduplicated download completion that arrives before its response', async () => {
+    let resolve!: (value: unknown) => void;
+    mocks.updateDownloadMock.mockImplementation(
+      () =>
+        new Promise((r) => {
+          resolve = r;
+        })
+    );
+    render(<UpdateNotificationCard />);
+    await act(async () => {
+      mocks.updateOpenHandler?.({ source: 'startup' });
+    });
+    await act(async () => {
+      requestSidebarUpdateAction();
+    });
+    await act(async () => {
+      mocks.manualProgressHandler?.({
+        downloadId: 'existing',
+        status: 'completed',
+        file_path: '/tmp/update.exe',
+        receivedBytes: 123,
+      });
+      resolve({ success: true, data: { downloadId: 'existing', file_path: '/tmp/update.exe' } });
+    });
+    expect(getSidebarUpdateState()?.status).toBe('downloaded');
+    expect(getSidebarUpdateState()?.downloadPath).toBe('/tmp/update.exe');
+  });
+
+  it('keeps latest-version results silent and honors a manual open during the same check', async () => {
+    mocks.updateCheckMock.mockResolvedValue({
+      success: true,
+      data: { currentVersion: '2.1.15', updateAvailable: false, latest: null },
+    });
+    render(<UpdateNotificationCard />);
+    await act(async () => {
+      mocks.updateOpenHandler?.({ source: 'startup' });
+    });
+    expect(screen.queryByTestId('update-notification-card')).not.toBeInTheDocument();
+    let resolve!: (value: unknown) => void;
+    mocks.autoUpdateCheckMock.mockImplementation(
+      () =>
+        new Promise((r) => {
+          resolve = r;
+        })
+    );
+    await act(async () => {
+      mocks.updateOpenHandler?.({ source: 'startup' });
+    });
+    await act(async () => {
+      mocks.updateOpenHandler?.({ source: 'menu' });
+    });
+    await act(async () => {
+      resolve({ success: true });
+    });
+    expect(screen.getByText('update.upToDateTitle')).toBeInTheDocument();
+  });
+
+  it('clears a withdrawn update after a successful silent check', async () => {
+    render(<UpdateNotificationCard />);
+    await act(async () => {
+      mocks.updateOpenHandler?.({ source: 'startup' });
+    });
+    expect(getSidebarUpdateState()?.status).toBe('available');
+    mocks.updateCheckMock.mockResolvedValue({
+      success: true,
+      data: { currentVersion: '2.1.15', updateAvailable: false, latest: null },
+    });
+    await act(async () => {
+      mocks.updateOpenHandler?.({ source: 'startup' });
+    });
+    expect(getSidebarUpdateState()?.status).toBe('upToDate');
+    expect(screen.queryByTestId('update-notification-card')).not.toBeInTheDocument();
+  });
+
+  it('ignores a late background result after unmount', async () => {
+    let resolve!: (value: unknown) => void;
+    mocks.autoUpdateCheckMock.mockImplementation(
+      () =>
+        new Promise((r) => {
+          resolve = r;
+        })
+    );
+    const { unmount } = render(<UpdateNotificationCard />);
+    await act(async () => {
+      mocks.updateOpenHandler?.({ source: 'startup' });
+    });
+    unmount();
+    await act(async () => {
+      resolve({ success: true });
+    });
+    expect(getSidebarUpdateState()).toBeNull();
+  });
+
+  it('deduplicates silent checks and ignores background errors', async () => {
+    let resolve!: (value: unknown) => void;
+    mocks.autoUpdateCheckMock.mockImplementation(
+      () =>
+        new Promise((r) => {
+          resolve = r;
+        })
+    );
+    render(<UpdateNotificationCard />);
+    await act(async () => {
+      mocks.updateOpenHandler?.({ source: 'startup' });
+      mocks.updateOpenHandler?.({ source: 'startup' });
+    });
+    expect(mocks.autoUpdateCheckMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      mocks.autoStatusHandler?.({ status: 'error', error: 'offline' });
+    });
+    expect(screen.queryByTestId('update-notification-card')).not.toBeInTheDocument();
+    mocks.updateCheckMock.mockResolvedValue({ success: false, msg: 'offline' });
+    await act(async () => {
+      resolve({ success: false });
+    });
+    expect(screen.queryByTestId('update-notification-card')).not.toBeInTheDocument();
+  });
+
+  it('requires confirmation before installation and supports cancellation', async () => {
+    mocks.autoUpdateRestoreDownloadedMock.mockResolvedValue({ success: true, data: { ready: true, version: '2.2.0' } });
+    render(<UpdateNotificationCard />);
+    fireEvent.click(await screen.findByText('update.restartNow'));
+    expect(mocks.autoUpdateQuitAndInstallMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('update.cancel'));
+    expect(mocks.autoUpdateQuitAndInstallMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('update.restartNow'));
+    fireEvent.click(screen.getByText('update.confirmInstall'));
+    await waitFor(() => expect(mocks.autoUpdateQuitAndInstallMock).toHaveBeenCalledTimes(1));
   });
 
   it('renders a bottom-right notification card for auto-update availability without a dialog', async () => {
@@ -571,6 +860,7 @@ describe('UpdateNotificationCard', () => {
     });
 
     fireEvent.click(await screen.findByText('update.restartNow'));
+    fireEvent.click(screen.getByText('update.confirmInstall'));
 
     expect(await screen.findByText('update.preparingInstall')).toBeInTheDocument();
     expect(screen.getByText('update.downloadCompleteTitle')).toBeInTheDocument();

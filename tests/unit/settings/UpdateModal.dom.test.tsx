@@ -132,11 +132,11 @@ describe('UpdateModal manual install fallback', () => {
       window.dispatchEvent(new Event('aionui-open-update-modal'));
     });
 
-    const downloadAndInstall = await screen.findByText('update.downloadButton');
+    const downloadAndInstall = await screen.findByText('update.manualInstall');
     await user.click(downloadAndInstall);
 
     await waitFor(() => {
-      expect(screen.getByText('update.restartNow')).toBeInTheDocument();
+      expect(screen.getByText('update.openInstaller')).toBeInTheDocument();
     });
 
     expect(mocks.updateDownloadMock).toHaveBeenCalledWith({
@@ -149,7 +149,9 @@ describe('UpdateModal manual install fallback', () => {
   });
 
   it('loads release notes when auto-update status opens the modal', async () => {
-    render(<UpdateModal />);
+    await act(async () => {
+      render(<UpdateModal />);
+    });
 
     act(() => {
       mocks.autoStatusHandler?.({

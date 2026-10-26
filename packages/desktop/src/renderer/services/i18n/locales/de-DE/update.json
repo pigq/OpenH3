@@ -131,5 +131,12 @@
     "changed": "Geändert",
     "removed": "Zurückgezogen",
     "linkUnavailable": "Die verknüpfte Vorlage wurde zurückgezogen, ihre Revision stimmt nicht überein oder ein Client-Update ist erforderlich. Dieses Werk kann nur angesehen werden."
-  }
+  },
+  "sidebarAvailable": "Update verfügbar",
+  "sidebarDownloading": "Download {{percent}}%",
+  "sidebarRestart": "Neustart & Update",
+  "sidebarRetry": "Update wiederholen",
+  "openInstaller": "Manuell installieren (Ersatz)",
+  "confirmInstall": "Installation bestätigen",
+  "confirmInstallDescription": "Die App wird für das Update geschlossen. Laufende Aufgaben können unterbrochen werden. Beenden Sie Ihre Arbeit, bevor Sie fortfahren."
 }

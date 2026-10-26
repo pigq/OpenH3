@@ -552,7 +552,8 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
     process.env.AIONUI_DISABLE_AUTO_UPDATE === '1' || process.env.AIONUI_E2E_TEST === '1' || isCiRuntime;
   if (!disableAutoUpdater) {
     Promise.all([import('./process/services/autoUpdaterService'), import('./process/bridge/updateBridge')])
-      .then(([{ autoUpdaterService }, { createAutoUpdateStatusBroadcast }]) => {
+      .then(([{ autoUpdaterService, scheduleUpdateChecks }, { createAutoUpdateStatusBroadcast }]) => {
+        if (mainWindow.isDestroyed()) return;
         // Create status broadcast callback that emits via ipcBridge (pure emitter, no window binding)
         const statusBroadcast = createAutoUpdateStatusBroadcast();
         autoUpdaterService.initialize(statusBroadcast);
@@ -560,15 +561,11 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
           await backendManager.stop();
           await contentRuntime?.stop();
         });
-        // Check for updates after 3 seconds delay. Skipped in the discontinued
-        // build: AionUi's final version guides users to the website instead of
-        // auto-checking, so startup stays silent. The flag is a compile-time
-        // literal, so this branch is tree-shaken out of non-discontinued builds.
-        // 3秒后检查更新。停更版启动静默，不做应用内检测。
         if (!process.env.IS_DISCONTINUED_BUILD) {
-          setTimeout(() => {
-            void autoUpdaterService.checkForUpdatesAndNotify();
-          }, 3000);
+          const stopUpdateChecks = scheduleUpdateChecks(() => {
+            ipcBridge.update.open.emit({ source: 'startup' });
+          });
+          mainWindow.once('closed', stopUpdateChecks);
         }
       })
       .catch((error) => {

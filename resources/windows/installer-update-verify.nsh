@@ -12,8 +12,10 @@ Var /GLOBAL AionUiActiveMarkerResult
 
 !macro AIONUI_BRING_UPDATED_INSTALLER_TO_FRONT
   ${If} ${isUpdated}
-    BringToFront
-    !insertmacro AIONUI_SLOG "event=updated-installer-foreground action=bring-to-front"
+    ${IfNot} ${Silent}
+      BringToFront
+      !insertmacro AIONUI_SLOG "event=updated-installer-foreground action=bring-to-front"
+    ${EndIf}
   ${EndIf}
 !macroend
 

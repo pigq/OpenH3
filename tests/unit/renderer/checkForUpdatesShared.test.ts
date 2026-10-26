@@ -25,6 +25,23 @@ describe('runUpdateCheck downgrade guard', () => {
     manualCheck.mockReset();
   });
 
+  it('shares a pending check across background and About callers', async () => {
+    let resolve!: (value: unknown) => void;
+    autoCheck.mockImplementation(
+      () =>
+        new Promise((r) => {
+          resolve = r;
+        })
+    );
+    manualCheck.mockResolvedValue({ success: true, data: { currentVersion: '2.1.54', updateAvailable: false } });
+    const background = runUpdateCheck(opts);
+    const about = runUpdateCheck(opts);
+    expect(autoCheck).toHaveBeenCalledTimes(1);
+    resolve({ success: true });
+    expect(await background).toEqual(await about);
+    expect(manualCheck).toHaveBeenCalledTimes(1);
+  });
+
   it('does not offer an older auto-update version as available', async () => {
     // Installed 2.1.54, auto-updater reports an older 2.1.53 feed version.
     autoCheck.mockResolvedValue({ success: true, data: { updateInfo: { version: '2.1.53' } } });

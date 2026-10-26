@@ -5,7 +5,8 @@
  */
 
 import path from 'path';
-import { rmSync } from 'fs';
+import fs, { mkdtempSync, rmSync } from 'fs';
+import os from 'os';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -28,15 +29,26 @@ const autoUpdaterMock = vi.hoisted(() => ({
   checkForUpdatesAndNotify: vi.fn(),
 }));
 
+const diagnosticsMock = vi.hoisted(() => ({
+  recordAutoUpdateNativeInstallError: vi.fn(),
+  recordAutoUpdateNativeInstallReady: vi.fn(),
+  recordAutoUpdateNativeInstallTimeout: vi.fn(),
+  recordAutoUpdateQuitAndInstall: vi.fn(),
+  recordAutoUpdateStatus: vi.fn(),
+}));
+
+vi.mock('@/process/services/autoUpdateDiagnostics', () => diagnosticsMock);
+
 const nativeAutoUpdaterMock = vi.hoisted(() => ({
   on: vi.fn(),
   removeListener: vi.fn(),
+  checkForUpdates: vi.fn(),
 }));
 
 const appMock = vi.hoisted(() => ({
   isPackaged: false,
   getVersion: vi.fn(() => '2.1.13'),
-  getPath: vi.fn(() => '/tmp/aionui-test'),
+  getPath: vi.fn<(name: string) => string>(),
   exit: vi.fn(),
 }));
 
@@ -75,10 +87,14 @@ const setPlatform = (platform: NodeJS.Platform): void => {
 
 describe('AutoUpdaterService', () => {
   const originalPlatform = process.platform;
+  let testTempRoot: string | undefined;
 
   beforeEach(() => {
+    testTempRoot = undefined;
+    testTempRoot = mkdtempSync(path.join(os.tmpdir(), 'openh3-updater-test-'));
     vi.resetModules();
     vi.clearAllMocks();
+    vi.spyOn(process, 'chdir').mockImplementation(() => undefined);
     setPlatform(originalPlatform);
     autoUpdaterMock.logger = null;
     autoUpdaterMock.autoDownload = true;
@@ -87,13 +103,14 @@ describe('AutoUpdaterService', () => {
     autoUpdaterMock.allowPrerelease = false;
     autoUpdaterMock.allowDowngrade = false;
     autoUpdaterMock.channel = undefined;
-    appMock.getPath.mockImplementation(() => '/tmp/aionui-test');
+    appMock.getPath.mockReturnValue(testTempRoot);
     delete (autoUpdaterMock as { updateInfoAndProvider?: unknown }).updateInfoAndProvider;
     appMock.isPackaged = false;
     delete process.env.AIONUI_FORCE_DEV_AUTO_UPDATE;
     delete process.env.AIONUI_DEBUG_AUTO_UPDATE_CURRENT_VERSION;
     nativeAutoUpdaterMock.on.mockReset();
     nativeAutoUpdaterMock.removeListener.mockReset();
+    nativeAutoUpdaterMock.checkForUpdates.mockReset();
     Object.defineProperty(autoUpdaterMock, 'currentVersion', {
       configurable: true,
       value: { version: '2.1.13' },
@@ -101,9 +118,16 @@ describe('AutoUpdaterService', () => {
   });
 
   afterEach(() => {
-    vi.clearAllTimers();
-    vi.useRealTimers();
-    setPlatform(originalPlatform);
+    const ownedRoot = testTempRoot;
+    testTempRoot = undefined;
+    try {
+      if (ownedRoot) rmSync(ownedRoot, { recursive: true, force: true });
+    } finally {
+      vi.restoreAllMocks();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+      setPlatform(originalPlatform);
+    }
   });
 
   it('does not use the stable CDN updater when prerelease manual mode is enabled', async () => {
@@ -170,16 +194,15 @@ describe('AutoUpdaterService', () => {
     expect(result).toEqual({ success: true, updateInfo });
   });
 
-  it('configures electron-updater to read stable metadata from the CDN', async () => {
+  it('configures electron-updater to read stable metadata from GitHub Releases', async () => {
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
-    const { CdnGenericProvider } = await import('@/process/services/cdnGenericProvider');
 
     autoUpdaterService.resetForTest();
 
     expect(autoUpdaterMock.setFeedURL).toHaveBeenCalledWith({
-      provider: 'custom',
-      url: 'https://static.aionui.com/releases',
-      updateProvider: CdnGenericProvider,
+      provider: 'github',
+      owner: 'pigq',
+      repo: 'OpenH3',
     });
   });
 
@@ -215,6 +238,25 @@ describe('AutoUpdaterService', () => {
     const entry = autoUpdaterMock.on.mock.calls.find(([event]) => event === 'error');
     if (!entry) throw new Error('error handler not registered');
     return entry[1] as (error: Error) => void;
+  };
+
+  const getActiveErrorHandlers = (): Array<(error: unknown) => void> =>
+    autoUpdaterMock.on.mock.calls
+      .filter(
+        ([event, handler]) =>
+          event === 'error' &&
+          !autoUpdaterMock.removeListener.mock.calls.some(
+            ([removedEvent, removedHandler]) => removedEvent === event && removedHandler === handler
+          )
+      )
+      .map(([, handler]) => handler as (error: unknown) => void);
+
+  const expectHandoffErrorHandlerRemoved = (): void => {
+    const handlers = autoUpdaterMock.on.mock.calls.filter(([event]) => event === 'error');
+    expect(handlers).toHaveLength(2);
+    expect(autoUpdaterMock.removeListener).toHaveBeenCalledWith('error', handlers[1][1]);
+    expect(autoUpdaterMock.removeListener).not.toHaveBeenCalledWith('error', handlers[0][1]);
+    expect(getActiveErrorHandlers()).toEqual([getErrorHandler()]);
   };
 
   const getUpdateDownloadedHandler = (): ((info: { version: string }) => void) => {
@@ -333,7 +375,24 @@ describe('AutoUpdaterService', () => {
     await expect(download).resolves.toEqual({ success: true });
   });
 
+  it('does not contact the update feed when no downloaded cache exists', async () => {
+    autoUpdaterMock.getOrCreateDownloadHelper.mockResolvedValue({ cacheDirForPendingUpdate: '/missing-update-cache' });
+    const exists = vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+    try {
+      const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+      autoUpdaterService.initialize();
+      await expect(autoUpdaterService.restoreDownloadedUpdateIfAvailable()).resolves.toEqual({
+        success: true,
+        data: { ready: false },
+      });
+      expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled();
+    } finally {
+      exists.mockRestore();
+    }
+  });
+
   it('restores a completed cached auto-update when the downloaded package validates', async () => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true);
     const updateInfo = {
       version: '2.1.14',
       files: [{ url: 'AionUi-2.1.14-mac.zip', sha512: 'sha512-value' }],
@@ -378,6 +437,7 @@ describe('AutoUpdaterService', () => {
   });
 
   it('does not restore a cached auto-update when the downloaded package is missing or invalid', async () => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true);
     const updateInfo = {
       version: '2.1.14',
       files: [{ url: 'AionUi-2.1.14-mac.zip', sha512: 'sha512-value' }],
@@ -415,6 +475,7 @@ describe('AutoUpdaterService', () => {
 
   it('waits on macOS when service downloaded but native install readiness has not arrived', async () => {
     setPlatform('darwin');
+    vi.useFakeTimers();
     const cleanup = vi.fn();
     const statuses: Array<{ status: string; error?: string }> = [];
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
@@ -435,7 +496,63 @@ describe('AutoUpdaterService', () => {
     await installPromise;
 
     expect(cleanup).toHaveBeenCalledTimes(1);
-    expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledWith(false, true);
+    expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledWith(true, true);
+    expectHandoffErrorHandlerRemoved();
+    expect(diagnosticsMock.recordAutoUpdateQuitAndInstall).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(appMock.exit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(appMock.exit).toHaveBeenCalledExactlyOnceWith(0);
+  });
+
+  it('starts native macOS staging only after explicit install confirmation', async () => {
+    setPlatform('darwin');
+    vi.useFakeTimers();
+    const cleanup = vi.fn();
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    autoUpdaterService.initialize();
+    autoUpdaterService.setBeforeQuitAndInstall(cleanup);
+    getUpdateDownloadedHandler()({ version: '2.2.0' });
+    expect(autoUpdaterMock.autoInstallOnAppQuit).toBe(false);
+    expect(nativeAutoUpdaterMock.checkForUpdates).not.toHaveBeenCalled();
+    nativeAutoUpdaterMock.checkForUpdates.mockImplementationOnce(() => {
+      queueMicrotask(() => getNativeUpdateDownloadedHandler()());
+    });
+    const install = autoUpdaterService.quitAndInstall().catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(60_000);
+    const result = await install;
+    expect(nativeAutoUpdaterMock.checkForUpdates).toHaveBeenCalledTimes(1);
+    expect(result).toBeUndefined();
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledExactlyOnceWith(true, true);
+    expect(autoUpdaterMock.autoInstallOnAppQuit).toBe(false);
+  });
+
+  it('rejects a synchronous native staging failure without stopping the backend and permits retry', async () => {
+    setPlatform('darwin');
+    vi.useFakeTimers();
+    const cleanup = vi.fn();
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    autoUpdaterService.initialize();
+    autoUpdaterService.setBeforeQuitAndInstall(cleanup);
+    getUpdateDownloadedHandler()({ version: '2.2.0' });
+    nativeAutoUpdaterMock.checkForUpdates.mockImplementationOnce(() => {
+      throw new Error('native staging rejected');
+    });
+    const failure = autoUpdaterService.quitAndInstall().catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await failure).toMatchObject({ message: 'update.errors.prepareInstallFailed' });
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled();
+    expect(appMock.exit).not.toHaveBeenCalled();
+    nativeAutoUpdaterMock.checkForUpdates.mockImplementationOnce(() => {
+      queueMicrotask(() => getNativeUpdateDownloadedHandler()());
+    });
+    const retry = autoUpdaterService.quitAndInstall().catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await retry).toBeUndefined();
+    expect(nativeAutoUpdaterMock.checkForUpdates).toHaveBeenCalledTimes(2);
+    expect(cleanup).toHaveBeenCalledTimes(1);
   });
 
   it('does not quit on macOS when native updater reports readiness error first', async () => {
@@ -504,7 +621,7 @@ describe('AutoUpdaterService', () => {
     await installPromise;
 
     expect(cleanup).toHaveBeenCalledTimes(1);
-    expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledWith(false, true);
+    expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledWith(true, true);
   });
 
   it('rejects a pending macOS install wait when a new update check starts', async () => {
@@ -551,6 +668,7 @@ describe('AutoUpdaterService', () => {
 
   it('does not force exit when quitAndInstall handoff throws', async () => {
     setPlatform('darwin');
+    vi.useFakeTimers();
     const statuses: Array<{ status: string; error?: string }> = [];
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
 
@@ -564,6 +682,9 @@ describe('AutoUpdaterService', () => {
 
     await expect(autoUpdaterService.quitAndInstall()).rejects.toThrow('update.errors.prepareInstallFailed');
 
+    expectHandoffErrorHandlerRemoved();
+    expect(diagnosticsMock.recordAutoUpdateQuitAndInstall).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1001);
     expect(appMock.exit).not.toHaveBeenCalled();
     expect(statuses.at(-1)).toEqual({
       status: 'error',
@@ -571,22 +692,88 @@ describe('AutoUpdaterService', () => {
     });
   });
 
-  it('keeps non-macOS quitAndInstall behavior immediate', async () => {
-    setPlatform('win32');
-    const cleanup = vi.fn();
+  it.each(['win32', 'linux'] as const)(
+    'keeps %s quitAndInstall native without a force-exit timer',
+    async (platform) => {
+      setPlatform(platform);
+      vi.useFakeTimers();
+      const cleanup = vi.fn();
+      const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+
+      autoUpdaterService.initialize();
+      autoUpdaterService.setBeforeQuitAndInstall(cleanup);
+
+      await autoUpdaterService.quitAndInstall();
+
+      expect(cleanup).toHaveBeenCalledTimes(1);
+      expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledWith(true, true);
+      expect(nativeAutoUpdaterMock.on).not.toHaveBeenCalled();
+      expect(diagnosticsMock.recordAutoUpdateQuitAndInstall).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1001);
+      expect(appMock.exit).not.toHaveBeenCalled();
+      expectHandoffErrorHandlerRemoved();
+    }
+  );
+
+  it.each(['win32', 'darwin', 'linux'] as const)(
+    'rejects a synchronous %s install error emitted without throwing',
+    async (platform) => {
+      setPlatform(platform);
+      vi.useFakeTimers();
+      const handoffError = new Error("No update filepath provided, can't quit and install");
+      const statuses: Array<{ status: string; error?: string }> = [];
+      const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+      autoUpdaterService.initialize();
+      autoUpdaterService.on('update-status', (status: { status: string; error?: string }) => statuses.push(status));
+      if (platform === 'darwin') {
+        getUpdateDownloadedHandler()({ version: '2.2.0' });
+        getNativeUpdateDownloadedHandler()();
+      }
+      autoUpdaterMock.quitAndInstall.mockImplementationOnce(() => {
+        for (const handler of getActiveErrorHandlers()) handler(handoffError);
+      });
+
+      const installPromise = autoUpdaterService.quitAndInstall();
+      await expect(installPromise).rejects.toMatchObject({
+        message: 'update.errors.prepareInstallFailed',
+        cause: handoffError,
+      });
+      expect(await installPromise.catch((error: Error) => error.cause)).toBe(handoffError);
+
+      expect(statuses).toContainEqual({ status: 'error', error: handoffError.message });
+      expect(statuses.at(-1)).toEqual({ status: 'error', error: 'update.errors.prepareInstallFailed' });
+      expect(diagnosticsMock.recordAutoUpdateQuitAndInstall).not.toHaveBeenCalled();
+      expectHandoffErrorHandlerRemoved();
+      await vi.advanceTimersByTimeAsync(1001);
+      expect(appMock.exit).not.toHaveBeenCalled();
+    }
+  );
+
+  it('normalizes a synchronous non-Error rejection without coercing its payload', async () => {
+    setPlatform('linux');
+    vi.useFakeTimers();
+    const stringify = vi.fn(() => {
+      throw new Error('must not coerce rejection payload');
+    });
+    const rejection = { message: 'native rejected the handoff', toString: stringify };
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
-
     autoUpdaterService.initialize();
-    autoUpdaterService.setBeforeQuitAndInstall(cleanup);
+    autoUpdaterMock.quitAndInstall.mockImplementationOnce(() => {
+      for (const handler of getActiveErrorHandlers()) handler(rejection);
+    });
 
-    await autoUpdaterService.quitAndInstall();
-
-    expect(cleanup).toHaveBeenCalledTimes(1);
-    expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledWith(false, true);
-    expect(nativeAutoUpdaterMock.on).not.toHaveBeenCalled();
+    await expect(autoUpdaterService.quitAndInstall()).rejects.toMatchObject({
+      message: 'update.errors.prepareInstallFailed',
+      cause: expect.objectContaining({ message: 'Auto-updater rejected the install handoff' }),
+    });
+    expect(stringify).not.toHaveBeenCalled();
+    expect(diagnosticsMock.recordAutoUpdateQuitAndInstall).not.toHaveBeenCalled();
+    expectHandoffErrorHandlerRemoved();
+    await vi.advanceTimersByTimeAsync(1001);
+    expect(appMock.exit).not.toHaveBeenCalled();
   });
 
-  it('uses a non-silent handoff for user-initiated Windows installs without changing app-quit installs', async () => {
+  it('uses a silent restart handoff for user-confirmed Windows updates without automatic app-quit installs', async () => {
     setPlatform('win32');
     const cleanup = vi.fn();
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
@@ -597,28 +784,71 @@ describe('AutoUpdaterService', () => {
     await autoUpdaterService.quitAndInstall();
 
     expect(cleanup).toHaveBeenCalledTimes(1);
-    expect(autoUpdaterMock.autoInstallOnAppQuit).toBe(true);
-    expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledWith(false, true);
+    expect(autoUpdaterMock.autoInstallOnAppQuit).toBe(false);
+    expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledWith(true, true);
   });
 
   it('moves the process cwd to temp before the Windows updater handoff', async () => {
     setPlatform('win32');
-    const tempRoot = path.join(process.env.TEMP || process.cwd(), `aionui-updater-cwd-test-${process.pid}`);
-    const expectedCwd = path.join(tempRoot, 'openh3-updater-cwd');
-    const chdir = vi.spyOn(process, 'chdir').mockImplementation(() => undefined);
-    appMock.getPath.mockImplementation((name: string) => (name === 'temp' ? tempRoot : '/tmp/aionui-test'));
+    const originalCwd = process.cwd();
+    const expectedCwd = path.join(appMock.getPath('temp'), 'openh3-updater-cwd');
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    autoUpdaterService.initialize();
 
+    await autoUpdaterService.quitAndInstall();
+
+    expect(fs.statSync(expectedCwd).isDirectory()).toBe(true);
+    expect(process.chdir).toHaveBeenCalledWith(expectedCwd);
+    expect(process.cwd()).toBe(originalCwd);
+    expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledWith(true, true);
+  });
+});
+
+describe('background update schedule', () => {
+  it('delays 30 seconds, repeats every 6 hours, and disposes timers', async () => {
+    vi.useFakeTimers();
     try {
-      const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
-      autoUpdaterService.initialize();
-
-      await autoUpdaterService.quitAndInstall();
-
-      expect(chdir).toHaveBeenCalledWith(expectedCwd);
-      expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledWith(false, true);
+      const { scheduleUpdateChecks } = await import('@/process/services/autoUpdaterService');
+      const check = vi.fn();
+      const stop = scheduleUpdateChecks(check);
+      await vi.advanceTimersByTimeAsync(29999);
+      expect(check).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(check).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(6 * 60 * 60 * 1000);
+      expect(check).toHaveBeenCalledTimes(2);
+      stop();
+      await vi.advanceTimersByTimeAsync(6 * 60 * 60 * 1000);
+      expect(check).toHaveBeenCalledTimes(2);
     } finally {
-      chdir.mockRestore();
-      rmSync(tempRoot, { recursive: true, force: true });
+      vi.useRealTimers();
     }
+  });
+});
+
+describe('Windows updater installer contract', () => {
+  it('passes update, silent and restart flags without requesting data deletion', async () => {
+    const { NsisUpdater } = await import('electron-updater/out/NsisUpdater');
+    const spawnLog = vi.fn().mockResolvedValue(true);
+    const updater = {
+      installerPath: 'C:/cached/OpenH3-update.exe',
+      installDirectory: 'C:/Apps/OpenH3',
+      downloadedUpdateHelper: null,
+      spawnLog,
+      _logger: { info: vi.fn() },
+    };
+    const result = NsisUpdater.prototype.doInstall.call(updater as unknown as InstanceType<typeof NsisUpdater>, {
+      isSilent: true,
+      isForceRunAfter: true,
+      isAdminRightsRequired: false,
+    });
+    expect(result).toBe(true);
+    expect(spawnLog).toHaveBeenCalledWith(updater.installerPath, [
+      '--updated',
+      '/S',
+      '--force-run',
+      '/D=' + updater.installDirectory,
+    ]);
+    expect(spawnLog.mock.calls[0][1]).not.toContain('--delete-app-data');
   });
 });

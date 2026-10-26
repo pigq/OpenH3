@@ -54,7 +54,7 @@ export const getIncludePrerelease = () => localStorage.getItem('update.includePr
  * discriminated outcome. Performs no UI side effects and no dispatch — callers
  * decide how to present the result.
  */
-export const runUpdateCheck = async (opts: {
+const performUpdateCheck = async (opts: {
   includePrerelease: boolean;
   fallbackVersion: string;
   checkFailedLabel: string;
@@ -83,7 +83,7 @@ export const runUpdateCheck = async (opts: {
     const releasePageUrl = latest?.htmlUrl || '';
 
     // Never treat a same-or-older feed version as an available update. The
-    // auto-updater and CDN manifest can report a version that is not strictly
+    // auto-updater and GitHub API can report a version that is not strictly
     // newer than the installed build; comparing here prevents downgrade offers.
     const autoUpdateAvailable = isNewerVersion(autoUpdateInfo?.version, currentVersion);
     const manualUpdateAvailable = Boolean(
@@ -113,4 +113,14 @@ export const runUpdateCheck = async (opts: {
       message: error instanceof Error ? error.message : String(error),
     };
   }
+};
+
+let pendingCheck: Promise<CheckUpdateOutcome> | null = null;
+/** Coalesce About, menu and periodic checks without changing channels mid-flight. */
+export const runUpdateCheck = (opts: Parameters<typeof performUpdateCheck>[0]): Promise<CheckUpdateOutcome> => {
+  if (pendingCheck) return pendingCheck;
+  pendingCheck = performUpdateCheck(opts).finally(() => {
+    pendingCheck = null;
+  });
+  return pendingCheck;
 };
