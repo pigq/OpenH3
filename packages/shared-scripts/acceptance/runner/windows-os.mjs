@@ -245,6 +245,14 @@ switch ($p.action) {
   'listeners' { Emit @{kind='result'; pids=@(Get-NetTCPConnection -State Listen -LocalPort $p.port | Select-Object -ExpandProperty OwningProcess -Unique)} }
   'signature' {
     CheckPath $p.path $false $false
+    # The hosted runner can invoke powershell.exe with a reduced module path.
+    # Load the inbox security module by its absolute path before querying the
+    # real Authenticode status; never synthesize a signature result.
+    if (-not (Get-Command Get-AuthenticodeSignature -ErrorAction SilentlyContinue)) {
+      $securityModule = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\Modules\Microsoft.PowerShell.Security'
+      if (-not (Test-Path -LiteralPath $securityModule -PathType Container)) { throw 'Microsoft.PowerShell.Security module is unavailable' }
+      Import-Module -Name $securityModule -ErrorAction Stop
+    }
     $signature = Get-AuthenticodeSignature -LiteralPath $p.path
     Emit @{kind='result'; status=$signature.Status.ToString(); subject=$signature.SignerCertificate.Subject; thumbprint=$signature.SignerCertificate.Thumbprint}
   }
