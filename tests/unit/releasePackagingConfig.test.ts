@@ -235,7 +235,7 @@ describe('manual build, official content and installed acceptance mode isolation
     expect(candidate.uses).toBe('./.github/workflows/_build-reusable.yml');
     expect(candidate.with).toMatchObject({
       ref: '${{ github.sha }}',
-      skip_code_quality: false,
+      skip_code_quality: '${{ inputs.skip_code_quality }}',
       append_commit_hash: false,
       upload_installers_only: false,
       acceptance_provenance: true,
