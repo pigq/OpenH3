@@ -321,15 +321,20 @@ describe('content orchestration', () => {
     await s.check();
     const a = new AbortController();
     const b = new AbortController();
+    const secondConsumerJoined = vi.spyOn(b.signal, 'addEventListener');
     const first = s.asset(1, digest, a.signal);
     const result = first.catch((e) => e);
     const other = s.asset(1, digest, b.signal);
-    await vi.waitFor(() => expect(source.asset).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => {
+      expect(source.asset).toHaveBeenCalledTimes(1);
+      expect(secondConsumerJoined).toHaveBeenCalledWith('abort', expect.any(Function), { once: true });
+    });
     a.abort();
     finish();
     expect((await other).bytes).toEqual(image);
     expect(await result).toBeInstanceOf(Error);
-    s.stop();
+    expect(source.asset).toHaveBeenCalledTimes(1);
+    await s.stop();
   });
   it('stops optional preview downloads before exceeding the cache budget', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'catalog-service-'));
