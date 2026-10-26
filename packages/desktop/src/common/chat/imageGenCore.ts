@@ -12,6 +12,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { randomUUID, createHash } from 'node:crypto';
+import { templateSnapshotSchema, type TemplateSnapshot } from '@/common/contentCatalog/snapshot';
 import { jsonrepair } from 'jsonrepair';
 import type OpenAI from 'openai';
 import { ClientFactory, type RotatingClient } from '@/common/api/ClientFactory';
@@ -123,12 +125,22 @@ export function getFileExtensionFromDataUrl(dataUrl: string): string {
   return DEFAULT_IMAGE_EXTENSION;
 }
 
-export async function saveGeneratedImage(base64Data: string, workspaceDir: string): Promise<string> {
+type ImageGenerationProvenance = {
+  prompt: string;
+  providerId: string;
+  model: string;
+  templateSnapshot: TemplateSnapshot;
+};
+export async function saveGeneratedImage(
+  base64Data: string,
+  workspaceDir: string,
+  provenance?: ImageGenerationProvenance
+): Promise<string> {
   const timestamp = Date.now();
   const decoded = decodeImageDataUrl(base64Data);
   const canonicalDataUrl = imageBytesToDataUrl(decoded.bytes, decoded.mime);
   const fileExtension = getFileExtensionFromDataUrl(canonicalDataUrl);
-  const file_name = `img-${timestamp}${fileExtension}`;
+  const file_name = `img-${timestamp}${provenance ? `-${randomUUID()}` : ''}${fileExtension}`;
   const resolvedDir = path.resolve(workspaceDir);
   const file_path = path.join(resolvedDir, file_name);
 
@@ -136,6 +148,31 @@ export async function saveGeneratedImage(base64Data: string, workspaceDir: strin
 
   try {
     await fs.promises.writeFile(file_path, imageBuffer);
+    if (provenance) {
+      const record = {
+        schemaVersion: 1,
+        status: 'succeeded',
+        createdAt: new Date().toISOString(),
+        prompt: provenance.prompt,
+        providerId: provenance.providerId,
+        model: provenance.model,
+        templateSnapshot: templateSnapshotSchema.parse(provenance.templateSnapshot),
+        artifact: { filename: file_name, sha256: createHash('sha256').update(imageBuffer).digest('hex') },
+      };
+      const temporary = `${file_path}.generation.json.tmp`;
+      const handle = await fs.promises.open(temporary, 'wx', 0o600);
+      try {
+        try {
+          await handle.writeFile(JSON.stringify(record, null, 2));
+          await handle.sync();
+        } finally {
+          await handle.close();
+        }
+        await fs.promises.rename(temporary, `${file_path}.generation.json`);
+      } finally {
+        await fs.promises.unlink(temporary).catch(() => {});
+      }
+    }
     return file_path;
   } catch (error) {
     console.error('[ImageGen] Failed to save image file:', error);
@@ -207,6 +244,7 @@ export async function processImageUri(imageUri: string, workspaceDir: string): P
 export interface ImageGenParams {
   prompt: string;
   image_uris?: string[] | string;
+  templateSnapshot?: TemplateSnapshot;
 }
 
 export interface ImageGenResult {
@@ -254,6 +292,14 @@ export async function executeImageGeneration(
   }
 
   try {
+    const provenance: ImageGenerationProvenance | undefined = params.templateSnapshot
+      ? {
+          prompt: params.prompt,
+          providerId: provider.id,
+          model: provider.use_model ?? '',
+          templateSnapshot: templateSnapshotSchema.parse(params.templateSnapshot) as TemplateSnapshot,
+        }
+      : undefined;
     // Parse image URIs
     let imageUris: string[] = [];
     if (params.image_uris) {
@@ -316,7 +362,7 @@ export async function executeImageGeneration(
         .filter((part): part is ImageContent => part.type === 'image_url')
         .map((part, index) => ({ uri: imageUris[index], url: part.image_url.url }));
       const dataUrl = await imagesApiDataUrl(rotatingClient, params.prompt, provider.use_model, references, signal);
-      const imagePath = await saveGeneratedImage(dataUrl, resolvedWorkspaceDir);
+      const imagePath = await saveGeneratedImage(dataUrl, resolvedWorkspaceDir, provenance);
       return {
         success: true,
         text: `Generated image saved to: ${imagePath}`,
@@ -384,7 +430,7 @@ export async function executeImageGeneration(
     const firstImage = images[0];
     if (firstImage.type === 'image_url' && firstImage.image_url?.url) {
       const dataUrl = await imageUrlToDataUrl(firstImage.image_url.url, signal);
-      const imagePath = await saveGeneratedImage(dataUrl, resolvedWorkspaceDir);
+      const imagePath = await saveGeneratedImage(dataUrl, resolvedWorkspaceDir, provenance);
       const relativeImagePath = path.relative(resolvedWorkspaceDir, imagePath);
 
       // Strip any inline base64 data URLs from the human-readable text before

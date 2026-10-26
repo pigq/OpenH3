@@ -6,6 +6,8 @@
 //! submodules. All logic lives in the modules below.
 
 mod config;
+mod content_catalog_proxy;
+pub use content_catalog_proxy::ContentCatalogProxy;
 mod router;
 mod services;
 

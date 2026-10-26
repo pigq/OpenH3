@@ -283,7 +283,9 @@ fn strip_pollution(cmd: &mut Command) {
     cmd.env_remove("NODE_OPTIONS")
         .env_remove("NODE_INSPECT")
         .env_remove("NODE_DEBUG")
-        .env_remove("CLAUDECODE");
+        .env_remove("CLAUDECODE")
+        .env_remove("OPENH3_CONTENT_TOKEN")
+        .env_remove("OPENH3_CONTENT_PORT");
 }
 
 #[cfg(unix)]
@@ -465,6 +467,20 @@ mod tests {
                 .get_envs()
                 .any(|(key, value)| { key == OsStr::new("NO_COLOR") && value == Some(OsStr::new("1")) })
         );
+    }
+
+    #[test]
+    fn content_host_credentials_are_removed_from_child_environment() {
+        let builder = Builder::new("test");
+        let removals: Vec<_> = builder
+            .inner
+            .as_std()
+            .get_envs()
+            .filter(|(_, value)| value.is_none())
+            .map(|(key, _)| key)
+            .collect();
+        assert!(removals.contains(&OsStr::new("OPENH3_CONTENT_TOKEN")));
+        assert!(removals.contains(&OsStr::new("OPENH3_CONTENT_PORT")));
     }
 
     #[test]

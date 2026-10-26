@@ -1,14 +1,22 @@
 name: '🔨 Manual Build'
 
 permissions:
-  contents: write
-  actions: write
+  contents: read
+  actions: read
 
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: 'Operation to run (content publication never builds desktop installers)'
+        required: true
+        type: choice
+        options:
+          - build
+          - official-content
+        default: 'build'
       branch:
-        description: 'Branch to build from'
+        description: 'Branch to build from (build mode only)'
         required: true
         default: 'main'
         type: string
@@ -40,12 +48,28 @@ on:
         required: false
         type: string
         default: ''
+      content_source:
+        description: 'Approved editorial source JSON in the dispatched main commit (official-content only)'
+        required: false
+        type: string
+        default: 'content-source/catalog-source.json'
+      content_sequence:
+        description: 'Required strictly increasing sequence, including rollback (official-content only)'
+        required: false
+        type: string
+        default: ''
+      rollback_reason:
+        description: 'Audited reason for older payload, at least 8 characters (official-content only)'
+        required: false
+        type: string
+        default: ''
 
 env:
   BUN_INSTALL_REGISTRY: 'https://registry.npmjs.org/'
 
 jobs:
   prepare-matrix:
+    if: inputs.mode == 'build'
     name: Prepare Build Matrix
     runs-on: ubuntu-latest
     outputs:
@@ -86,7 +110,11 @@ jobs:
           echo "$MATRIX" | python3 -m json.tool
 
   build-pipeline:
+    if: inputs.mode == 'build'
     needs: prepare-matrix
+    permissions:
+      contents: write
+      actions: write
     uses: ./.github/workflows/_build-reusable.yml
     with:
       matrix: ${{ needs.prepare-matrix.outputs.matrix }}
@@ -96,3 +124,60 @@ jobs:
       append_commit_hash: true
       upload_installers_only: true
     secrets: inherit
+
+  publish-official-content:
+    name: Publish official content catalog
+    if: inputs.mode == 'official-content' && github.repository == 'pigq/OpenH3' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: official-content
+    permissions:
+      contents: write
+    concurrency:
+      group: official-content-publication
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Validate approved content and media
+        env:
+          CONTENT_SOURCE: ${{ inputs.content_source }}
+          CONTENT_SEQUENCE: ${{ inputs.content_sequence }}
+        run: |
+          set -euo pipefail
+          : "${CONTENT_SOURCE:?Content source is required in official-content mode}"
+          : "${CONTENT_SEQUENCE:?Content sequence is required in official-content mode}"
+          WORKSPACE_REAL="$(cd -- "$GITHUB_WORKSPACE" && pwd -P)"
+          SOURCE_REAL="$(realpath -e -- "$CONTENT_SOURCE")"
+          case "$SOURCE_REAL" in
+            "$WORKSPACE_REAL"/*) ;;
+            *) echo 'Content source must be inside the reviewed checkout' >&2; exit 1 ;;
+          esac
+          test -f "$SOURCE_REAL"
+          git --literal-pathspecs ls-files --error-unmatch -- "$CONTENT_SOURCE" >/dev/null
+          node scripts/content-catalog/build.mjs --input "$CONTENT_SOURCE" --assets-dir "$(dirname "$CONTENT_SOURCE")" --out "$RUNNER_TEMP/content-build" --keyring resources/content-catalog/trusted-keys.json --sequence "$CONTENT_SEQUENCE"
+          cat "$RUNNER_TEMP/content-build/changes.json"
+      - name: Sign and publish immutable snapshot, then advance signed channel
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SIGNING_PEM: ${{ secrets.CONTENT_SIGNING_PRIVATE_KEY }}
+          CONTENT_KEY_ID: openh3-content-20261024
+          CONTENT_MIN_CLIENT: '3.0.1'
+          CONTENT_ROLLBACK_REASON: ${{ inputs.rollback_reason }}
+          OPENH3_CONTENT_PRIVATE_KEY_FILE: ${{ runner.temp }}/content-private.pem
+        run: |
+          set -euo pipefail
+          trap 'rm -f -- "$OPENH3_CONTENT_PRIVATE_KEY_FILE"' EXIT
+          node --input-type=module -e "import fs from 'node:fs'; if(!process.env.SIGNING_PEM)throw Error('Missing signing key');fs.writeFileSync(process.env.OPENH3_CONTENT_PRIVATE_KEY_FILE,process.env.SIGNING_PEM,{mode:0o600,flag:'wx'});"
+          node scripts/content-catalog/publish.mjs --publish --directory "$RUNNER_TEMP/content-build" --key-id "$CONTENT_KEY_ID" --keyring resources/content-catalog/trusted-keys.json --min-client-version "$CONTENT_MIN_CLIENT" --rollback-reason "$CONTENT_ROLLBACK_REASON"
+      - name: Remove temporary private key
+        if: always()
+        env:
+          OPENH3_CONTENT_PRIVATE_KEY_FILE: ${{ runner.temp }}/content-private.pem
+        run: node --input-type=module -e "import fs from 'node:fs';fs.rmSync(process.env.OPENH3_CONTENT_PRIVATE_KEY_FILE,{force:true});"

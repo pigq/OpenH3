@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { TemplateSnapshot } from '@/common/contentCatalog/snapshot';
 
 const pinnedVersion = z
   .string()
@@ -211,6 +212,7 @@ export type ComfyOperation = {
 };
 export type ComfyDiagnosis = { category: string; nodeId?: string; retryable: boolean; action: string };
 export type ComfyGenerationJob = {
+  templateSnapshot?: TemplateSnapshot;
   id: string;
   profileId: string;
   kind: 'image' | 'video';

@@ -6,8 +6,9 @@ import { BackendHttpError } from '@/common/adapter/httpBridge';
 import AionrsSendBox from '@/renderer/pages/conversation/platforms/aionrs/AionrsSendBox';
 import type { AionrsModelSelection } from '@/renderer/pages/conversation/platforms/aionrs/useAionrsModelSelection';
 import type { TeamSendBoxRuntime } from '@/renderer/pages/team/components/teamSendRuntime';
-import { useGuidDraft } from '@/renderer/pages/guid/hooks/useGuidDraft';
+import { resetGuidDraft, useGuidDraft } from '@/renderer/pages/guid/hooks/useGuidDraft';
 import { beginComfySelectionChange } from '@/renderer/pages/conversation/runtime/Creation/useComfySelectionPending';
+import { templateSnapshotFixture } from '../../contentCatalog/galleryFixture';
 const bindComfy = vi.fn().mockResolvedValue({ ok: true });
 vi.mock('@/common/chat/document/creation/comfyApi', () => ({
   comfyApi: { bind: (...args: unknown[]) => bindComfy(...args) },
@@ -339,13 +340,60 @@ describe('AionrsSendBox', () => {
     expect(draft.result.current[0]).toBe('');
   });
 
+  it('does not clear a replacement same-text draft after its scope was reset during an in-flight send', async () => {
+    const draft = renderHook(() => useGuidDraft());
+    act(() => draft.result.current[1]('Same prompt'));
+    sessionStorage.setItem(
+      'aionrs_initial_message_conv-1',
+      JSON.stringify({ input: 'Same prompt', guidDraft: 'Same prompt' })
+    );
+    let acknowledge!: (value: unknown) => void;
+    sendMessageInvokeMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          acknowledge = resolve;
+        })
+    );
+    const first = render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledOnce());
+    first.unmount();
+    act(() => resetGuidDraft());
+    act(() => draft.result.current[1]('Same prompt'));
+    await act(async () => acknowledge({ turn_id: 'turn-1', msg_id: 'msg-1', runtime: {} }));
+    expect(draft.result.current[0]).toBe('Same prompt');
+  });
+
+  it('discards an initial message from an obsolete account scope before binding or sending', async () => {
+    sessionStorage.setItem(
+      'aionrs_initial_message_conv-1',
+      JSON.stringify({
+        input: 'Other account secret',
+        guidDraft: 'Other account secret',
+        guidDraftScope: 'expired-account-scope',
+        creationRequestId: 'request-1',
+        creationRequest: { source: 'local', kind: 'image' },
+      })
+    );
+    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    await act(async () => {});
+    expect(bindComfy).not.toHaveBeenCalled();
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+  });
+
   it('binds the selected local profile snapshot before the initial Aion CLI turn', async () => {
     sessionStorage.setItem(
       'aionrs_initial_message_conv-1',
       JSON.stringify({
         input: 'generate image',
         creationRequestId: 'request-z',
-        creationRequest: { source: 'local', kind: 'image', profileId: 'z-fp8', family: 'z-image', intent: 'generate' },
+        creationRequest: {
+          source: 'local',
+          kind: 'image',
+          profileId: 'z-fp8',
+          family: 'z-image',
+          intent: 'generate',
+          templateSnapshot: templateSnapshotFixture,
+        },
       })
     );
     sendMessageInvokeMock.mockResolvedValueOnce({ turn_id: 'turn-1', msg_id: 'msg-1', runtime: {} });
@@ -354,6 +402,7 @@ describe('AionrsSendBox', () => {
     expect(bindComfy).toHaveBeenCalledWith('request-z', 'conv-1', 'z-fp8', 'z-image', 'generate', {
       source: 'local',
       kind: 'image',
+      templateSnapshot: templateSnapshotFixture,
     });
     expect(bindComfy.mock.invocationCallOrder[0]).toBeLessThan(sendMessageInvokeMock.mock.invocationCallOrder[0]);
   });

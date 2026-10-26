@@ -1819,13 +1819,35 @@ mod tests {
 
     #[test]
     fn stream_relay_emits_feedback_runtime_terminal_log() {
+        const CHILD: &str = "OPENH3_STREAM_RELAY_LOG_CAPTURE_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            // Callsite interest is process-global. Isolate this subscriber from
+            // parallel tests registering the same callsites without a subscriber.
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "stream_relay::tests::stream_relay_emits_feedback_runtime_terminal_log",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success()
+                    && stdout.lines().any(|line| line == "running 1 test")
+                    && stdout.contains("test result: ok. 1 passed; 0 failed;"),
+                "isolated log capture did not pass exactly one test:\n{}\n{}",
+                stdout,
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
-        // Keep this capture at TRACE so a parallel test's WARN-only subscriber
-        // cannot leave the global callsite cache filtering the INFO terminal
-        // event before this scoped subscriber is installed.
+        // Keep all diagnostic levels visible inside the isolated test process.
         let captured = capture_logs(Level::TRACE, || {
             runtime.block_on(async {
                 let repo = Arc::new(RecordingRepo::new());

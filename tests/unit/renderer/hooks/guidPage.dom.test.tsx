@@ -1,3 +1,7 @@
+import { galleryFixture } from '../../contentCatalog/galleryFixture';
+vi.mock('@/renderer/components/ContentCatalog/useContentCatalog', () => ({
+  useContentCatalog: () => ({ current: galleryFixture, accept: () => {}, act: async () => {} }),
+}));
 /**
  * @license
  * Copyright 2025 AionUi (aionui.com)
@@ -302,6 +306,7 @@ const guidInputCardProps = {
 
 describe('GuidPage', () => {
   beforeEach(() => {
+    vi.stubGlobal('__APP_VERSION__', '2.2.2');
     locationMock.state = null;
     locationMock.key = 'guid-location';
     locationMock.pathname = '/guid';
@@ -482,11 +487,21 @@ describe('GuidPage', () => {
     expect(screen.getByText('guid.aiCreation')).toBeInTheDocument();
     expect(screen.getAllByRole('article')).toHaveLength(52);
     fireEvent.click(
-      within(screen.getByRole('article', { name: 'guid.templates.poster.title' })).getByRole('button', {
+      within(
+        screen.getByRole('article', {
+          name: galleryFixture.entries.find((e) => e.id === 'official:poster')!.title['zh-CN'],
+        })
+      ).getByRole('button', {
         name: 'guid.templateUse',
       })
     );
-    expect(guidInputMock.setInput).toHaveBeenCalledWith('guid.templates.poster.prompt');
+    expect(guidInputMock.setInput).toHaveBeenCalledWith(
+      (
+        galleryFixture.entries.find(
+          (e) => e.id === 'official:poster'
+        ) as import('@/common/contentCatalog/schema').OfficialTemplate
+      ).prompt['zh-CN']
+    );
   });
 
   it('adds model installation requests to the editable composer without sending or changing the selected H3 target', () => {

@@ -108,6 +108,8 @@ files:
     to: static
 
 extraResources:
+  - from: out/content-catalog
+    to: content-catalog
   - from: public
     to: .
   - from: resources/app.png

@@ -144,6 +144,21 @@ describe('local image tool routing', () => {
     expect(cloudMock).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledOnce();
   });
+  it('passes the bound template revision to cloud output metadata, not into the prompt', async () => {
+    const templateSnapshot = {
+      templateId: 'official:cloud',
+      templateRevision: 3,
+      releaseSequence: 7,
+      locale: 'en-US',
+      title: 'Title',
+      prompt: 'Original',
+      parameters: {},
+      requiresReference: false,
+    };
+    respond({ profiles: [], selection: { source: 'cloud', kind: 'image', intent: 'generate', templateSnapshot } });
+    await invoke({ prompt: 'Edited' });
+    expect(cloudMock.mock.calls[0][0]).toEqual({ prompt: 'Edited', image_uris: undefined, templateSnapshot });
+  });
 
   it('preserves ordinary configured cloud generation outside creation sessions', async () => {
     vi.stubEnv('AIONUI_CREATION_REQUEST_ID', '');

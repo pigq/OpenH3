@@ -3,7 +3,11 @@ import { promises as fs } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import type { AddressInfo } from 'node:net';
+import net, { type AddressInfo, type Socket } from 'node:net';
+import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import WebSocket, { WebSocketServer } from 'ws';
 import { startStaticServer, type StaticServerHandle } from './static-server.js';
 
 async function mkRendererFixture(): Promise<string> {
@@ -24,6 +28,54 @@ async function startMockBackend(
     port,
     close: () => new Promise<void>((r) => server.close(() => r())),
   };
+}
+
+const WS_KEY = 'dGhlIHNhbXBsZSBub25jZQ==';
+const WS_RESPONSE =
+  'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' +
+  `Sec-WebSocket-Accept: ${createHash('sha1').update(`${WS_KEY}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64')}\r\n\r\n`;
+const CONTENT_REQUEST = 'GET /api/content-catalog/catalog HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n';
+const execFileAsync = promisify(execFile);
+
+function wsRequest(route: string, extraHeaders = ''): string {
+  return (
+    `GET ${route} HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: keep-alive, Upgrade\r\n` +
+    `Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: ${WS_KEY}\r\n${extraHeaders}\r\n`
+  );
+}
+
+async function startRawBackend(onConnection: (socket: Socket) => void): Promise<{
+  port: number;
+  close: () => Promise<void>;
+}> {
+  const clients = new Set<Socket>();
+  const server = net.createServer((socket) => {
+    clients.add(socket);
+    socket.on('close', () => clients.delete(socket));
+    onConnection(socket);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  return {
+    port: (server.address() as AddressInfo).port,
+    close: () => {
+      for (const client of clients) client.destroy();
+      return new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
+}
+
+async function rawExchange(port: number, send: (socket: Socket) => void): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect({ host: '127.0.0.1', port }, () => send(socket));
+    const chunks: Buffer[] = [];
+    const timer = setTimeout(() => socket.destroy(new Error('timeout waiting for connection close')), 2500);
+    socket.on('data', (chunk: Buffer) => chunks.push(chunk));
+    socket.on('error', reject);
+    socket.on('close', () => {
+      clearTimeout(timer);
+      resolve(Buffer.concat(chunks));
+    });
+  });
 }
 
 describe('static-server', () => {
@@ -86,6 +138,313 @@ describe('static-server', () => {
     expect(r.status).toBe(200);
     const json = (await r.json()) as { path: string };
     expect(json.path).toBe('/api/anything');
+  });
+  it('overwrites the embedded-WebUI marker so browsers cannot inherit desktop authentication', async () => {
+    const backend = await startMockBackend((req, res) => res.end(String(req.headers['x-openh3-webui-request'])));
+    stopBackend = backend.close;
+    handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+    expect(
+      await (
+        await fetch(`${handle.localUrl}/api/content-catalog/catalog`, { headers: { 'x-openh3-webui-request': '0' } })
+      ).text()
+    ).toBe('1');
+  });
+
+  describe.each(['/ws', '/api/stt/stream'])('%s TCP upgrade boundary', (route) => {
+    it('does not give a non-upgrade GET pipeline an unmarked connection to Core', async () => {
+      const contentMarkers: unknown[] = [];
+      const backend = await startMockBackend((req, res) => {
+        if (req.url === '/api/content-catalog/catalog') {
+          contentMarkers.push(req.headers['x-openh3-webui-request']);
+          res.end(req.headers['x-openh3-webui-request'] === '1' ? 'WEBUI_AUTH_REQUIRED' : 'DESKTOP_CONTENT');
+        } else {
+          res.writeHead(400).end('upgrade required');
+        }
+      });
+      stopBackend = backend.close;
+      handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+      const response = await rawExchange(handle.port, (socket) => {
+        socket.write(`GET ${route} HTTP/1.1\r\nHost: localhost\r\n\r\n${CONTENT_REQUEST}`);
+      });
+      expect(response.toString()).not.toContain('DESKTOP_CONTENT');
+      expect(contentMarkers.every((marker) => marker === '1')).toBe(true);
+    });
+
+    it('isolates a rejected handshake from a same-packet HTTP pipeline', async () => {
+      let received = '';
+      const backend = await startRawBackend((socket) => {
+        socket.on('data', (chunk) => {
+          received += chunk.toString();
+          if (received.includes('\r\n\r\n')) {
+            // Keep-alive refusal: the proxy must close without sending the next request.
+            socket.write('HTTP/1.1 401 Unauthorized\r\nContent-Length: 6\r\nConnection: keep-alive\r\n\r\ndenied');
+          }
+        });
+      });
+      stopBackend = backend.close;
+      handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+      const response = await rawExchange(handle.port, (socket) => socket.write(wsRequest(route) + CONTENT_REQUEST));
+      expect(received).toBe(wsRequest(route));
+      expect(response.toString()).toContain('401 Unauthorized');
+      expect(response.toString()).toContain('denied');
+    });
+
+    it('discards bytes arriving while the backend handshake is still pending', async () => {
+      let received = '';
+      let sendDelayedBytes: (() => void) | undefined;
+      const backend = await startRawBackend((socket) => {
+        socket.on('data', (chunk) => {
+          received += chunk.toString();
+          if (!received.includes('\r\n\r\n')) return;
+          sendDelayedBytes?.();
+          sendDelayedBytes = undefined;
+          setTimeout(() => {
+            socket.write('HTTP/1.1 403 Forbidden\r\nContent-Length: 6\r\n\r\nden');
+            setTimeout(() => socket.write('ied'), 10);
+          }, 50);
+        });
+      });
+      stopBackend = backend.close;
+      handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+      const response = await rawExchange(handle.port, (socket) => {
+        sendDelayedBytes = () => socket.write(CONTENT_REQUEST);
+        socket.write(wsRequest(route));
+      });
+      expect(received).toBe(wsRequest(route));
+      expect(response.toString()).toContain('denied');
+    });
+
+    it('waits for a segmented complete request header before contacting Core', async () => {
+      let receivedBeforeHeaderEnd = false;
+      let requestComplete = false;
+      let received = '';
+      const backend = await startRawBackend((socket) => {
+        if (!requestComplete) receivedBeforeHeaderEnd = true;
+        socket.on('data', (chunk) => {
+          received += chunk.toString();
+          if (received.includes('\r\n\r\n')) socket.end(WS_RESPONSE);
+        });
+      });
+      stopBackend = backend.close;
+      handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+      const request = wsRequest(`${route}?lang=en`);
+      const response = await rawExchange(handle.port, (socket) => {
+        socket.write(request.slice(0, -1));
+        setTimeout(() => {
+          requestComplete = true;
+          socket.write(request.slice(-1));
+        }, 40);
+      });
+      expect(receivedBeforeHeaderEnd).toBe(false);
+      expect(received).toBe(request);
+      expect(response.toString()).toContain('101 Switching Protocols');
+    });
+
+    it('does not replay pre-101 bytes after a segmented successful handshake', async () => {
+      const clientFrame = Buffer.from([0x81, 0x82, 1, 2, 3, 4, 0x6e, 0x69]); // Masked "ok".
+      const serverFrame = Buffer.from([0x81, 2, 0x6f, 0x6b]);
+      let received = Buffer.alloc(0);
+      let sendEarlyBytes: (() => void) | undefined;
+      let awaitingHeader = true;
+      const backend = await startRawBackend((socket) => {
+        socket.on('data', (chunk) => {
+          received = Buffer.concat([received, chunk]);
+          if (awaitingHeader && received.includes('\r\n\r\n')) {
+            awaitingHeader = false;
+            sendEarlyBytes?.();
+            setTimeout(() => {
+              socket.write(WS_RESPONSE.slice(0, -1));
+              setTimeout(() => socket.write(WS_RESPONSE.slice(-1)), 20);
+            }, 40);
+          } else if (received.subarray(-clientFrame.length).equals(clientFrame)) {
+            socket.end(serverFrame);
+          }
+        });
+      });
+      stopBackend = backend.close;
+      handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+      const response = await rawExchange(handle.port, (socket) => {
+        let handshake = '';
+        let sentFrame = false;
+        socket.on('data', (chunk) => {
+          handshake += chunk.toString();
+          if (!sentFrame && handshake.includes('\r\n\r\n')) {
+            sentFrame = true;
+            socket.write(clientFrame);
+          }
+        });
+        sendEarlyBytes = () => socket.write(CONTENT_REQUEST);
+        socket.write(wsRequest(route) + CONTENT_REQUEST);
+      });
+      expect(received).toEqual(Buffer.concat([Buffer.from(wsRequest(route)), clientFrame]));
+      expect(response.subarray(-serverFrame.length)).toEqual(serverFrame);
+    });
+
+    it.each([
+      'HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n',
+      'HTTP/1.1 204 No Content\r\n\r\n',
+      'HTTP/1.1 403 Forbidden\r\nTransfer-Encoding: chunked\r\n\r\n6;test=yes\r\ndenied\r\n0\r\nX-End: yes\r\n\r\n',
+    ])('closes exactly after one failed HTTP response: %s', async (reply) => {
+      let received = '';
+      const backend = await startRawBackend((socket) => {
+        socket.on('data', (chunk) => {
+          received += chunk.toString();
+          if (!received.includes('\r\n\r\n')) return;
+          let offset = 0;
+          const writeNext = (): void => {
+            if (socket.destroyed || offset === reply.length) return;
+            socket.write(reply.slice(offset, ++offset));
+            setTimeout(writeNext, 1);
+          };
+          writeNext();
+        });
+      });
+      stopBackend = backend.close;
+      handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+      const response = await rawExchange(handle.port, (socket) => socket.write(wsRequest(route) + CONTENT_REQUEST));
+      expect(response.toString()).toBe(reply);
+      expect(received).toBe(wsRequest(route));
+    });
+
+    it.each([
+      WS_RESPONSE.replace('101 Switching Protocols', '101'),
+      WS_RESPONSE.replace('s3pPLMBiTxaQ9kYGzzhZRbK+xOo=', 'invalid'),
+      WS_RESPONSE.replace('Upgrade: websocket', 'Upgrade: h2c'),
+      WS_RESPONSE.replace('Connection: Upgrade', 'Connection: keep-alive'),
+      `HTTP/1.1 401 Unauthorized\r\nX-Padding: ${'a'.repeat(16 * 1024)}\r\n\r\n`,
+    ])('does not turn an invalid backend handshake into a tunnel: %#', async (reply) => {
+      let received = '';
+      const backend = await startRawBackend((socket) => {
+        socket.on('data', (chunk) => {
+          received += chunk.toString();
+          socket.write(reply);
+        });
+      });
+      stopBackend = backend.close;
+      handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+      await rawExchange(handle.port, (socket) => socket.write(wsRequest(route) + CONTENT_REQUEST));
+      expect(received).toBe(wsRequest(route));
+    });
+
+    it.each(['Content-Length: 1\r\n', 'Transfer-Encoding: chunked\r\n'])(
+      'rejects handshake body framing: %s',
+      async (headers) => {
+        let contactedCore = false;
+        const backend = await startRawBackend((socket) => {
+          contactedCore = true;
+          socket.on('data', () => socket.end(WS_RESPONSE));
+        });
+        stopBackend = backend.close;
+        handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+        const response = await rawExchange(handle.port, (socket) =>
+          socket.write(wsRequest(route, headers) + CONTENT_REQUEST)
+        );
+        expect(contactedCore).toBe(false);
+        expect(response.toString()).toMatch(/^HTTP\/1\.1 400/);
+      }
+    );
+
+    it('keeps native WebSocket frames bidirectional after a real 101', async () => {
+      const server = http.createServer();
+      const wss = new WebSocketServer({ server });
+      wss.on('connection', (socket) => {
+        socket.send('server-ready');
+        socket.on('message', (message) => socket.send(`echo:${message.toString()}`));
+      });
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      stopBackend = async () => {
+        for (const client of wss.clients) client.terminate();
+        await new Promise<void>((resolve) => wss.close(() => resolve()));
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      };
+      handle = await startStaticServer({ staticDir, backendPort: (server.address() as AddressInfo).port, port: 0 });
+      const messages = await new Promise<string[]>((resolve, reject) => {
+        const client = new WebSocket(`ws://127.0.0.1:${handle?.port}${route}`);
+        const received: string[] = [];
+        const timer = setTimeout(() => client.terminate(), 2000);
+        client.on('error', reject);
+        client.on('open', () => client.send('client-ready'));
+        client.on('message', (message) => {
+          received.push(message.toString());
+          if (received.length === 2) client.close();
+        });
+        client.on('close', () => {
+          clearTimeout(timer);
+          resolve(received);
+        });
+      });
+      expect(messages).toEqual(['server-ready', 'echo:client-ready']);
+    });
+  });
+
+  it.each([
+    ['an invalid version', wsRequest('/ws').replace('Version: 13', 'Version: 12'), 400],
+    ['a duplicate header', wsRequest('/ws', 'Host: duplicate\r\n'), 400],
+    ['an oversized header', wsRequest('/ws', `X-Padding: ${'a'.repeat(16 * 1024)}\r\n`), 431],
+  ])('keeps the host alive when a client resets after rejecting %s', async (_label, request, status) => {
+    // Use a separate host process: a global uncaughtException handler would
+    // hide an unhandled Socket error and let this regression pass falsely.
+    const sourceUrl = new URL('./static-server.ts', import.meta.url).href;
+    const script = `
+      import assert from 'node:assert/strict';
+      import net from 'node:net';
+      import { startStaticServer } from ${JSON.stringify(sourceUrl)};
+      const handle = await startStaticServer({ staticDir: '.', backendPort: 9, port: 0 });
+      try {
+        await new Promise((resolve, reject) => {
+          const client = net.connect({ host: '127.0.0.1', port: handle.port }, () => client.write(${JSON.stringify(request)}));
+          client.once('data', chunk => {
+            assert.match(chunk.toString(), /^HTTP\\/1\\.1 ${status} /);
+            client.resetAndDestroy();
+          });
+          client.on('error', reject);
+          client.once('close', resolve);
+        });
+        await new Promise(resolve => setTimeout(resolve, 100));
+      } finally {
+        await handle.stop();
+      }
+      console.log('HOST_SURVIVED_REJECTED_HANDSHAKE_RESET');
+    `;
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [...(process.versions.bun ? [] : ['--import', 'tsx']), '--input-type=module', '--eval', script],
+      { timeout: 5000 }
+    );
+    expect(stdout).toContain('HOST_SURVIVED_REJECTED_HANDSHAKE_RESET');
+  });
+
+  it('rejects a WebSocket header beyond the bounded peek size', async () => {
+    let contactedCore = false;
+    const backend = await startRawBackend((socket) => {
+      contactedCore = true;
+      socket.on('data', () => socket.end(WS_RESPONSE));
+    });
+    stopBackend = backend.close;
+    handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+    const response = await rawExchange(handle.port, (socket) => {
+      socket.write(wsRequest('/ws', `X-Padding: ${'a'.repeat(16 * 1024)}\r\n`));
+    });
+    expect(contactedCore).toBe(false);
+    expect(response.toString()).toMatch(/^HTTP\/1\.1 431/);
+  });
+
+  it('accepts a complete WebSocket header exactly at the bounded peek size', async () => {
+    let received = '';
+    const backend = await startRawBackend((socket) => {
+      socket.on('data', (chunk) => {
+        received += chunk.toString();
+        if (received.includes('\r\n\r\n')) socket.end(WS_RESPONSE);
+      });
+    });
+    stopBackend = backend.close;
+    handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+    const paddingLength = 16 * 1024 - Buffer.byteLength(wsRequest('/ws', 'Content-Length: 0\r\nX-Padding: \r\n'));
+    const request = wsRequest('/ws', `Content-Length: 0\r\nX-Padding: ${'a'.repeat(paddingLength)}\r\n`);
+    const response = await rawExchange(handle.port, (socket) => socket.write(request));
+    expect(Buffer.byteLength(request)).toBe(16 * 1024);
+    expect(received).toBe(request);
+    expect(response.toString()).toBe(WS_RESPONSE);
   });
 
   it('/login reverse-proxies to backend (no local handler)', async () => {
@@ -168,8 +527,6 @@ describe('static-server', () => {
     // We don't run a real ws protocol — just verify the upgrade response makes
     // it back through the TCP-splice proxy. This is the exact regression path
     // that bun 1.3's http-compat upgrade handler broke.
-    const { createHash } = await import('node:crypto');
-    const net = await import('node:net');
     const httpMod = await import('node:http');
     const backendServer = httpMod.createServer();
     backendServer.on('upgrade', (req, socket) => {
@@ -226,8 +583,6 @@ describe('static-server', () => {
 
   it('/api/stt/stream WebSocket upgrade is spliced to backend and 101 is relayed', async () => {
     // Same as /ws test but for STT streaming endpoint.
-    const { createHash } = await import('node:crypto');
-    const net = await import('node:net');
     const httpMod = await import('node:http');
     const backendServer = httpMod.createServer();
     backendServer.on('upgrade', (req, socket) => {
@@ -281,8 +636,6 @@ describe('static-server', () => {
   });
 
   it('/api/stt/stream with query params is spliced to backend', async () => {
-    const { createHash } = await import('node:crypto');
-    const net = await import('node:net');
     const httpMod = await import('node:http');
     const backendServer = httpMod.createServer();
     backendServer.on('upgrade', (req, socket) => {

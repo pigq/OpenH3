@@ -8,8 +8,9 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BackendHttpError } from '@/common/adapter/httpBridge';
 import { useAcpInitialMessage } from '@/renderer/pages/conversation/platforms/acp/useAcpInitialMessage';
-import { useGuidDraft } from '@/renderer/pages/guid/hooks/useGuidDraft';
+import { resetGuidDraft, useGuidDraft } from '@/renderer/pages/guid/hooks/useGuidDraft';
 import { useComfySelectionPending } from '@/renderer/pages/conversation/runtime/Creation/useComfySelectionPending';
+import { templateSnapshotFixture } from '../../contentCatalog/galleryFixture';
 
 const bindCreation = vi.fn();
 const bindComfy = vi.fn();
@@ -91,6 +92,45 @@ describe('useAcpInitialMessage', () => {
     expect(draft.result.current[0]).toBe('');
   });
 
+  it('does not clear a replacement same-text draft after its scope was reset during an in-flight send', async () => {
+    const draft = renderHook(() => useGuidDraft());
+    act(() => draft.result.current[1]('Same prompt'));
+    sessionStorage.setItem(
+      'acp_initial_message_conv-1',
+      JSON.stringify({ input: 'Same prompt', guidDraft: 'Same prompt' })
+    );
+    let acknowledge!: (value: unknown) => void;
+    sendMessageInvokeMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          acknowledge = resolve;
+        })
+    );
+    const first = mountInitial();
+    await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledOnce());
+    first.unmount();
+    act(() => resetGuidDraft());
+    act(() => draft.result.current[1]('Same prompt'));
+    await act(async () => acknowledge({ turn_id: 'turn-1', runtime: {} }));
+    expect(draft.result.current[0]).toBe('Same prompt');
+  });
+
+  it('discards an initial message from an obsolete account scope before binding or sending', async () => {
+    sessionStorage.setItem(
+      'acp_initial_message_conv-1',
+      JSON.stringify({
+        input: 'Other account secret',
+        guidDraft: 'Other account secret',
+        guidDraftScope: 'expired-account-scope',
+        creationRequestId: 'request-1',
+      })
+    );
+    mountInitial();
+    await act(async () => {});
+    expect(bindCreation).not.toHaveBeenCalled();
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+  });
+
   it('binds the local tools for an empty creation entry without sending a blank message', async () => {
     sessionStorage.setItem('acp_initial_message_conv-1', JSON.stringify({ input: '', creationRequestId: 'request-1' }));
     mountInitial();
@@ -110,6 +150,7 @@ describe('useAcpInitialMessage', () => {
           profileId: 'qwen-fp8',
           family: 'qwen-edit',
           intent: 'generate',
+          templateSnapshot: templateSnapshotFixture,
         },
       })
     );
@@ -119,6 +160,7 @@ describe('useAcpInitialMessage', () => {
     expect(bindComfy).toHaveBeenCalledWith('request-qwen', 'conv-1', 'qwen-fp8', 'qwen-edit', 'generate', {
       source: 'local',
       kind: 'image',
+      templateSnapshot: templateSnapshotFixture,
     });
     expect(bindCreation).not.toHaveBeenCalled();
     expect(bindComfy.mock.invocationCallOrder[0]).toBeLessThan(sendMessageInvokeMock.mock.invocationCallOrder[0]);
