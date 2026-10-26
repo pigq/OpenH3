@@ -7,8 +7,8 @@ use tokio::net::TcpStream;
 use tower::ServiceExt;
 
 use common::{
-    body_json, build_app, build_app_with_mock_agents, delete_with_token, get_request, get_with_token, json_with_token,
-    setup_and_login,
+    body_json, build_app, build_app_with_mock_agents, build_app_with_mock_agents_from_database, delete_with_token,
+    get_request, get_with_token, json_with_token, setup_and_login,
 };
 use openh3_api_types::TeamMcpStdioConfig;
 use openh3_team::mcp::protocol::{read_frame, write_frame};
@@ -1157,7 +1157,30 @@ async fn es1_ensure_session() {
 // ES-1b: ensure session + team MCP list_assistants projection
 #[tokio::test]
 async fn es1b_team_mcp_list_assistants_matches_assistant_projection() {
-    let (mut app, services) = build_app_with_mock_agents().await;
+    let db = openh3_db::init_database_memory().await.unwrap();
+    let command = std::env::current_exe()
+        .expect("test executable path")
+        .to_string_lossy()
+        .to_string();
+    let source_info = json!({ "binary_name": command }).to_string();
+    // The HTTP and MCP reads must observe a stable catalog. Configure the
+    // mock-agent fixture before startup so host CLI probes cannot mutate it.
+    let seeded = sqlx::query(
+        "UPDATE agent_metadata \
+         SET agent_source = 'custom', agent_source_info = ?, command = ?, args = '[]', env = '[]' \
+         WHERE agent_type = 'acp'",
+    )
+    .bind(&source_info)
+    .bind(&command)
+    .execute(db.pool())
+    .await
+    .expect("seed deterministic ACP catalog");
+    assert!(seeded.rows_affected() > 0, "fixture must include ACP agents");
+    let (mut app, services) = build_app_with_mock_agents_from_database(db).await;
+    assert!(
+        services.agent_registry.pending_slow_probe_rechecks().await.is_empty(),
+        "fixture must not schedule host CLI probes"
+    );
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
     mark_claude_backend_team_mcp_stdio_capable(&services).await;
 
@@ -1237,6 +1260,10 @@ async fn es1b_team_mcp_list_assistants_matches_assistant_projection() {
     assert_eq!(
         runtime_ids, expected_ids,
         "Team MCP runtime assistant list must match /api/assistants team_selectable projection"
+    );
+    assert!(
+        services.agent_registry.pending_slow_probe_rechecks().await.is_empty(),
+        "fixture must remain free of host CLI probes"
     );
 
     let stop_req = delete_with_token(&format!("/api/teams/{team_id}/session"), &token, &csrf);

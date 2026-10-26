@@ -131,6 +131,10 @@ pub async fn build_app_with_mock_version(
 /// send_message) where spawning a real CLI process is not feasible.
 pub async fn build_app_with_mock_agents() -> (axum::Router, AppServices) {
     let db = openh3_db::init_database_memory().await.unwrap();
+    build_app_with_mock_agents_from_database(db).await
+}
+
+pub async fn build_app_with_mock_agents_from_database(db: openh3_db::Database) -> (axum::Router, AppServices) {
     let factory: std::sync::Arc<
         dyn Fn(
                 openh3_ai_agent::types::BuildTaskOptions,
