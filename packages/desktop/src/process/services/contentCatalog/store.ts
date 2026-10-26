@@ -6,6 +6,7 @@ import { verifyManifest, assertDigest, ContentCatalogError, type ContentKeyring 
 import type { ContentCandidate } from './source';
 type Journal = { active?: string; previous?: string; highest: number };
 const HASH = /^[a-f0-9]{64}$/;
+const localLocks = new Set<string>();
 export class ContentStore {
   private readonly pinOwner = randomUUID();
   private writing: Promise<unknown> = Promise.resolve();
@@ -78,6 +79,9 @@ export class ContentStore {
   }
   private async acquire<T>(action: () => Promise<T>, file = path.join(this.root, 'lock.json')): Promise<T> {
     const token = randomUUID();
+    const localKey = path.basename(file) === 'lock.json' ? path.resolve(file) : undefined;
+    if (localKey && localLocks.has(localKey)) throw new ContentCatalogError('BUSY');
+    if (localKey) localLocks.add(localKey);
     const staged = path.join(this.root, `lock.${token}.tmp`);
     try {
       // Publish a fully written owner atomically. A crash must not leave an
@@ -95,6 +99,7 @@ export class ContentStore {
         await fs.unlink(staged).catch(() => {});
       }
     } catch (e) {
+      if (localKey) localLocks.delete(localKey);
       if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
       let stale: { pid: number; token: string } | undefined;
       try {
@@ -140,6 +145,7 @@ export class ContentStore {
       } catch {
         /* Never release a different owner's lock. */
       }
+      if (localKey) localLocks.delete(localKey);
     }
   }
   async putAsset(hash: string, bytes: Uint8Array): Promise<void> {
