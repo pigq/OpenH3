@@ -142,7 +142,7 @@ describe('ComfyUI installation approval card', () => {
     });
   });
 
-  it('shows the concrete plan and waits for a user click before authorization or a resume turn', async () => {
+  it('starts the reviewed plan through the UI authorization request without another LLM turn', async () => {
     render(<ComfyOperationResult id={mocks.operation.id} conversationId='conv-1' />);
     expect(screen.getByText('Qwen-Edit')).toBeInTheDocument();
     expect(screen.getByText('D:\\models')).toBeInTheDocument();
@@ -153,11 +153,18 @@ describe('ComfyUI installation approval card', () => {
     expect(mocks.swr.mock.calls[0][0]).toEqual(['comfy.operation', 'conv-1', mocks.operation.id]);
     expect(mocks.operationFetch).toHaveBeenCalledWith(mocks.operation.id, 'conv-1');
     fireEvent.click(screen.getByRole('button', { name: 'guid.comfy.operation.authorize' }));
-    await waitFor(() => expect(mocks.send).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.mutate).toHaveBeenCalledTimes(1));
     expect(mocks.authorize).toHaveBeenCalledWith(mocks.operation.id, 'conv-1');
-    expect(mocks.authorize.mock.invocationCallOrder[0]).toBeLessThan(mocks.send.mock.invocationCallOrder[0]);
-    expect(mocks.send.mock.calls[0][0].conversation_id).toBe('conv-1');
-    expect(mocks.accepted).toHaveBeenCalledWith('turn-2', {}, 'msg-2');
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.started).not.toHaveBeenCalled();
+  });
+
+  it('resumes a previously authorized operation through the same UI action without model involvement', async () => {
+    mocks.operation.state = 'authorized';
+    render(<ComfyOperationResult id={mocks.operation.id} conversationId='conv-1' />);
+    fireEvent.click(screen.getByRole('button', { name: 'guid.comfy.operation.continue' }));
+    await waitFor(() => expect(mocks.authorize).toHaveBeenCalledWith(mocks.operation.id, 'conv-1'));
+    expect(mocks.send).not.toHaveBeenCalled();
   });
 
   it('shows the diagnostic log path without reading or exposing raw log contents', () => {

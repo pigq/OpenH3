@@ -457,15 +457,32 @@ async function ensureBootstrapMcpServersInDb(configFile: ConfigFile): Promise<vo
     );
   }
 
-  // Rename legacy built-in media records in place. The server id, enabled
-  // state, transport and user settings remain intact, so existing sessions
-  // continue to resolve while new records use only the OpenH3 name.
+  // Upgrade the entrypoint as well as its name. A surviving old checkout can
+  // launch successfully while exposing none of the newer ComfyUI tools.
   const existingVideoServer = existing?.find((server) => isBuiltinVideoMediaName(server.name));
-  if (existingVideoServer && existingVideoServer.name !== BUILTIN_VIDEO_MEDIA_NAME) {
-    await mcpService.updateServer.invoke({
-      id: existingVideoServer.id,
-      data: { name: BUILTIN_VIDEO_MEDIA_NAME, builtin: true },
+  if (existingVideoServer) {
+    const transport: IMcpServer['transport'] = {
+      type: 'stdio',
+      command: 'node',
+      args: [getBuiltinMcpScriptPath('builtin-mcp-video-media')],
+      ...(existingVideoServer.transport.type === 'stdio' ? { env: existingVideoServer.transport.env } : {}),
+    };
+    const original_json = buildOriginalJsonFromTransport({
+      name: BUILTIN_VIDEO_MEDIA_NAME,
+      transport,
     });
+    if (
+      existingVideoServer.name !== BUILTIN_VIDEO_MEDIA_NAME ||
+      existingVideoServer.builtin !== true ||
+      !isSameStdioTransport(existingVideoServer.transport, transport) ||
+      existingVideoServer.original_json !== original_json
+    ) {
+      await mcpService.updateServer.invoke({
+        id: existingVideoServer.id,
+        data: { name: BUILTIN_VIDEO_MEDIA_NAME, builtin: true, transport, original_json },
+      });
+      console.info('[Migration] Updated built-in media MCP entrypoint, server id: %s', existingVideoServer.id);
+    }
   }
 
   /**

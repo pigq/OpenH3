@@ -9,6 +9,7 @@ export type MediaServiceProcessOptions = {
   dataDir: string;
   bundleRoot?: string;
   port?: number;
+  backendPort?: number;
   command?: string;
   spawnProcess?: (
     command: string,
@@ -56,6 +57,7 @@ export class MediaServiceProcess {
       AIONUI_FFPROBE_PATH: resolveMediaBinary('ffprobe'),
       OPENH3_MEDIA_UI_TOKEN: this.uiToken,
       AIONUI_MEDIA_UI_TOKEN: this.uiToken,
+      ...(this.options.backendPort ? { OPENH3_MEDIA_BACKEND_PORT: String(this.options.backendPort) } : {}),
       ...(this.options.bundleRoot
         ? { OPENH3_H3_BUNDLE_ROOT: this.options.bundleRoot, AIONUI_H3_BUNDLE_ROOT: this.options.bundleRoot }
         : {}),
@@ -85,6 +87,21 @@ export class MediaServiceProcess {
     }
     this.stop();
     throw new Error('MEDIA_SERVICE_START_TIMEOUT');
+  }
+
+  /** Refresh Core connectivity after recovery without interrupting media work. */
+  async setBackendPort(backendPort: number): Promise<void> {
+    if (!Number.isInteger(backendPort) || backendPort < 1 || backendPort > 65535)
+      throw new Error('MEDIA_SERVICE_BACKEND_PORT_INVALID');
+    this.options.backendPort = backendPort;
+    if (!this.child) return;
+    const response = await this.fetchImpl(`http://127.0.0.1:${this.port}/api/comfy/runtime-context`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-openh3-ui-token': this.uiToken },
+      body: JSON.stringify({ backendPort }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) throw new Error('MEDIA_SERVICE_BACKEND_SYNC_FAILED');
   }
 
   stop(): void {

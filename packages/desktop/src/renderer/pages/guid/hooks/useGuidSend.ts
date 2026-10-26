@@ -6,6 +6,7 @@
 
 import { ipcBridge } from '@/common';
 import { getGuidDraftScope, getGuidTemplateSnapshot } from './useGuidDraft';
+import { isBackendHttpError } from '@/common/adapter/httpBridge';
 import { type ChatFileRef, chatFileRefPath } from '@/common/types/chatFile';
 import {
   isBuiltinImageGenerationName,
@@ -217,25 +218,71 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
       const matchesRequired = (server: IMcpServer) =>
         server.builtin &&
         (wantsVideoMedia ? isBuiltinVideoMediaName(server.name) : isBuiltinImageGenerationName(server.name));
-      let required = availableMcpServers.find(matchesRequired);
-      // First-load migrations can register the builtin tools after Guid mounts.
-      if (!required) required = (await ensureBackendMcpCatalog()).allServers.find(matchesRequired);
+      let required: IMcpServer | undefined;
+      try {
+        required = requiresCreationBinding
+          ? (await ensureBackendMcpCatalog()).allServers.find(matchesRequired)
+          : availableMcpServers.find(matchesRequired);
+        // First-load migrations can register builtin tools after Guid mounts.
+        if (!required && !requiresCreationBinding)
+          required = (await ensureBackendMcpCatalog()).allServers.find(matchesRequired);
+      } catch {
+        Message.error(t('guid.creation.toolsCheckFailed', { reason: 'COMFY_MCP_CATALOG_UNAVAILABLE' }));
+        return false;
+      }
       if (!required) {
         Message.error(t('guid.creation.toolsUnavailable'));
         return false;
       }
       const sessionServers =
         selectedMcpServerIds !== undefined ? selectedSessionMcpServers : selectedSessionMcpServersToSend;
-      const combined =
-        required && !sessionServers.some((server) => server.id === required.id)
-          ? [...sessionServers, toSessionMcpServer(required)]
-          : sessionServers;
+      // Replace the cached required transport, including legacy-name aliases.
+      // A matching id in Guid's mounted state is not evidence of a current script.
+      const combined = [
+        ...sessionServers.filter(
+          (server) =>
+            server.id !== required.id &&
+            !(wantsVideoMedia ? isBuiltinVideoMediaName(server.name) : isBuiltinImageGenerationName(server.name))
+        ),
+        toSessionMcpServer(required),
+      ];
       selectedSessionMcpServersToSend = creationSessionServers(
         combined,
         creationRequest,
         creationRequest.source === 'cloud' ? creationModel?.provider : undefined,
         creationRequestId
       );
+      if (requiresCreationBinding) {
+        const scoped = selectedSessionMcpServersToSend.find((server) => server.id === required.id)!;
+        try {
+          const check = await ipcBridge.mcpService.testMcpConnection.invoke({
+            ...required,
+            name: scoped.name,
+            transport: scoped.transport,
+            runtime_scope_id: creationRequestId,
+          });
+          const tools = new Set(check.tools?.map((tool) => tool.name));
+          const needed = [
+            'openh3_comfy_environment',
+            'openh3_comfy_profiles',
+            ...(creationRequest.intent === 'generate'
+              ? ['openh3_comfy_generate', 'openh3_comfy_job_status', 'openh3_comfy_cancel_job']
+              : ['openh3_comfy_install']),
+          ];
+          const missing = needed.filter((name) => !tools.has(name));
+          if (!check.success || missing.length) {
+            const reason = !check.success
+              ? (check.code ?? 'COMFY_MCP_CONNECTION_FAILED')
+              : `COMFY_REQUIRED_TOOLS_MISSING: ${missing.join(', ')}`;
+            Message.error(t('guid.creation.toolsCheckFailed', { reason }));
+            return false;
+          }
+        } catch (cause) {
+          const reason = isBackendHttpError(cause) && cause.code ? cause.code : 'COMFY_MCP_CONNECTION_FAILED';
+          Message.error(t('guid.creation.toolsCheckFailed', { reason }));
+          return false;
+        }
+      }
     }
 
     // `current_model` is the aionrs provider selection and means nothing to a

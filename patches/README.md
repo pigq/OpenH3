@@ -15,4 +15,4 @@ Do not delete this directory independently of `package.json` and `bun.lock`. The
 - Patched Git tree: `d53609d6280ac937b9900c053b00e84f6fcae0e8`
 - Upstream root license: Apache-2.0; its Cargo metadata declares MIT. Both upstream notices remain in the source.
 
-Apply the patch to a clean checkout of that exact base before building the backend. See the [development guide](../docs/contributing/development.md) for commands. The unmodified upstream `v0.2.2` release does not contain these OpenH3 fixes.
+Only historical reconstruction uses this patch: apply it to a separate clean checkout of that exact base, never to the current `core/` tree. Normal development and packaging build the versioned `core/` source directly; follow the [development guide](../docs/contributing/development.md). The unmodified upstream `v0.2.2` release does not contain the historical OpenH3 fixes recorded by this patch.

@@ -194,6 +194,7 @@ export const comfyInstallPlanSchema = comfyProfileSchema.omit({ state: true, val
   repair: z.boolean().default(false),
 });
 export type ComfyInstallPlan = z.infer<typeof comfyInstallPlanSchema>;
+export type ComfyApprovalDecision = { mode: 'automatic' | 'manual'; runtimeMode?: string };
 export type ComfyOperation = {
   id: string;
   requestId: string;
@@ -207,6 +208,7 @@ export type ComfyOperation = {
   snapshotDirectory?: string;
   diagnosticLogPath?: string;
   diagnosis?: ComfyDiagnosis;
+  approval?: ComfyApprovalDecision & { source: 'session' | 'ui'; checkedAt: string };
 };
 export type ComfyDiagnosis = { category: string; nodeId?: string; retryable: boolean; action: string };
 export type ComfyGenerationJob = {

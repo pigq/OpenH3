@@ -5,6 +5,7 @@ import { Worker } from 'node:worker_threads';
 import { H3SetupTask } from '../packages/desktop/src/process/services/runtime/H3SetupTask';
 import { inspectCreationInventory } from '../packages/desktop/src/process/services/media/creation/inventory';
 import { CreationOperations } from '../packages/desktop/src/process/services/media/creation/CreationOperations';
+import { createComfyApprovalResolver } from '../packages/desktop/src/process/services/media/creation/installApproval';
 import { ComfyService } from '../packages/desktop/src/process/services/media/comfy/ComfyService';
 import { ComfyWorkflowEngine } from '../packages/desktop/src/process/services/media/comfy/workflowEngine';
 import {
@@ -200,10 +201,12 @@ const creationTimer = setInterval(() => {
 creationTimer.unref();
 const comfyManifest = path.join(dataDir, 'comfy-profiles.json');
 const comfyEngine = new ComfyWorkflowEngine({ outputRoot: path.join(dataDir, 'comfy-output') });
+let approvalBackendPort = Number(process.env.OPENH3_MEDIA_BACKEND_PORT);
 const comfyService = new ComfyService({
   filename: comfyManifest,
   engine: comfyEngine,
   checkPlan: assertComfyInstallPlan,
+  resolveApproval: createComfyApprovalResolver({ backendPort: () => approvalBackendPort }),
   install: (plan, signal, progress) => {
     const legacyRoot = path.join(h3Runtime.installStatus().runtimeRoot, 'ComfyUI');
     if (
@@ -352,6 +355,9 @@ const server = http.createServer(async (req, res) => {
       await handleComfyRoute(req, res, url, {
         service: comfyService,
         uiToken: process.env.AIONUI_MEDIA_UI_TOKEN ?? '',
+        setBackendPort: (backendPort) => {
+          approvalBackendPort = backendPort;
+        },
         body,
         json,
       })

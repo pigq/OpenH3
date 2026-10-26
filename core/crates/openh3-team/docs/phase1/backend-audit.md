@@ -1,5 +1,7 @@
 # 后端 Team 模块 GAP 调研（rebase 后最新代码）
 
+> **历史归档，非当前规格。** 本文保留迁入单仓库之前的阶段性规划或修复记录，供源码引用与历史分析。文中的分支、进度、“未提交”状态、绝对路径和操作指令仅反映当时环境，不代表当前仓库状态，也不作为当前执行步骤。当前入口见[模块文档](../README.md)；行为以当前源码和测试为准。
+
 > **调研范围**：仓库 `/Users/zhuqingyu/.superset/worktrees/aionui-backend/repeated-algebra/`，分支 `docs/api-for-frontend`，HEAD `21abc46`。
 > **调研对象**：只看后端；只考虑 **ACP agent type**（Gemini 走 ACP 路径，aionrs 是 stub，不涉及）。
 > **目标**：让 backend 包掉所有 team 逻辑，上层调用方（参考 AionUi 实现）只管渲染。

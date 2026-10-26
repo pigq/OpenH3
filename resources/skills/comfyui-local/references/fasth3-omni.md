@@ -8,9 +8,11 @@ Read only the selected `fasth3-omni` candidate in [candidates.json](candidates.j
 
 > Install FastH3-Omni through the bundled `comfyui-local` Skill. Detect my actual OS, GPU architecture, driver, Python, Torch/CUDA build, executing attention and quantization kernels, available VRAM, RAM and disk. Choose one complete pinned BF16, INT8-ConvRot, FP8 or NVFP4-QAD ComfyUI candidate that this environment can support. Prefer ModelScope, then the verified domestic mirror, then the official upstream. Preserve revisions, size and SHA-256 and resume receipts. Report concrete missing device conditions separately from incomplete detection. Use the matching 8-step R2V API graph, guidance 1 and video/audio shifts 12/3, with no Turbo LoRA. Verify an image/video reference and synchronized video-plus-audio output before declaring the model usable.
 
-This prompt is a draft for the input box. Preserve user edits and send it as an ordinary chat request. Use the application's normal install-plan review and consent flow.
+This prompt is a draft for the input box. Preserve user edits and send it as an ordinary chat request. Use the shared session approval policy: full automatic approval starts a valid submitted plan directly; other modes require one confirmation in the installation card.
 
 ## Select a complete hardware-compatible set
+
+For a cold install, confirm the host architecture/driver and the pinned runtime's upstream platform/kernel support before selection; execute those target kernels only after the approved dependencies are installed. Record those checks as pending rather than requiring an uninstalled kernel to run. A known unsupported platform excludes a candidate; missing target packages do not by themselves exclude it. Real kernel and representative video/audio validation are mandatory before marking the profile usable.
 
 | Candidate    | Diffusion                       | Text/vision encoder   | Video VAE    | Audio VAE |
 | ------------ | ------------------------------- | --------------------- | ------------ | --------- |
@@ -21,7 +23,7 @@ This prompt is a draft for the input box. Preserve user edits and send it as an 
 
 The graph needs the encoder's vision support and both VAEs. Precision of diffusion does not imply the precision of the encoder or either VAE. FP8 and NVFP4 use their separate **Comfy-native** repositories; do not insert the FastVideo-format FP8/NVFP4 files or make an unvalidated conversion. The non-Blackwell FP8 candidate deliberately uses a BF16 encoder. Its large encoder still needs a measured memory/offload plan.
 
-Before selection, inspect exact OS/architecture, Python and Torch/CUDA ABI, GPU UUID and compute capability, driver, actual kernel execution, available VRAM/RAM, and free disk. Include peak encoder, reference, sampling, video/audio decode, temporary download and output allocations. File size and advertised GPU names are insufficient. Do not invent a fixed VRAM-to-model table.
+Before selection, inspect exact host OS/architecture, GPU UUID and compute capability, driver, available VRAM/RAM and free disk. Check existing Python/Torch/CUDA and kernel execution when installed; for a cold target, assess the pinned dependencies' platform support now and execute those checks after installation. Include peak encoder, reference, sampling, video/audio decode, temporary download and output allocations. File size and advertised GPU names are insufficient. Do not invent a fixed VRAM-to-model table.
 
 **NVFP4-QAD requires confirmed NVIDIA Blackwell hardware and a working compatible native NVFP4 kernel**, including the AWQ encoder path. A Blackwell GPU with an incompatible driver, OS wheel or kernel is still unsupported for that set. BF16, INT8 and FP8 also require successful checks of their own kernels. The source-derived core pin is `b1a247c9cf9dbfda4b2c0a0c1d50950667eeaa0c`, with `comfy-kitchen==0.2.39` and `comfy-aimdo==0.5.6`; resolve and record exact compatible Python/Torch/CUDA wheels before preparing a cold install. Upstream's GB200 validation environment is not a Windows compatibility guarantee.
 

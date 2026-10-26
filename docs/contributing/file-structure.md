@@ -23,6 +23,15 @@ Rules for organizing files and directories across the entire Electron project.
 - Keep reusable tests and fixtures in the repository; local transcripts, temporary plans and generated reports stay ignored.
 - Packaging entitlements live beside the Electron builder configuration in `packages/desktop/`.
 
+### Local artifacts and conservative cleanup
+
+- Keep local logs, cleanup receipts, temporary installer extractions and analysis under the ignored `.runtime/` directory, not at the repository root. Archive completed diagnostic records before removing their loose copies.
+- Treat `core/target/`, `node_modules/` and downloaded runtime resources as development caches, not source clutter. Cleaning them is optional and requires a separate decision because it causes rebuilds or downloads.
+- Installer extraction directories are disposable only after confirming the source installer is retained and no running process uses the extracted copy. Keep final installers, checksums, manifests and release evidence.
+- Never infer that an ignored directory is disposable: it can contain user data, model downloads, local tools or valuable test evidence. Do not bulk-delete ignored files or sibling Git worktrees.
+- Keep source-cited historical documents at their existing paths and label them as historical. Their old progress, branch names and machine-specific commands must not be presented as current instructions.
+- Merge overlapping guides into one maintained document; keep a small forwarding page when an older document URL may still be used.
+
 ## Source layout
 
 The application lives in `packages/desktop/src/`, with `renderer/`, `process/`, `common/`, `index.ts` and `preload.ts`. See the [architecture overview](../architecture/overview.md) and [package map](../../packages/README.md) for responsibilities.

@@ -11,6 +11,7 @@ type Ports = {
   body: (request: http.IncomingMessage) => Promise<unknown>;
   service: ComfyService;
   uiToken?: string;
+  setBackendPort?: (port: number) => void;
 };
 const envelope = z
   .object({ requestId: z.string().uuid().optional(), conversationId: z.string().min(1).optional() })
@@ -25,6 +26,17 @@ export async function handleComfyRoute(
 ): Promise<boolean> {
   if (!url.pathname.startsWith('/api/comfy/')) return false;
   const { service, json, body } = ports;
+  if (request.method === 'POST' && url.pathname === '/api/comfy/runtime-context') {
+    if (!hasUiCapability(request, ports.uiToken)) {
+      json(response, 403, { error: 'COMFY_UI_AUTH_REQUIRED' });
+      return true;
+    }
+    const payload = z.object({ backendPort: z.number().int().min(1).max(65535) }).parse(await body(request));
+    if (!ports.setBackendPort) throw new Error('COMFY_APPROVAL_BACKEND_UNAVAILABLE');
+    ports.setBackendPort(payload.backendPort);
+    json(response, 200, { ok: true });
+    return true;
+  }
   const requestId = url.searchParams.get('requestId') ?? undefined;
   if (requestId) service.selection(requestId);
   if (request.method === 'POST' && url.pathname === '/api/comfy/bind') {
@@ -99,20 +111,20 @@ export async function handleComfyRoute(
     }
     if (request.method === 'POST') {
       const payload = envelope.parse(await body(request));
-      service.operation(id, payload);
+      const current = service.operation(id, payload);
       if (action === 'authorize') {
-        const provided = request.headers['x-openh3-ui-token'];
-        if (
-          !ports.uiToken ||
-          typeof provided !== 'string' ||
-          provided.length !== ports.uiToken.length ||
-          !timingSafeEqual(provided, ports.uiToken)
-        ) {
+        if (!hasUiCapability(request, ports.uiToken)) {
           json(response, 403, { error: 'COMFY_UI_AUTH_REQUIRED' });
           return true;
         }
         if (!payload.conversationId) throw new Error('COMFY_CONVERSATION_REQUIRED');
-        json(response, 200, service.authorize(id, payload.conversationId));
+        if (current.state === 'running' || current.state === 'completed') {
+          json(response, 200, current);
+          return true;
+        }
+        // The UI click authorizes and queues this saved plan without an LLM handoff.
+        service.authorize(id, payload.conversationId);
+        json(response, 202, service.start(id, current.requestId));
         return true;
       }
       if (action === 'start') {
@@ -192,8 +204,10 @@ export async function handleComfyRoute(
   return true;
 }
 
-function timingSafeEqual(left: string, right: string): boolean {
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
+function hasUiCapability(request: http.IncomingMessage, token?: string): boolean {
+  const provided = request.headers['x-openh3-ui-token'];
+  if (!token || typeof provided !== 'string' || provided.length !== token.length) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(token);
   return a.length === b.length && cryptoTimingSafeEqual(a, b);
 }

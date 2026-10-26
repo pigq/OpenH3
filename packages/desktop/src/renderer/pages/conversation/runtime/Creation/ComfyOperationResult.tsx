@@ -88,25 +88,11 @@ export default function ComfyOperationResult({ id, conversationId }: { id: strin
     if (operation?.state === 'completed') void swrMutate('creation.comfy-profiles');
   }, [operation?.state]);
   if (operation && operation.conversationId !== conversationId) return null;
-  const resume = async () => {
-    runtime.markSendStarted();
-    try {
-      const result = await ipcBridge.conversation.sendMessage.invoke({
-        conversation_id: conversationId,
-        input: t('guid.comfy.operation.continueRequest', { id }),
-      });
-      runtime.markSendAccepted(result.turn_id, result.runtime, result.msg_id);
-    } catch (cause) {
-      runtime.markSendFailed({ kind: 'ordinary', reason: cause instanceof Error ? cause.message : String(cause) });
-      throw cause;
-    }
-  };
   const authorize = async () => {
     setBusy(true);
     setError('');
     try {
       await comfyApi.authorize(id, conversationId);
-      await resume();
       await mutate();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -118,18 +104,6 @@ export default function ComfyOperationResult({ id, conversationId }: { id: strin
     setBusy(true);
     try {
       await comfyApi.cancel(id, conversationId);
-      await mutate();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const continueWithLlm = async () => {
-    setBusy(true);
-    setError('');
-    try {
-      await resume();
       await mutate();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -381,7 +355,7 @@ export default function ComfyOperationResult({ id, conversationId }: { id: strin
         </Button>
       )}
       {operation?.state === 'authorized' && (
-        <Button type='primary' loading={busy} disabled={runtime.isProcessing} onClick={() => void continueWithLlm()}>
+        <Button type='primary' loading={busy} disabled={runtime.isProcessing} onClick={() => void authorize()}>
           {t('guid.comfy.operation.continue')}
         </Button>
       )}

@@ -290,9 +290,9 @@
         "actualObjectInfoAndKernelValidationRequired": true
       },
       "limitations": [
-        "This is a reproducible upstream discovery snapshot, not an installable or hardware-compatible profile.",
-        "Resolve UI subgraphs and validate the complete API graph against the selected pinned runtime before UI consent.",
-        "Verify all required precision/attention kernels on the real accelerator; no VRAM capacity mapping is provided.",
+        "This reproducible discovery snapshot is an input to install planning, not an already verified profile. Expand it into a complete plan with host-specific paths and pinned runtime dependencies.",
+        "Before UI consent, resolve UI subgraphs or reuse the matched bundled API baseline and validate it against pinned offline node schemas. Execute live loader/kernel checks after the target runtime is installed.",
+        "Select cold-install dependencies from pinned platform/architecture support evidence; verify their precision/attention kernels on the real accelerator after installation and before marking usable. No fixed VRAM mapping is provided.",
         "Alternative quantizations and accelerated component sets are separate candidates; never mix assets by filename."
       ]
     },
@@ -397,9 +397,9 @@
         "actualObjectInfoAndKernelValidationRequired": true
       },
       "limitations": [
-        "This is a reproducible upstream discovery snapshot, not an installable or hardware-compatible profile.",
-        "Resolve UI subgraphs and validate the complete API graph against the selected pinned runtime before UI consent.",
-        "Verify all required precision/attention kernels on the real accelerator; no VRAM capacity mapping is provided.",
+        "This reproducible discovery snapshot is an input to install planning, not an already verified profile. Expand it into a complete plan with host-specific paths and pinned runtime dependencies.",
+        "Before UI consent, resolve UI subgraphs or reuse the matched bundled API baseline and validate it against pinned offline node schemas. Execute live loader/kernel checks after the target runtime is installed.",
+        "Select cold-install dependencies from pinned platform/architecture support evidence; verify their precision/attention kernels on the real accelerator after installation and before marking usable. No fixed VRAM mapping is provided.",
         "Alternative quantizations and accelerated component sets are separate candidates; never mix assets by filename."
       ],
       "apiBaselineId": "qwen-edit-2511-fp8mixed-lightning-single-image-api-discovery"
@@ -483,9 +483,9 @@
         "actualObjectInfoAndKernelValidationRequired": true
       },
       "limitations": [
-        "This is a reproducible upstream discovery snapshot, not an installable or hardware-compatible profile.",
-        "Resolve UI subgraphs and validate the complete API graph against the selected pinned runtime before UI consent.",
-        "Verify all required precision/attention kernels on the real accelerator; no VRAM capacity mapping is provided.",
+        "This reproducible discovery snapshot is an input to install planning, not an already verified profile. Expand it into a complete plan with host-specific paths and pinned runtime dependencies.",
+        "Before UI consent, resolve UI subgraphs or reuse the matched bundled API baseline and validate it against pinned offline node schemas. Execute live loader/kernel checks after the target runtime is installed.",
+        "Select cold-install dependencies from pinned platform/architecture support evidence; verify their precision/attention kernels on the real accelerator after installation and before marking usable. No fixed VRAM mapping is provided.",
         "Alternative quantizations and accelerated component sets are separate candidates; never mix assets by filename."
       ],
       "apiBaselineId": "z-image-turbo-bf16-api-discovery"
@@ -1968,7 +1968,7 @@
       },
       "limitations": [
         "Discovery-only; file metadata and offline schema checks do not establish device compatibility or successful generation.",
-        "Select using actual OS, GPU architecture, driver, Python/Torch/CUDA or ROCm/MPS, working precision/attention kernels, free VRAM/RAM, offload and disk evidence; no fixed VRAM table.",
+        "Select using actual host OS, GPU architecture, driver and free VRAM/RAM/disk, plus supported pinned target Python/Torch/backend dependencies. Test target precision/attention kernels after installation before marking usable; no fixed VRAM table.",
         "The baseline exposes text-to-image only. References/editing/style adapters require a separate matching workflow and validation.",
         "Do not select a smaller recipe because probes are incomplete, or change the original generation parameters automatically after OOM.",
         "Prompt expansion by the existing agent/LLM is mandatory before CLIPTextEncode. The local prompt-upsampler branch is intentionally excluded to avoid a second LLM download.",
@@ -2121,7 +2121,7 @@
       },
       "limitations": [
         "Discovery-only; file metadata and offline schema checks do not establish device compatibility or successful generation.",
-        "Select using actual OS, GPU architecture, driver, Python/Torch/CUDA or ROCm/MPS, working precision/attention kernels, free VRAM/RAM, offload and disk evidence; no fixed VRAM table.",
+        "Select using actual host OS, GPU architecture, driver and free VRAM/RAM/disk, plus supported pinned target Python/Torch/backend dependencies. Test target precision/attention kernels after installation before marking usable; no fixed VRAM table.",
         "The baseline exposes text-to-image only. References/editing/style adapters require a separate matching workflow and validation.",
         "Do not select a smaller recipe because probes are incomplete, or change the original generation parameters automatically after OOM.",
         "Prompt expansion by the existing agent/LLM is mandatory before CLIPTextEncode. The local prompt-upsampler branch is intentionally excluded to avoid a second LLM download.",
@@ -2274,7 +2274,7 @@
       },
       "limitations": [
         "Discovery-only; file metadata and offline schema checks do not establish device compatibility or successful generation.",
-        "Select using actual OS, GPU architecture, driver, Python/Torch/CUDA or ROCm/MPS, working precision/attention kernels, free VRAM/RAM, offload and disk evidence; no fixed VRAM table.",
+        "Select using actual host OS, GPU architecture, driver and free VRAM/RAM/disk, plus supported pinned target Python/Torch/backend dependencies. Test target precision/attention kernels after installation before marking usable; no fixed VRAM table.",
         "The baseline exposes text-to-image only. References/editing/style adapters require a separate matching workflow and validation.",
         "Do not select a smaller recipe because probes are incomplete, or change the original generation parameters automatically after OOM.",
         "Prompt expansion by the existing agent/LLM is mandatory before CLIPTextEncode. The local prompt-upsampler branch is intentionally excluded to avoid a second LLM download.",
@@ -2457,7 +2457,7 @@
       },
       "limitations": [
         "Discovery-only; file metadata and offline schema checks do not establish device compatibility or successful generation.",
-        "Select using actual OS, GPU architecture, driver, Python/Torch/CUDA or ROCm/MPS, working precision/attention kernels, free VRAM/RAM, offload and disk evidence; no fixed VRAM table.",
+        "Select using actual host OS, GPU architecture, driver and free VRAM/RAM/disk, plus supported pinned target Python/Torch/backend dependencies. Test target precision/attention kernels after installation before marking usable; no fixed VRAM table.",
         "The baseline exposes text-to-image only. References/editing/style adapters require a separate matching workflow and validation.",
         "Do not select a smaller recipe because probes are incomplete, or change the original generation parameters automatically after OOM.",
         "Preserves MOSS-Image-Base, never substitutes SFT. Uses source-model reference settings: Euler, 50 steps, CFG 3, native shift 5 and negative-branch layer 22 skipping for the full trajectory. The inspected UI default instead disables SLG and uses 25 steps/CFG 2.5.",
@@ -2639,7 +2639,7 @@
       },
       "limitations": [
         "Discovery-only; file metadata and offline schema checks do not establish device compatibility or successful generation.",
-        "Select using actual OS, GPU architecture, driver, Python/Torch/CUDA or ROCm/MPS, working precision/attention kernels, free VRAM/RAM, offload and disk evidence; no fixed VRAM table.",
+        "Select using actual host OS, GPU architecture, driver and free VRAM/RAM/disk, plus supported pinned target Python/Torch/backend dependencies. Test target precision/attention kernels after installation before marking usable; no fixed VRAM table.",
         "The baseline exposes text-to-image only. References/editing/style adapters require a separate matching workflow and validation.",
         "Do not select a smaller recipe because probes are incomplete, or change the original generation parameters automatically after OOM.",
         "Preserves MOSS-Image-Base, never substitutes SFT. Uses source-model reference settings: Euler, 50 steps, CFG 3, native shift 5 and negative-branch layer 22 skipping for the full trajectory. The inspected UI default instead disables SLG and uses 25 steps/CFG 2.5.",
@@ -2821,7 +2821,7 @@
       },
       "limitations": [
         "Discovery-only; file metadata and offline schema checks do not establish device compatibility or successful generation.",
-        "Select using actual OS, GPU architecture, driver, Python/Torch/CUDA or ROCm/MPS, working precision/attention kernels, free VRAM/RAM, offload and disk evidence; no fixed VRAM table.",
+        "Select using actual host OS, GPU architecture, driver and free VRAM/RAM/disk, plus supported pinned target Python/Torch/backend dependencies. Test target precision/attention kernels after installation before marking usable; no fixed VRAM table.",
         "The baseline exposes text-to-image only. References/editing/style adapters require a separate matching workflow and validation.",
         "Do not select a smaller recipe because probes are incomplete, or change the original generation parameters automatically after OOM.",
         "Preserves MOSS-Image-Base, never substitutes SFT. Uses source-model reference settings: Euler, 50 steps, CFG 3, native shift 5 and negative-branch layer 22 skipping for the full trajectory. The inspected UI default instead disables SLG and uses 25 steps/CFG 2.5.",
@@ -3003,7 +3003,7 @@
       },
       "limitations": [
         "Discovery-only; file metadata and offline schema checks do not establish device compatibility or successful generation.",
-        "Select using actual OS, GPU architecture, driver, Python/Torch/CUDA or ROCm/MPS, working precision/attention kernels, free VRAM/RAM, offload and disk evidence; no fixed VRAM table.",
+        "Select using actual host OS, GPU architecture, driver and free VRAM/RAM/disk, plus supported pinned target Python/Torch/backend dependencies. Test target precision/attention kernels after installation before marking usable; no fixed VRAM table.",
         "The baseline exposes text-to-image only. References/editing/style adapters require a separate matching workflow and validation.",
         "Do not select a smaller recipe because probes are incomplete, or change the original generation parameters automatically after OOM.",
         "Uses Turbo, not Raw, at 8 steps/CFG 1; optional prompt-enhancement, style LoRA and their UI switches are removed. No implicit image-edit or style-reference capability."
@@ -3184,7 +3184,7 @@
       },
       "limitations": [
         "Discovery-only; file metadata and offline schema checks do not establish device compatibility or successful generation.",
-        "Select using actual OS, GPU architecture, driver, Python/Torch/CUDA or ROCm/MPS, working precision/attention kernels, free VRAM/RAM, offload and disk evidence; no fixed VRAM table.",
+        "Select using actual host OS, GPU architecture, driver and free VRAM/RAM/disk, plus supported pinned target Python/Torch/backend dependencies. Test target precision/attention kernels after installation before marking usable; no fixed VRAM table.",
         "The baseline exposes text-to-image only. References/editing/style adapters require a separate matching workflow and validation.",
         "Do not select a smaller recipe because probes are incomplete, or change the original generation parameters automatically after OOM.",
         "Uses Turbo, not Raw, at 8 steps/CFG 1; optional prompt-enhancement, style LoRA and their UI switches are removed. No implicit image-edit or style-reference capability."
@@ -3365,7 +3365,7 @@
       },
       "limitations": [
         "Discovery-only; file metadata and offline schema checks do not establish device compatibility or successful generation.",
-        "Select using actual OS, GPU architecture, driver, Python/Torch/CUDA or ROCm/MPS, working precision/attention kernels, free VRAM/RAM, offload and disk evidence; no fixed VRAM table.",
+        "Select using actual host OS, GPU architecture, driver and free VRAM/RAM/disk, plus supported pinned target Python/Torch/backend dependencies. Test target precision/attention kernels after installation before marking usable; no fixed VRAM table.",
         "The baseline exposes text-to-image only. References/editing/style adapters require a separate matching workflow and validation.",
         "Do not select a smaller recipe because probes are incomplete, or change the original generation parameters automatically after OOM.",
         "Uses Turbo, not Raw, at 8 steps/CFG 1; optional prompt-enhancement, style LoRA and their UI switches are removed. No implicit image-edit or style-reference capability."
@@ -3546,7 +3546,7 @@
       },
       "limitations": [
         "Discovery-only; file metadata and offline schema checks do not establish device compatibility or successful generation.",
-        "Select using actual OS, GPU architecture, driver, Python/Torch/CUDA or ROCm/MPS, working precision/attention kernels, free VRAM/RAM, offload and disk evidence; no fixed VRAM table.",
+        "Select using actual host OS, GPU architecture, driver and free VRAM/RAM/disk, plus supported pinned target Python/Torch/backend dependencies. Test target precision/attention kernels after installation before marking usable; no fixed VRAM table.",
         "The baseline exposes text-to-image only. References/editing/style adapters require a separate matching workflow and validation.",
         "Do not select a smaller recipe because probes are incomplete, or change the original generation parameters automatically after OOM.",
         "Uses Turbo, not Raw, at 8 steps/CFG 1; optional prompt-enhancement, style LoRA and their UI switches are removed. No implicit image-edit or style-reference capability."
@@ -3730,7 +3730,7 @@
       },
       "limitations": [
         "Discovery-only; file metadata and offline schema checks do not establish device compatibility or successful generation.",
-        "Select using actual OS, GPU architecture, driver, Python/Torch/CUDA or ROCm/MPS, working precision/attention kernels, free VRAM/RAM, offload and disk evidence; no fixed VRAM table.",
+        "Select using actual host OS, GPU architecture, driver and free VRAM/RAM/disk, plus supported pinned target Python/Torch/backend dependencies. Test target precision/attention kernels after installation before marking usable; no fixed VRAM table.",
         "The SFT baseline exposes text-to-image only. References/editing/style adapters require a separate matching workflow and validation.",
         "Do not select a smaller recipe because probes are incomplete, or change the original generation parameters automatically after OOM.",
         "Preserves MOSS-Image-SFT, never substitutes Base. Uses source-model reference settings: Euler, 50 steps, CFG 3, native shift 5 and negative-branch layer 22 skipping for the full trajectory. The inspected UI default instead disables SLG and uses 25 steps/CFG 2.5.",
@@ -3915,7 +3915,7 @@
       },
       "limitations": [
         "Discovery-only; file metadata and offline schema checks do not establish device compatibility or successful generation.",
-        "Select using actual OS, GPU architecture, driver, Python/Torch/CUDA or ROCm/MPS, working precision/attention kernels, free VRAM/RAM, offload and disk evidence; no fixed VRAM table.",
+        "Select using actual host OS, GPU architecture, driver and free VRAM/RAM/disk, plus supported pinned target Python/Torch/backend dependencies. Test target precision/attention kernels after installation before marking usable; no fixed VRAM table.",
         "The SFT baseline exposes text-to-image only. References/editing/style adapters require a separate matching workflow and validation.",
         "Do not select a smaller recipe because probes are incomplete, or change the original generation parameters automatically after OOM.",
         "Preserves MOSS-Image-SFT, never substitutes Base. Uses source-model reference settings: Euler, 50 steps, CFG 3, native shift 5 and negative-branch layer 22 skipping for the full trajectory. The inspected UI default instead disables SLG and uses 25 steps/CFG 2.5.",
@@ -4100,7 +4100,7 @@
       },
       "limitations": [
         "Discovery-only; file metadata and offline schema checks do not establish device compatibility or successful generation.",
-        "Select using actual OS, GPU architecture, driver, Python/Torch/CUDA or ROCm/MPS, working precision/attention kernels, free VRAM/RAM, offload and disk evidence; no fixed VRAM table.",
+        "Select using actual host OS, GPU architecture, driver and free VRAM/RAM/disk, plus supported pinned target Python/Torch/backend dependencies. Test target precision/attention kernels after installation before marking usable; no fixed VRAM table.",
         "The SFT baseline exposes text-to-image only. References/editing/style adapters require a separate matching workflow and validation.",
         "Do not select a smaller recipe because probes are incomplete, or change the original generation parameters automatically after OOM.",
         "Preserves MOSS-Image-SFT, never substitutes Base. Uses source-model reference settings: Euler, 50 steps, CFG 3, native shift 5 and negative-branch layer 22 skipping for the full trajectory. The inspected UI default instead disables SLG and uses 25 steps/CFG 2.5.",

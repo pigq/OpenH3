@@ -23,7 +23,7 @@ Do not collapse the evidence into a single “network is available” claim. A c
 
 - Download into the selected profile root with a `.part` file and a receipt containing URL, source identity, expected bytes, and expected SHA-256. Resume only when the server advertises byte ranges and the receipt still matches the approved component.
 - After completion, verify size and SHA-256 before extraction or registration. On mismatch, quarantine the partial/full file and rebuild the plan; do not reuse same-size bytes.
-- A source switch is allowed only between already-approved equivalent URLs. A new revision, license, component set, or digest requires a new plan and user confirmation.
+- A source switch is allowed only between already-approved equivalent URLs. A new revision, license, component set, or digest requires a new complete plan submitted through `action=request`. Apply SKILL.md's observed approval-mode contract: full automatic approval starts directly; other modes require one UI confirmation. Do not request chat confirmation.
 - If direct access fails but a configured proxy succeeds, record the proxy route as network evidence without treating it as a different artifact source. Do not ask the LLM to invent proxy credentials or embed them in a URL.
 - For offline installation, accept only a user-selected local file or an existing path whose digest and component identity are recorded. Mark it downloaded first; loader checks and a representative smoke run are still required before it becomes loadable or verified.
 

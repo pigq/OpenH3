@@ -1,4 +1,9 @@
-# OpenH3 Windows x64 runtime notice
+# Historical OpenH3 Windows x64 runtime notice
+
+This inventory records the pre-monorepo Windows x64 experience package, not
+the component versions of every current build. Keep it as historical
+distribution evidence. Current packaging builds the versioned [`core/`](../../../core/)
+source by default; the actual bundle's `manifest.json` records its origin.
 
 This notice records the runtime components included in the Windows x64
 experience package. The package contains the corresponding upstream license
@@ -28,7 +33,7 @@ OpenH3 does not ship a separate `bun.exe` or `7z.exe` in the Windows x64
 runtime directory. AionCore v0.2.2 is built with Rust, not Bun: its tagged
 [release workflow](https://github.com/iOfficeAI/AionCore/blob/v0.2.2/.github/workflows/release.yml)
 uses Rust 1.95.0 and `cargo build --release -p aionui-app`.
-The current OpenH3 backend is built from upstream commit
+The historical OpenH3 backend described by this inventory was built from upstream commit
 `503a87199eb978790ca77675b39c84b241535bf3` with the complete
 [`openh3-core.patch`](../../../patches/openh3-core.patch) in the OpenH3 source
 repository. The resulting source tree is

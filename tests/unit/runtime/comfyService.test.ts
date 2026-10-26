@@ -2,8 +2,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ComfyService } from '@/process/services/media/comfy/ComfyService';
-import type { ComfyProfile } from '@/common/chat/document/creation/comfy';
+import { ComfyService, type ComfyServiceOptions } from '@/process/services/media/comfy/ComfyService';
+import { comfyFamilyKind, comfyFamilySchema, type ComfyProfile } from '@/common/chat/document/creation/comfy';
+import { createComfyApprovalResolver } from '@/process/services/media/creation/installApproval';
 
 let root: string;
 let profile: ComfyProfile;
@@ -34,7 +35,7 @@ beforeEach(() => {
   };
 });
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
-function setup() {
+function setup(options: Partial<ComfyServiceOptions> = {}) {
   const engine = {
     validate: vi.fn(async () => ({ fingerprint: 'fingerprint', loadable: true as const })),
     ensureStarted: vi.fn(async () => undefined),
@@ -79,6 +80,7 @@ function setup() {
     install,
     probe,
     verifyArtifact: async (): Promise<void> => undefined,
+    ...options,
   });
   service.bind({
     requestId,
@@ -223,6 +225,122 @@ describe('Comfy installation and profile service', () => {
       }
     }
   );
+  it.each(
+    comfyFamilySchema.options.flatMap((family) =>
+      ['install', 'repair', 'install-other'].map((intent) => ({ family, intent }))
+    )
+  )(
+    'automatically starts the $family $intent plan when the active session approves all operations',
+    async ({ family, intent }) => {
+      profile.family = family;
+      profile.kind = comfyFamilyKind(family);
+      const resolveApproval = vi.fn(async () => ({ mode: 'automatic' as const, runtimeMode: 'yolo' }));
+      const { service, install } = setup({ resolveApproval });
+      service.bind({ requestId, conversationId: 'chat', family, intent, source: 'local', kind: profile.kind });
+      const operation = await service.request(requestId, { ...plan(), repair: intent === 'repair' });
+      expect(operation.state).toBe('running');
+      expect(operation.approval).toMatchObject({ mode: 'automatic', runtimeMode: 'yolo' });
+      expect(resolveApproval).toHaveBeenCalledWith('chat');
+      await service.idle();
+      expect(install).toHaveBeenCalledTimes(1);
+      expect(service.operation(operation.id, { requestId }).state).toBe('completed');
+      await service.close();
+    }
+  );
+
+  it('does not accept an automatic-approval claim from the model or the request binding', async () => {
+    const { service, install } = setup({ resolveApproval: async () => ({ mode: 'manual' }) });
+    service.bind({
+      requestId,
+      conversationId: 'chat',
+      family: 'z-image',
+      intent: 'install',
+      approvalMode: 'automatic',
+    });
+    const operation = await service.request(requestId, { ...plan(), approvalMode: 'automatic' });
+    expect(operation.state).toBe('awaiting-consent');
+    expect(install).not.toHaveBeenCalled();
+    await service.close();
+  });
+
+  it('keeps an unexecutable permission lookup reviewable and reports its diagnostic code', async () => {
+    const { service, install } = setup({
+      resolveApproval: async () => {
+        throw new Error('private response');
+      },
+    });
+    const operation = await service.request(requestId, plan());
+    expect(operation.state).toBe('awaiting-consent');
+    expect(operation.error).toBe('COMFY_APPROVAL_MODE_UNAVAILABLE');
+    expect(install).not.toHaveBeenCalled();
+    expect(JSON.stringify(operation)).not.toContain('private response');
+    await service.close();
+  });
+
+  it('deduplicates concurrent automatic requests before probing or creating an installation', async () => {
+    const { service, install, probe } = setup({
+      resolveApproval: async () => ({ mode: 'automatic', runtimeMode: 'yolo' }),
+    });
+    const operations = await Promise.all([service.request(requestId, plan()), service.request(requestId, plan())]);
+    expect(new Set(operations.map((operation) => operation.id)).size).toBe(1);
+    await service.idle();
+    expect(install).toHaveBeenCalledTimes(1);
+    // One planning probe and one pre-execution probe.
+    expect(probe).toHaveBeenCalledTimes(2);
+    await service.close();
+  });
+
+  it('uses a newly observed automatic mode to continue the same previously unapproved plan', async () => {
+    const resolveApproval = vi.fn(async () => ({ mode: 'manual' as 'manual' | 'automatic', runtimeMode: 'default' }));
+    const { service, install } = setup({ resolveApproval });
+    const pending = await service.request(requestId, plan());
+    resolveApproval.mockResolvedValue({ mode: 'automatic', runtimeMode: 'yolo' });
+    const continued = await service.request(requestId, plan());
+    expect(continued.id).toBe(pending.id);
+    expect(continued.state).toBe('running');
+    await service.idle();
+    expect(install).toHaveBeenCalledTimes(1);
+    await service.close();
+  });
+
+  it('does not retry a failed automatic installation just because its request is repeated', async () => {
+    const { service, install } = setup({ resolveApproval: async () => ({ mode: 'automatic', runtimeMode: 'yolo' }) });
+    install.mockRejectedValueOnce(new Error('COMFY_COMPONENT_HASH_MISMATCH'));
+    const initial = await service.request(requestId, plan());
+    await service.idle();
+    const repeated = await service.request(requestId, plan());
+    expect(repeated.id).toBe(initial.id);
+    expect(repeated.state).toBe('failed');
+    expect(install).toHaveBeenCalledTimes(1);
+    await service.close();
+  });
+
+  it('drains pending approval lookups when closing and never starts their installations', async () => {
+    let reached!: () => void;
+    let finish!: (value: { mode: 'automatic'; runtimeMode: string }) => void;
+    const lookupStarted = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const { service, install, engine } = setup({
+      resolveApproval: async () => {
+        reached();
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      },
+    });
+    const pending = service.request(requestId, plan());
+    await lookupStarted;
+    const closing = service.close();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(engine.stopOwned).not.toHaveBeenCalled();
+    finish({ mode: 'automatic', runtimeMode: 'yolo' });
+    await expect(pending).rejects.toThrow('COMFY_SERVICE_STOPPING');
+    await closing;
+    expect(install).not.toHaveBeenCalled();
+    expect(engine.stopOwned).toHaveBeenCalledTimes(1);
+  });
 
   it('keeps planning separate from execution and requires UI consent for this conversation', async () => {
     const { service, install } = setup();

@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { IMAGE_GEN_ENV_KEYS } from '@/common/config/imageGenerationMcpEnv';
-import { BUILTIN_IMAGE_GEN_NAME, type IMcpServer, type IProvider } from '@/common/config/storage';
+import {
+  BUILTIN_IMAGE_GEN_NAME,
+  BUILTIN_VIDEO_MEDIA_NAME,
+  type IMcpServer,
+  type IProvider,
+} from '@/common/config/storage';
 import {
   enforceOpenH3AssistantDefault,
   resolveImageGenerationMigrationConfig,
@@ -164,6 +169,51 @@ describe('resolveImageGenerationMigrationConfig', () => {
       backendConfig
     );
   });
+});
+
+describe('built-in ComfyUI tool upgrades', () => {
+  it.each(['aionui-video-media', BUILTIN_VIDEO_MEDIA_NAME])(
+    'repairs the stale media entrypoint for %s while preserving its ID and user environment',
+    async (name) => {
+      const existing = {
+        ...imageServer(),
+        id: 'media-server-id',
+        name,
+        enabled: false,
+        transport: {
+          type: 'stdio' as const,
+          command: 'node',
+          args: ['D:/old-install/out/main/builtin-mcp-video-media.js'],
+          env: { OPENH3_MEDIA_PORT: '33019', CUSTOM_SETTING: 'preserve' },
+        },
+        original_json: '{}',
+      };
+      listServersMock.mockResolvedValue([imageServer(), existing]);
+
+      await runBackendMigrations(configFile as never);
+
+      const update = updateServerMock.mock.calls.find(([request]) => request.id === existing.id)?.[0];
+      expect(update).toMatchObject({
+        id: existing.id,
+        data: {
+          name: BUILTIN_VIDEO_MEDIA_NAME,
+          builtin: true,
+          transport: {
+            type: 'stdio',
+            command: 'node',
+            args: ['/mock/builtin-mcp-video-media.js'],
+            env: existing.transport.env,
+          },
+        },
+      });
+      expect(update.data).not.toHaveProperty('enabled');
+      expect(JSON.parse(update.data.original_json).mcpServers[BUILTIN_VIDEO_MEDIA_NAME]).toEqual({
+        command: 'node',
+        args: ['/mock/builtin-mcp-video-media.js'],
+        env: existing.transport.env,
+      });
+    }
+  );
 });
 
 describe('runBackendMigrations', () => {

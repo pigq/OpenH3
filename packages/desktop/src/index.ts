@@ -263,7 +263,7 @@ ipcMain.handle('backend:recover-corrupted-database', async () => {
         const { getDataPath } = await import('./process/utils/utils');
         const { getSystemDir } = await import('./process/utils/initStorage');
         const sysDir = getSystemDir();
-        return await backendManager.start(
+        const backendPort = await backendManager.start(
           getDataPath(),
           sysDir.logDir,
           {
@@ -288,6 +288,10 @@ ipcMain.handle('backend:recover-corrupted-database', async () => {
           undefined,
           { recoverCorruptedDatabase: true }
         );
+        await mediaServiceProcess?.setBackendPort(backendPort).catch((error: unknown) => {
+          console.warn('[OpenH3] Media service Core connection refresh failed:', error);
+        });
+        return backendPort;
       } catch (error) {
         markBackendStartupFailed(error);
         await captureBackendStartupFailure(error);
@@ -371,6 +375,9 @@ function exposeBackendPort(backendPort: number): void {
   // ipcBridge.* invoke from the main process — the renderer side reads
   // window.__backendPort via preload, but main has no `window`.
   (globalThis as typeof globalThis & { __backendPort?: number }).__backendPort = backendPort;
+  void mediaServiceProcess?.setBackendPort(backendPort).catch((error: unknown) => {
+    console.warn('[OpenH3] Media service Core connection refresh failed:', error);
+  });
 }
 
 function ensureAdminUserOnce(backendPort: number): Promise<void> {
@@ -739,42 +746,6 @@ const handleAppReady = async (): Promise<void> => {
     return;
   }
 
-  try {
-    const { getDataPath } = await import('./process/utils/utils');
-    const bundledScript = app.isPackaged
-      ? path.join(process.resourcesPath, 'app.asar.unpacked', 'out', 'main', 'media-service.js')
-      : path.join(__dirname, 'media-service.js');
-    const scriptPath = fs.existsSync(bundledScript)
-      ? bundledScript
-      : path.join(process.cwd(), 'scripts', 'media-service.ts');
-    if (fs.existsSync(scriptPath)) {
-      const isTypeScript = scriptPath.endsWith('.ts');
-      const command = isTypeScript ? process.execPath : process.execPath;
-      const args = isTypeScript
-        ? [path.join(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs'), scriptPath]
-        : [scriptPath];
-      mediaServiceProcess = new MediaServiceProcess({
-        scriptPath: isTypeScript ? args[1] : scriptPath,
-        dataDir: getDataPath(),
-        command,
-        ...(isTypeScript
-          ? {
-              spawnProcess: (file, _ignored, options) => {
-                const { spawn } = require('node:child_process') as typeof import('node:child_process');
-                return spawn(file, args, options);
-              },
-            }
-          : {}),
-      });
-      await mediaServiceProcess.start();
-      mark('mediaService');
-    } else {
-      console.warn('[OpenH3] Media service bundle is unavailable; video jobs remain disabled.');
-    }
-  } catch (error) {
-    console.error('[OpenH3] Failed to start media service; video jobs remain disabled:', error);
-  }
-
   /**
    * 启动单目标 CDP 通道，并把端口/口令写进自己的 env。
    *
@@ -944,6 +915,44 @@ const handleAppReady = async (): Promise<void> => {
         console.warn('[OpenH3] Early video provider initialization incomplete');
       }
     }
+  }
+
+  // The media child must inherit the actual Core port for observed session approval.
+  try {
+    const { getDataPath } = await import('./process/utils/utils');
+    const bundledScript = app.isPackaged
+      ? path.join(process.resourcesPath, 'app.asar.unpacked', 'out', 'main', 'media-service.js')
+      : path.join(__dirname, 'media-service.js');
+    const scriptPath = fs.existsSync(bundledScript)
+      ? bundledScript
+      : path.join(process.cwd(), 'scripts', 'media-service.ts');
+    if (fs.existsSync(scriptPath)) {
+      const isTypeScript = scriptPath.endsWith('.ts');
+      const command = isTypeScript ? process.execPath : process.execPath;
+      const args = isTypeScript
+        ? [path.join(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs'), scriptPath]
+        : [scriptPath];
+      mediaServiceProcess = new MediaServiceProcess({
+        scriptPath: isTypeScript ? args[1] : scriptPath,
+        dataDir: getDataPath(),
+        backendPort: (globalThis as typeof globalThis & { __backendPort?: number }).__backendPort,
+        command,
+        ...(isTypeScript
+          ? {
+              spawnProcess: (file, _ignored, options) => {
+                const { spawn } = require('node:child_process') as typeof import('node:child_process');
+                return spawn(file, args, options);
+              },
+            }
+          : {}),
+      });
+      await mediaServiceProcess.start();
+      mark('mediaService');
+    } else {
+      console.warn('[OpenH3] Media service bundle is unavailable; video jobs remain disabled.');
+    }
+  } catch (error) {
+    console.error('[OpenH3] Failed to start media service; video jobs remain disabled:', error);
   }
 
   // One-shot backend migrations are deferred until after the renderer finishes

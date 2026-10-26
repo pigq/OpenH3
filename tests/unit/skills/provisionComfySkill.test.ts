@@ -12,6 +12,15 @@ import {
 type Skill = { name: string; location: string; source: string; is_custom: boolean };
 
 describe('ComfyUI skill provisioning', () => {
+  it('avoids the recorded multi-name ToolSearch false negative before starting installation scans', async () => {
+    const entry = await fs.readFile(path.resolve('resources/skills/comfyui-local/SKILL.md'), 'utf8');
+    expect(entry).toContain('"query":"openh3_comfy"');
+    expect(entry).toContain('literal substring');
+    expect(entry).toContain('before reading references or scanning');
+    expect(entry).toContain('No deferred tools');
+    expect(entry).toContain('do not prove');
+  });
+
   let sandbox: string;
   let bundleRoot: string;
   let userRoot: string;
@@ -261,7 +270,7 @@ describe('ComfyUI skill provisioning', () => {
     await provisionComfySkill(request, bundleRoot);
     const repositoryBundle = path.resolve('resources/skills/comfyui-local');
     await expect(provisionComfySkill(request, repositoryBundle)).resolves.toBe('updated');
-    expect(preferences[COMFY_LOCAL_SKILL_PREFERENCE]).toMatchObject({ version: '1.5.0' });
+    expect(preferences[COMFY_LOCAL_SKILL_PREFERENCE]).toMatchObject({ version: '1.7.0' });
     expect(await fs.readFile(path.join(userRoot, 'references/fasth3-omni.md'), 'utf8')).toBe(
       await fs.readFile(path.join(repositoryBundle, 'references/fasth3-omni.md'), 'utf8')
     );

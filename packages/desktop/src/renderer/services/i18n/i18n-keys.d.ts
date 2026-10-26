@@ -1230,6 +1230,7 @@ export type I18nKey =
   | 'guid.creation.states.unavailable'
   | 'guid.creation.states.unsupported'
   | 'guid.creation.states.verified'
+  | 'guid.creation.toolsCheckFailed'
   | 'guid.creation.toolsUnavailable'
   | 'guid.defaultPrompts.cleanup'
   | 'guid.defaultPrompts.create'

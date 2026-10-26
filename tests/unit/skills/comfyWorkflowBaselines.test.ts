@@ -202,7 +202,7 @@ describe('packaged FastH3-Omni installation', () => {
     expect(omni).toContain('each video or standalone audio must be 2–15 seconds');
     expect(omni).toContain('all videos together must be at most 15 seconds');
     expect(omni).toContain('all soundtracks plus standalone audio together must be at most 15 seconds');
-    expect(JSON.parse(await fs.readFile(path.join(root, 'manifest.json'), 'utf8')).version).toBe('1.5.0');
+    expect(JSON.parse(await fs.readFile(path.join(root, 'manifest.json'), 'utf8')).version).toBe('1.7.0');
     expect(skill).toContain('original parameters');
     expect(skill).not.toContain('lower width/height');
     const attachments = await fs.readFile(path.join(root, 'references/attachment-adoption.md'), 'utf8');

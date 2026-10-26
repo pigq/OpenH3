@@ -12,13 +12,13 @@ Use this reference for every cold install, missing component, resumed download, 
 5. A mirror is eligible only when repository identity, immutable revision, file name, size, license, and SHA-256 (or an independently verifiable digest) match the pinned candidate. A same-name or same-size file is not an equivalent copy. If the mirror cannot provide that evidence, keep it as a connectivity hint, not an install source.
 6. Pin every URL to a revision or immutable object. Never use `latest`, a moving branch, an unpinned ModelScope snapshot, or a dynamically composed component set in an approved plan.
 
-Reachability is only transport evidence. A successful HEAD, Range response, content length, or fast mirror does not prove that the bytes are the pinned artifact. Before selecting a ModelScope or domestic mirror transport, record the upstream repository, revision, path, license, expected byte count, and SHA-256, then verify the mirror's corresponding identity and digest. If the mirror exposes no independently checkable identity or digest, retain it as a connectivity hint and stop the install plan for user review.
+Reachability is only transport evidence. A successful HEAD, Range response, content length, or fast mirror does not prove that the bytes are the pinned artifact. Before selecting a ModelScope or domestic mirror transport, record the upstream repository, revision, path, license, expected byte count, and SHA-256, then verify the mirror's corresponding identity and digest. If a mirror lacks that evidence, exclude that transport and continue to the next eligible mirror or upstream. Stop for source review only when no eligible source remains for a required component. A failed optional mirror does not block an otherwise complete plan.
 
 ## Transfer and resume
 
 - Use the approved downloader's resume support after a connection reset. Preserve the partial file and resume metadata inside the selected target root; do not restart a large file blindly.
 - Verify byte count and SHA-256 after completion and after switching sources. If either check fails, quarantine the file and rebuild the plan; do not retry the same bytes from another URL under the old approval.
-- A source switch is allowed only between already-approved equivalent sources. If identity, revision, license, component set, or hash evidence changes, stop and ask the user to review a new plan.
+- A source switch is allowed only between already-approved equivalent sources. If identity, revision, license, component set, or hash evidence changes, stop the old transfer and submit a new complete plan through `action=request`. Apply SKILL.md's observed approval-mode contract: full automatic approval starts directly; other modes require one UI confirmation. Do not request chat confirmation.
 - Keep temporary files, receipts, and hashes with the profile snapshot so a restart can distinguish downloaded, loadable, and verified states.
 
 ## Diagnose the right network layer
@@ -34,7 +34,7 @@ Reachability is only transport evidence. A successful HEAD, Range response, cont
 | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ModelScope is reachable and its immutable file identity and digest match upstream | Select ModelScope and record upstream identity plus the selected mirror URL in the component evidence.                                            |
 | ModelScope is unreachable or lacks identity evidence                              | Probe a domestic mirror with the same checks, then upstream. Keep the failed source result in the plan evidence.                                  |
-| A mirror responds but size, revision, license, or digest cannot be checked        | Do not install from it; ask for another source or a user-provided verified file.                                                                  |
+| A mirror responds but size, revision, license, or digest cannot be checked        | Exclude that mirror and try the next eligible mirror or pinned upstream source; ask the user only when no eligible source remains.                |
 | All candidate hosts are unreachable, or the probe is incomplete                   | Stop at a reviewable plan and report the missing evidence. Do not switch to a smaller or differently quantized model just because its page opens. |
 
 Workflow templates normally ship as the pinned API graph in the Skill bundle. They should not be downloaded again for each generation. Probe a workflow URL only when planning a template update or when the bundle lacks the required graph; pin and hash that update before approval.

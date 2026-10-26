@@ -2,6 +2,8 @@
 
 ## Probe the runtime that will run the graph
 
+Separate host detection, install planning and post-install execution checks. During cold planning, the host OS/GPU/driver/memory/disk must be known, while missing target Python/Torch, kernels, nodes and weights are expected installation steps. Use the target dependencies' pinned upstream support evidence now; run actual imports, kernels, loader schemas and representative generation after those dependencies exist. Inspect an already installed runtime immediately when available. Avoid re-running completed probes or scanning unrelated disks/templates.
+
 Start with `openh3_comfy_environment`. Reuse the registered profile's paths and check tool results before supplementing missing fields. For an install or a repair that may download files, pass the exact immutable model, node, package, or workflow URLs in `sources` and read the returned `network` object. A nonzero process exit, missing command, permission error, timeout, missing source result, or `NETWORK_*` issue is incomplete evidence, not evidence of no accelerator or a usable mirror. Avoid searching every disk; inspect configured roots and user-named locations first. A cold plan may record a CPU route only when the selected graph/runtime explicitly supports CPU and the plan uses its CPU launch mode; otherwise GPU/kernel evidence is required.
 
 Collect an evidence record:

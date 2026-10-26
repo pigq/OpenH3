@@ -11,10 +11,13 @@ import { useGuidSend, type GuidSendDeps } from '@/renderer/pages/guid/hooks/useG
 import { Message } from '@arco-design/web-react';
 import { resetGuidDraft, setGuidTemplateSnapshot } from '@/renderer/pages/guid/hooks/useGuidDraft';
 import { templateSnapshotFixture } from '../contentCatalog/galleryFixture';
+import { ensureBackendMcpCatalog } from '@/renderer/hooks/mcp/catalog';
+import { BackendHttpError } from '@/common/adapter/httpBridge';
 
 const createConversationInvokeMock = vi.fn();
 const swrMutateMock = vi.fn();
 const bindCreationMock = vi.fn().mockResolvedValue({ ok: true });
+const checkCreationToolsMock = vi.fn();
 vi.mock('@/common/chat/document/h3JobApi', () => ({
   h3JobApi: { bindCreation: (...args: unknown[]) => bindCreationMock(...args) },
 }));
@@ -25,6 +28,7 @@ vi.mock('@/renderer/hooks/mcp/catalog', async () => ({
 
 vi.mock('@/common', () => ({
   ipcBridge: {
+    mcpService: { testMcpConnection: { invoke: (...args: unknown[]) => checkCreationToolsMock(...args) } },
     conversation: {
       create: {
         invoke: (...args: unknown[]) => createConversationInvokeMock(...args),
@@ -86,6 +90,110 @@ const createDeps = (): GuidSendDeps => ({
 });
 
 describe('useGuidSend', () => {
+  it('refreshes the media transport and checks the actual tools before starting a Qwen installation chat', async () => {
+    const deps = createDeps();
+    deps.creationIntent = { family: 'qwen-edit', intent: 'install' };
+    const stale: IMcpServer = {
+      id: 'media',
+      name: 'openh3-video-media',
+      builtin: true,
+      transport: { type: 'stdio', command: 'node', args: ['D:/old/media.js'] },
+    } as IMcpServer;
+    const current = { ...stale, transport: { ...stale.transport, args: ['D:/current/media.js'] } } as IMcpServer;
+    deps.availableMcpServers.push(stale);
+    deps.selectedMcpServerIds = ['media'];
+    vi.mocked(ensureBackendMcpCatalog).mockResolvedValueOnce({
+      allServers: [current],
+      userServers: [],
+      builtinServers: [current],
+    });
+    const { result } = renderHook(() => useGuidSend(deps));
+    await act(async () => {
+      await result.current.handleSend();
+    });
+    const session = createConversationInvokeMock.mock.calls[0][0].extra.selected_session_mcp_servers;
+    expect(session).toHaveLength(1);
+    expect(session[0].transport.args).toEqual(['D:/current/media.js']);
+    expect(checkCreationToolsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'openh3-video-media',
+        transport: expect.objectContaining({
+          args: ['D:/current/media.js'],
+          env: expect.objectContaining({
+            OPENH3_CREATION_FAMILY: 'qwen-edit',
+            OPENH3_CREATION_INTENT: 'install',
+          }),
+        }),
+      })
+    );
+    expect(checkCreationToolsMock.mock.invocationCallOrder[0]).toBeLessThan(
+      createConversationInvokeMock.mock.invocationCallOrder[0]
+    );
+  });
+
+  it.each(['missing-install', 'connection-failed'] as const)(
+    'keeps the Qwen install draft when its dedicated tools are %s',
+    async (failure) => {
+      const deps = createDeps();
+      deps.creationIntent = { family: 'qwen-edit', intent: 'install' };
+      checkCreationToolsMock.mockResolvedValueOnce(
+        failure === 'missing-install'
+          ? { success: true, tools: [{ name: 'openh3_comfy_environment' }, { name: 'openh3_comfy_profiles' }] }
+          : { success: false, code: 'MCP_COMMAND_START_FAILED' }
+      );
+      const { result } = renderHook(() => useGuidSend(deps));
+      let sent: boolean | undefined;
+      await act(async () => {
+        sent = await result.current.handleSend();
+      });
+      expect(sent).toBe(false);
+      expect(createConversationInvokeMock).not.toHaveBeenCalled();
+      expect(deps.navigate).not.toHaveBeenCalled();
+      expect(deps.setInput).not.toHaveBeenCalled();
+      expect(Message.error).toHaveBeenCalledWith('guid.creation.toolsCheckFailed');
+      expect(deps.t).toHaveBeenCalledWith(
+        'guid.creation.toolsCheckFailed',
+        expect.objectContaining({
+          reason: expect.stringContaining(
+            failure === 'missing-install' ? 'openh3_comfy_install' : 'MCP_COMMAND_START_FAILED'
+          ),
+        })
+      );
+    }
+  );
+
+  it('reports a structured MCP failure without displaying the transport payload or submitting a chat', async () => {
+    const deps = createDeps();
+    deps.creationIntent = { family: 'qwen-edit', intent: 'install' };
+    checkCreationToolsMock.mockRejectedValueOnce(
+      new BackendHttpError({
+        method: 'POST',
+        path: '/api/mcp/test-connection',
+        status: 502,
+        body: { code: 'MCP_COMMAND_START_FAILED', error: 'private transport details' },
+      })
+    );
+    const { result } = renderHook(() => useGuidSend(deps));
+    await act(async () => {
+      await result.current.handleSend();
+    });
+    expect(createConversationInvokeMock).not.toHaveBeenCalled();
+    expect(deps.t).toHaveBeenCalledWith('guid.creation.toolsCheckFailed', { reason: 'MCP_COMMAND_START_FAILED' });
+    expect(JSON.stringify(vi.mocked(deps.t).mock.calls)).not.toContain('private transport details');
+  });
+
+  it('keeps an editable installation draft when the fresh MCP catalog cannot be loaded', async () => {
+    const deps = createDeps();
+    deps.creationIntent = { family: 'qwen-edit', intent: 'install' };
+    vi.mocked(ensureBackendMcpCatalog).mockRejectedValueOnce(new Error('offline'));
+    const { result } = renderHook(() => useGuidSend(deps));
+    await act(async () => {
+      expect(await result.current.handleSend()).toBe(false);
+    });
+    expect(createConversationInvokeMock).not.toHaveBeenCalled();
+    expect(checkCreationToolsMock).not.toHaveBeenCalled();
+    expect(deps.t).toHaveBeenCalledWith('guid.creation.toolsCheckFailed', { reason: 'COMFY_MCP_CATALOG_UNAVAILABLE' });
+  });
   it('preserves an unsent draft when conversation creation fails', async () => {
     const deps = createDeps();
     createConversationInvokeMock.mockResolvedValueOnce(null);
@@ -335,6 +443,29 @@ describe('useGuidSend', () => {
     createConversationInvokeMock.mockResolvedValue({ id: 'conv-1' });
     swrMutateMock.mockReset();
     swrMutateMock.mockResolvedValue(undefined);
+    checkCreationToolsMock.mockReset();
+    checkCreationToolsMock.mockResolvedValue({
+      success: true,
+      tools: [
+        'openh3_comfy_environment',
+        'openh3_comfy_profiles',
+        'openh3_comfy_install',
+        'openh3_comfy_generate',
+        'openh3_comfy_job_status',
+        'openh3_comfy_cancel_job',
+      ].map((name) => ({ name })),
+    });
+    const media = {
+      id: 'media',
+      name: 'openh3-video-media',
+      builtin: true,
+      transport: { type: 'stdio', command: 'node', args: ['media.js'] },
+    } as IMcpServer;
+    vi.mocked(ensureBackendMcpCatalog).mockResolvedValue({
+      allServers: [media],
+      userServers: [],
+      builtinServers: [media],
+    });
   });
 
   it('passes selected mode into assistant conversation overrides when creating a preset ACP conversation', async () => {

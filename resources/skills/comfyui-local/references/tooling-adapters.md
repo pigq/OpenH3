@@ -2,6 +2,8 @@
 
 Use these upstream skills and references as narrow adapters. They reduce repeated troubleshooting without bypassing OpenH3's plan, consent, profile, and verification contract.
 
+Consent means authorization under SKILL.md's observed approval-mode contract, not an additional chat-confirmation step: full automatic approval starts a valid submitted plan directly; other modes require one UI confirmation.
+
 | Need                                                                    | Reuse                                                                                                                         | Boundary                                                                                                                                                                                             |
 | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ComfyUI installation, workspace selection, pinned node/model operations | [`comfy`](https://github.com/Comfy-Org/comfy-cli/blob/main/comfy_cli/skills/comfy/SKILL.md) from `comfy-cli`                  | Confirm the installed CLI help and route locally; keep OpenH3's absolute paths, fixed revisions, source receipts, and consent.                                                                       |

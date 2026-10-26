@@ -28,4 +28,4 @@ For each selected component, pass its ordered eligible `transports` URLs to the 
 
 ## When no mirror is usable
 
-Keep the install request in the reviewable planning state and report the missing evidence. Ask for the smallest decision needed: another approved source, a user-provided verified file, or a later retry. Do not silently downgrade the model, change quantization, use a moving `latest` snapshot, or switch to a cloud workflow.
+Try the pinned upstream identity URL next. A missing domestic transport entry is not proof that upstream is unavailable, and one failed mirror does not block a reachable eligible source. If no eligible source remains for a required component, report that exact component and its probe errors; ask only for the smallest needed source decision or a user-provided verified file. Do not silently downgrade the model, change quantization, use a moving `latest` snapshot, or switch to a cloud workflow.

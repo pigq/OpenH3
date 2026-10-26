@@ -2,6 +2,14 @@
 
 产品显示、内部工程命名和持久化标识采用不同的迁移方式。代码搜索仍会命中旧名称；这些命中不能全部机械替换。
 
+## 产品名称与兼容边界
+
+OpenH3 是产品展示名称。新的安装包、窗口标题、应用身份、后端二进制、资源目录、更新仓库和 CLI 帮助使用 OpenH3 名称；持久化标识、已有协议和真实上游来源不做机械替换。
+
+兼容范围包括 `AIONUI_*` 环境变量、`aionui://` 深链、`aionui-session` Cookie、`x-aionui-*` 请求头，以及 `AIONCORE_LISTENING` / `AIONCORE_READY` 启动握手。`aionui.db`、`.aionui`、旧用户目录、`aionui.dir`、`aion-extension.json` 和内置 Skill/MCP 历史 ID 可能仍被已有数据、扩展或脚本引用。
+
+新配置优先使用 OpenH3 标识；读取旧数据时保留回退，在兼容旧客户端所需的位置保留双写。删除旧标识前必须提供迁移、回滚方案和旧版本数据的集成测试。上游依赖、版权声明和来源链接中的原名称保持真实，不改写为 OpenH3 自有来源。
+
 ## 本次统一的命名
 
 | 范围                                  | 新名称                                                                           | 旧版本的兼容方式                                                                          |
@@ -44,7 +52,7 @@
 ## 回归验证入口
 
 - Desktop：`tests/unit/bootstrap/storageIdentityMigration.test.ts` 覆盖自定义缓存路径、旧临时目录、文件优先级、迁移失败回退、重复启动和混合历史目录。
-- Backend：`crates/openh3-db/tests/identity_compatibility.rs` 从 migration 044 的数据库升级，逐列比较助手、overlay、偏好、会话、快照及定时任务，检查外键和重复执行。
+- Backend：[`identity_compatibility.rs`](../../core/crates/openh3-db/tests/identity_compatibility.rs) 从 migration 044 的数据库升级，逐列比较助手、overlay、偏好、会话、快照及定时任务，检查外键和重复执行。
 - Assistant：`openh3_butler_upgrade_preserves_identity_settings_rules_and_avatar` 检查改名后的 bootstrap、两个名称的查询、规则及头像。
 - MCP：媒体工具测试同时检查新旧名称的 schema 与 handler 相同；旧调用测试和新工具结果显示测试同时保留。
-- 数据库历史：`scripts/migration/check-immutability.test.ps1` 覆盖纯目录改名可通过、改名后修改历史 SQL 仍会失败。
+- 数据库历史：[`check-immutability.test.ps1`](../../core/scripts/migration/check-immutability.test.ps1) 覆盖纯目录改名可通过、改名后修改历史 SQL 仍会失败。

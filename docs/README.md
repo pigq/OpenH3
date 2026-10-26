@@ -2,14 +2,14 @@
 
 按你要完成的任务选择入口。产品概览见[中文首页](../README.md)或 [English](readme/README.en.md)。
 
-| 我想…… / Goal                           | 入口 / Start here                                                                                    |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| 安装并开始使用 / Get started            | [首次运行](getting-started/README.md)、[系统要求](getting-started/system-requirements.md)            |
-| 了解支持范围 / Check capabilities       | [产品范围](getting-started/product-scope.md)、[演示](showcase/README.md)                             |
-| 配置与排错 / Configure and troubleshoot | [操作指南](guides/README.md)、[支持](../.github/SUPPORT.md)                                          |
-| 运行源码 / Develop                      | [开发环境](contributing/development.md)、[贡献指南](../CONTRIBUTING.md)                              |
-| 理解实现 / Understand the code          | [架构](architecture/overview.md)、[模块](../packages/README.md)、[测试](../tests/README.md)          |
-| 了解计划与发布 / Follow the project     | [路线图](contributing/roadmap.md)、[发布流程](contributing/releases.md)、[变更记录](../CHANGELOG.md) |
+| 我想…… / Goal                           | 入口 / Start here                                                                                                                                               |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 安装并开始使用 / Get started            | [首次运行](getting-started/README.md)、[系统要求](getting-started/system-requirements.md)                                                                       |
+| 了解支持范围 / Check capabilities       | [产品范围](getting-started/product-scope.md)、[演示](showcase/README.md)                                                                                        |
+| 配置与排错 / Configure and troubleshoot | [操作指南](guides/README.md)、[支持](../.github/SUPPORT.md)                                                                                                     |
+| 运行源码 / Develop                      | [开发环境](contributing/development.md)、[贡献指南](../CONTRIBUTING.md)                                                                                         |
+| 理解实现 / Understand the code          | [架构](architecture/overview.md)、[命名与兼容](architecture/product-identity-compatibility.zh-CN.md)、[模块](../packages/README.md)、[测试](../tests/README.md) |
+| 了解计划与发布 / Follow the project     | [路线图](contributing/roadmap.md)、[发布流程](contributing/releases.md)、[变更记录](../CHANGELOG.md)                                                            |
 
 ## 维护规则 / Maintaining docs
 

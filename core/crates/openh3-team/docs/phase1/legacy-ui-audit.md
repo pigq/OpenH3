@@ -1,5 +1,7 @@
 # AionUi Team 模块后端能力审计（Phase 1）
 
+> **历史归档，非当前规格。** 本文保留迁入单仓库之前的阶段性规划或修复记录，供源码引用与历史分析。文中的分支、进度、“未提交”状态、绝对路径和操作指令仅反映当时环境，不代表当前仓库状态，也不作为当前执行步骤。当前入口见[模块文档](../README.md)；行为以当前源码和测试为准。
+
 > **目的**：对照 AionUi 前端 main 分支（`/Volumes/Macintosh HD/Users/zhuqingyu/project/AionUi/`，commit `ed8a6bcd3`），列出 aionui-backend 后端需要复刻的所有 team 能力。
 >
 > **范围约束**：
