@@ -143,6 +143,87 @@ describe('Comfy installation and profile service', () => {
     const restarted = new ComfyService({ filename: path.join(root, 'state.json'), engine, install, probe });
     expect(restarted.job(job.id, { requestId }).templateSnapshot).toEqual({ ...snapshot, parameters: { width: 768 } });
   });
+
+  it('does not recover valid state as corrupt when constructor persistence stays locked', () => {
+    const { service, engine, install, probe } = setup();
+    service.register(profile);
+    const filename = path.join(root, 'state.json');
+    const previous = fs.readFileSync(filename, 'utf8');
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    const failure = Object.assign(new Error('cannot replace valid state'), { code: 'EPERM' });
+    const rename = vi.spyOn(fs, 'renameSync').mockImplementation(() => {
+      throw failure;
+    });
+    const recoveryLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    try {
+      expect(() => new ComfyService({ filename, engine, install, probe })).toThrow(failure);
+      expect(rename).toHaveBeenCalledTimes(6);
+      expect(recoveryLog).not.toHaveBeenCalled();
+      expect(fs.readFileSync(filename, 'utf8')).toBe(previous);
+      expect(fs.readdirSync(root)).toEqual(['state.json']);
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+      rename.mockRestore();
+      recoveryLog.mockRestore();
+    }
+  });
+
+  it.each(['EPERM', 'EACCES', 'EBUSY'])(
+    'persists profiles after a transient Windows %s without deleting prior state',
+    (code) => {
+      const { service } = setup();
+      const filename = path.join(root, 'state.json');
+      const previous = fs.readFileSync(filename, 'utf8');
+      const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+      const rename = vi.spyOn(fs, 'renameSync').mockImplementationOnce(() => {
+        expect(fs.readFileSync(filename, 'utf8')).toBe(previous);
+        throw Object.assign(new Error('temporarily locked'), { code });
+      });
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      try {
+        service.register(profile);
+        expect(rename.mock.calls.length).toBeGreaterThanOrEqual(2);
+        const { validation: _validation, ...downloaded } = profile;
+        expect(JSON.parse(fs.readFileSync(filename, 'utf8')).profiles).toEqual([
+          { ...downloaded, state: 'downloaded' },
+        ]);
+        expect(fs.readdirSync(root)).toEqual(['state.json']);
+      } finally {
+        Object.defineProperty(process, 'platform', platform);
+        rename.mockRestore();
+      }
+    }
+  );
+
+  it.each([
+    ['win32', 'EPERM', 6],
+    ['win32', 'ENOSPC', 1],
+    ['linux', 'EPERM', 1],
+  ] as const)(
+    'bounds %s %s replacement retries and leaves committed profiles intact',
+    (platformName, code, attempts) => {
+      const { service } = setup();
+      const filename = path.join(root, 'state.json');
+      const previous = fs.readFileSync(filename, 'utf8');
+      const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+      const failure = Object.assign(new Error('cannot replace state'), { code });
+      const rename = vi.spyOn(fs, 'renameSync').mockImplementation(() => {
+        throw failure;
+      });
+      Object.defineProperty(process, 'platform', { value: platformName, configurable: true });
+      try {
+        expect(() => service.register(profile)).toThrow(failure);
+        expect(rename).toHaveBeenCalledTimes(attempts);
+        expect(fs.readFileSync(filename, 'utf8')).toBe(previous);
+        expect(fs.readdirSync(root)).toEqual(['state.json']);
+      } finally {
+        Object.defineProperty(process, 'platform', platform);
+        rename.mockRestore();
+      }
+    }
+  );
+
   it('keeps planning separate from execution and requires UI consent for this conversation', async () => {
     const { service, install } = setup();
     const operation = await service.request(requestId, plan());

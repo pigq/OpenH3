@@ -210,7 +210,6 @@ export class ComfyService {
       this.cancelledConversations = new Set(saved.cancelledConversations ?? []);
       this.operationScopes = new Map(saved.operationScopes ?? []);
       this.failures = new Map(saved.failures ?? []);
-      this.flush();
     } catch (error) {
       // Keep the original manifest intact: corrupt consent must never start an operation.
       fs.copyFileSync(options.filename, `${options.filename}.corrupt-${Date.now()}`, fs.constants.COPYFILE_EXCL);
@@ -220,29 +219,50 @@ export class ComfyService {
       this.jobs.clear();
       this.probes.clear();
       console.error('[comfy] COMFY_STATE_RECOVERY_FAILED', error);
-      this.flush();
     }
+    // A failed write is not evidence that the state we successfully read is corrupt.
+    this.flush();
   }
   private flush(): void {
-    const temporary = `${this.options.filename}.tmp`;
-    fs.writeFileSync(
-      temporary,
-      JSON.stringify(
-        {
-          profiles: [...this.catalog.values()],
-          bindings: [...this.bindings.values()],
-          operations: [...this.operations.values()],
-          jobs: [...this.jobs.values()],
-          probes: [...this.probes],
-          operationScopes: [...this.operationScopes],
-          failures: [...this.failures],
-          cancelledConversations: [...this.cancelledConversations],
-        },
-        null,
-        2
-      )
-    );
-    fs.renameSync(temporary, this.options.filename);
+    const temporary = `${this.options.filename}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    try {
+      fs.writeFileSync(
+        temporary,
+        JSON.stringify(
+          {
+            profiles: [...this.catalog.values()],
+            bindings: [...this.bindings.values()],
+            operations: [...this.operations.values()],
+            jobs: [...this.jobs.values()],
+            probes: [...this.probes],
+            operationScopes: [...this.operationScopes],
+            failures: [...this.failures],
+            cancelledConversations: [...this.cancelledConversations],
+          },
+          null,
+          2
+        ),
+        { flag: 'wx', mode: 0o600 }
+      );
+      for (let attempt = 0; ; attempt++) {
+        try {
+          fs.renameSync(temporary, this.options.filename);
+          break;
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (process.platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(code ?? '') || attempt >= 5)
+            throw error;
+          // Retry only the completed replacement; never unlink committed profiles or consent.
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10 * (attempt + 1));
+        }
+      }
+    } finally {
+      try {
+        fs.rmSync(temporary, { force: true });
+      } catch {
+        // Preserve the original persistence error when temporary cleanup also fails.
+      }
+    }
   }
   private scope(requestId: string): ComfySelection {
     uuid.parse(requestId);
