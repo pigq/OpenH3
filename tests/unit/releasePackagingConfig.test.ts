@@ -49,13 +49,16 @@ type ManualWorkflow = {
     {
       if?: string;
       uses?: string;
-      needs?: string;
+      needs?: string | string[];
       with?: Record<string, unknown>;
       secrets?: string;
       environment?: string;
       permissions?: Record<string, string>;
       concurrency?: { group: string; 'cancel-in-progress': boolean };
+      'runs-on'?: string;
+      strategy?: { 'fail-fast'?: boolean; matrix: { scenario: string[] } };
       steps?: {
+        id?: string;
         name?: string;
         uses?: string;
         if?: string;
@@ -71,12 +74,55 @@ function manualWorkflow(): ManualWorkflow {
   return load(readProjectFile('.github/workflows/build-manual.yml')) as ManualWorkflow;
 }
 
-describe('manual build and official content mode isolation', () => {
+type JobResult = 'success' | 'failure' | 'cancelled' | 'skipped';
+
+function selectManualJobs(
+  mode: string,
+  repository: string,
+  ref: string,
+  completed: Record<string, JobResult> = {}
+): { selected: string[]; results: Record<string, JobResult> } {
+  const selected: string[] = [];
+  const results: Record<string, JobResult> = {};
+  for (const [id, job] of Object.entries(manualWorkflow().jobs)) {
+    expect(job.if, `${id} must have an explicit mode gate`).toBeTruthy();
+    const dependencies = job.needs ? (Array.isArray(job.needs) ? job.needs : [job.needs]) : [];
+    for (const dependency of dependencies)
+      expect(results[dependency], `Unresolved dependency ${dependency}`).toBeDefined();
+    const success = () => dependencies.every((dependency) => results[dependency] === 'success');
+    const expression = job.if!.replace(/^\s*\$\{\{|\}\}\s*$/g, '');
+    // GitHub implicitly adds success() unless the condition contains a status
+    // function. always() intentionally lets the evidence gate inspect failures
+    // and missing reports after a rejected/skipped producer.
+    const explicitStatus = /\b(?:always|success|failure|cancelled)\s*\(/.test(expression);
+    const condition = runInNewContext(expression, {
+      inputs: { mode },
+      github: {
+        repository,
+        ref,
+        ref_type: ref.startsWith('refs/tags/') ? 'tag' : 'branch',
+        event_name: 'workflow_dispatch',
+      },
+      needs: Object.fromEntries(dependencies.map((dependency) => [dependency, { result: results[dependency] }])),
+      always: () => true,
+      success,
+      failure: () => dependencies.some((dependency) => results[dependency] === 'failure'),
+      cancelled: () => dependencies.some((dependency) => results[dependency] === 'cancelled'),
+    });
+    if (condition && (explicitStatus || success())) {
+      selected.push(id);
+      results[id] = completed[id] ?? 'success';
+    } else results[id] = 'skipped';
+  }
+  return { selected, results };
+}
+
+describe('manual build, official content and installed acceptance mode isolation', () => {
   it('reuses the existing workflow entry within its input and directory budget', () => {
     const inputs = manualWorkflow().on.workflow_dispatch.inputs;
     expect(inputs.mode).toMatchObject({
       default: 'build',
-      options: expect.arrayContaining(['build', 'official-content']),
+      options: ['build', 'official-content', 'windows-upgrade-acceptance'],
     });
     expect(Object.keys(inputs).length).toBeLessThanOrEqual(10);
     expect(inputs.branch).toMatchObject({ default: 'main', required: true });
@@ -100,6 +146,7 @@ describe('manual build and official content mode isolation', () => {
     expect(inputs.rollback_reason.required).not.toBe(true);
     expect(inputs.key_id).toBeUndefined();
     expect(inputs.min_client_version).toBeUndefined();
+    expect(inputs.reviewed_source_sha).toMatchObject({ default: '', required: false });
     expect(existsSync(resolve(projectRoot, '.github/workflows/publish-content-catalog.yml'))).toBe(false);
     expect(readdirSync(resolve(projectRoot, '.github/workflows')).length).toBeLessThanOrEqual(14);
   });
@@ -111,21 +158,171 @@ describe('manual build and official content mode isolation', () => {
     ['official-content', 'pigq/OpenH3', 'refs/heads/feature', []],
     ['official-content', 'contributor/OpenH3', 'refs/heads/main', []],
     ['official-content', 'pigq/OpenH3', 'refs/tags/v3.0.1', []],
-    ['windows-upgrade-acceptance', 'pigq/OpenH3', 'refs/heads/main', []],
+    [
+      'windows-upgrade-acceptance',
+      'pigq/OpenH3',
+      'refs/heads/main',
+      ['acceptance-contracts', 'acceptance-candidate', 'acceptance-installed', 'acceptance-gate'],
+    ],
+    [
+      'windows-upgrade-acceptance',
+      'pigq/OpenH3',
+      'refs/heads/reviewed-candidate',
+      ['acceptance-contracts', 'acceptance-candidate', 'acceptance-installed', 'acceptance-gate'],
+    ],
+    ['windows-upgrade-acceptance', 'pigq/OpenH3', 'refs/tags/v3.0.1', ['acceptance-gate']],
+    ['windows-upgrade-acceptance', 'contributor/OpenH3', 'refs/heads/main', ['acceptance-gate']],
     ['unknown', 'pigq/OpenH3', 'refs/heads/main', []],
   ])('isolates %s jobs for %s at %s', (mode, repository, ref, expected) => {
-    const jobs = manualWorkflow().jobs;
-    const selected = ['prepare-matrix', 'build-pipeline', 'publish-official-content'].filter((id) => {
-      expect(jobs[id], id).toBeDefined();
-      const condition = jobs[id].if;
-      expect(condition, `${id} must have an explicit mode gate`).toBeTruthy();
-      // These job gates intentionally use only GitHub/JavaScript-compatible comparisons.
-      return runInNewContext(condition!.replace(/^\s*\$\{\{|\}\}\s*$/g, ''), {
-        inputs: { mode },
-        github: { repository, ref, event_name: 'workflow_dispatch' },
+    expect(selectManualJobs(mode, repository, ref).selected).toEqual(expected);
+  });
+
+  it.each(['failure', 'cancelled', 'skipped'] as const)(
+    'skips dependent acceptance jobs after contracts %s while always running the evidence gate',
+    (result) => {
+      const selection = selectManualJobs('windows-upgrade-acceptance', 'pigq/OpenH3', 'refs/heads/main', {
+        'acceptance-contracts': result,
       });
+      expect(selection.selected).toEqual(['acceptance-contracts', 'acceptance-gate']);
+      expect(selection.results['acceptance-candidate']).toBe('skipped');
+      expect(selection.results['acceptance-installed']).toBe('skipped');
+    }
+  );
+
+  it('keeps build dependencies gated and lets the final acceptance gate inspect an installed failure', () => {
+    expect(
+      selectManualJobs('build', 'pigq/OpenH3', 'refs/heads/main', { 'prepare-matrix': 'failure' }).selected
+    ).toEqual(['prepare-matrix']);
+    const acceptance = selectManualJobs('windows-upgrade-acceptance', 'pigq/OpenH3', 'refs/heads/main', {
+      'acceptance-installed': 'failure',
     });
-    expect(selected).toEqual(expected);
+    expect(acceptance.selected).toEqual([
+      'acceptance-contracts',
+      'acceptance-candidate',
+      'acceptance-installed',
+      'acceptance-gate',
+    ]);
+    expect(acceptance.results['acceptance-installed']).toBe('failure');
+  });
+
+  it('requires six isolated hosted acceptance scenarios from the reviewed dispatch SHA without inherited secrets', () => {
+    const workflow = manualWorkflow();
+    const names = ['acceptance-contracts', 'acceptance-candidate', 'acceptance-installed', 'acceptance-gate'];
+    expect(Object.keys(workflow.jobs).filter((name) => name.startsWith('acceptance-'))).toEqual(names);
+    for (const name of names) {
+      const job = workflow.jobs[name];
+      expect(job.permissions, name).toEqual({ contents: 'read', actions: 'read' });
+      expect(job.secrets, name).toBeUndefined();
+      expect(job.environment, name).toBeUndefined();
+      expect(job.if, name).toContain("inputs.mode == 'windows-upgrade-acceptance'");
+      expect(JSON.stringify(job), name).not.toContain('secrets.');
+      expect(JSON.stringify(job), name).not.toContain('CONTENT_SIGNING_PRIVATE_KEY');
+      for (const checkout of job.steps?.filter((step) => step.uses?.startsWith('actions/checkout@')) ?? [])
+        expect(checkout.with).toMatchObject({ ref: '${{ github.sha }}', 'persist-credentials': false, clean: true });
+    }
+    const contracts = workflow.jobs['acceptance-contracts'];
+    expect(contracts['runs-on']).toBe('windows-2022');
+    const preflight = contracts.steps!.find((step) => step.id === 'reviewed-source')!;
+    expect(preflight.env).toEqual({ REVIEWED_SOURCE_SHA: '${{ inputs.reviewed_source_sha }}' });
+    expect(preflight.run).toContain("'^[a-f0-9]{40}$'");
+    expect(preflight.run).toContain('$env:REVIEWED_SOURCE_SHA -cne $env:GITHUB_SHA');
+    expect(preflight.run).toContain('git rev-parse HEAD');
+    expect(preflight.run).toContain('$head -cne $env:GITHUB_SHA');
+    expect(preflight.run).toContain('git status --porcelain --untracked-files=no');
+    expect(preflight.run).toContain("$package.version -cne '3.0.1'");
+    const candidate = workflow.jobs['acceptance-candidate'];
+    expect(candidate.needs).toBe('acceptance-contracts');
+    expect(candidate.uses).toBe('./.github/workflows/_build-reusable.yml');
+    expect(candidate.with).toMatchObject({
+      ref: '${{ github.sha }}',
+      skip_code_quality: false,
+      append_commit_hash: false,
+      upload_installers_only: false,
+      acceptance_provenance: true,
+    });
+    expect(candidate.with).not.toHaveProperty('openh3_core_run_id');
+    expect(candidate.with).not.toHaveProperty('aioncore_run_id');
+    expect(JSON.parse(candidate.with!.matrix as string)).toEqual({
+      include: [
+        {
+          platform: 'windows-x64',
+          os: 'windows-2022',
+          arch: 'x64',
+          'artifact-name': 'windows-x64-installed-upgrade-build',
+          command: 'node scripts/build-with-builder.js x64 --win --x64',
+        },
+      ],
+    });
+    const installed = workflow.jobs['acceptance-installed'];
+    expect(installed.needs).toBe('acceptance-candidate');
+    expect(installed['runs-on']).toBe('windows-2022');
+    expect(installed.strategy).toEqual({
+      'fail-fast': false,
+      matrix: {
+        scenario: ['manual-migration', 'cancel', 'disconnect', 'corrupt', 'downloaded-quit', 'install'],
+      },
+    });
+    const download = installed.steps!.find((step) => step.uses?.startsWith('actions/download-artifact@'))!;
+    expect(download.with).toMatchObject({
+      name: 'windows-installed-upgrade-candidate-${{ github.run_id }}-${{ github.run_attempt }}',
+    });
+    expect(download.with).not.toHaveProperty('run-id');
+    expect(download.with).not.toHaveProperty('github-token');
+    const acceptance = installed.steps!.find((step) => step.id === 'installed-acceptance')!;
+    expect(acceptance.run).toContain('installed-upgrade.mjs --scenario $env:SCENARIO --source-sha $env:GITHUB_SHA');
+    expect(acceptance.run).toContain('$LASTEXITCODE -ne 0');
+    expect(acceptance.env).toEqual({ GITHUB_TOKEN: '${{ github.token }}' });
+    const upload = installed.steps!.find((step) => step.uses?.startsWith('actions/upload-artifact@'))!;
+    expect(upload.if).toContain('always()');
+    expect(upload.with).toMatchObject({
+      name: 'windows-upgrade-evidence-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.scenario }}',
+      'if-no-files-found': 'error',
+    });
+    const gate = workflow.jobs['acceptance-gate'];
+    expect(gate.if).toContain('always()');
+    expect(gate.needs).toEqual(names.slice(0, 3));
+    expect(
+      gate.steps!.some((step) => step.run?.includes('packages/shared-scripts/acceptance/runner/flows/gate.mjs'))
+    ).toBe(true);
+    expect(gate.steps!.find((step) => step.uses?.startsWith('actions/download-artifact@'))!.with).toMatchObject({
+      pattern: 'windows-upgrade-evidence-${{ github.run_id }}-${{ github.run_attempt }}-*',
+      'merge-multiple': false,
+    });
+  });
+
+  it('keeps reusable acceptance provenance opt-in and binds the original candidate bytes in the successful build job', () => {
+    const reusable = load(readProjectFile('.github/workflows/_build-reusable.yml')) as {
+      on: { workflow_call: { inputs: Record<string, { type: string; default: unknown }> } };
+      jobs: ManualWorkflow['jobs'];
+    };
+    expect(reusable.on.workflow_call.inputs.acceptance_provenance).toMatchObject({ type: 'boolean', default: false });
+    expect(manualWorkflow().jobs['build-pipeline'].with).not.toHaveProperty('acceptance_provenance');
+    const steps = reusable.jobs.build.steps!;
+    const packIndex = steps.findIndex((step) => step.id === 'acceptance-candidate');
+    expect(packIndex).toBeGreaterThan(steps.findIndex((step) => step.id === 'windows-build'));
+    expect(packIndex).toBeLessThan(steps.findIndex((step) => step.name === 'Clean up non-installer artifacts'));
+    const pack = steps[packIndex];
+    for (const predicate of [
+      'success()',
+      'inputs.acceptance_provenance',
+      "matrix.platform == 'windows-x64'",
+      "matrix.arch == 'x64'",
+      "steps.windows-build.outputs.result == 'success'",
+    ])
+      expect(pack.if).toContain(predicate);
+    expect(pack.run).toContain('$head -cne $env:GITHUB_SHA');
+    expect(pack.run).toContain('git diff --exit-code --');
+    expect(pack.run).toContain('git diff --cached --exit-code --');
+    expect(pack.run).toContain('Copy-Item -LiteralPath');
+    expect(pack.run).toContain('OpenH3-3.0.1-win-x64.exe');
+    expect(pack.run).toContain('latest.yml');
+    expect(pack.run).toContain('candidate-bundle.mjs --source-sha $env:GITHUB_SHA');
+    expect(pack.run).not.toContain('Set-Content');
+    expect(steps[packIndex + 1].with).toMatchObject({
+      name: 'windows-installed-upgrade-candidate-${{ github.run_id }}-${{ github.run_attempt }}',
+      'if-no-files-found': 'error',
+    });
+    expect(steps[packIndex + 1].with!.path).toMatch(/bundle\/$/);
   });
 
   it('preserves the ordinary six-platform reusable build inputs, permissions and secrets', () => {
