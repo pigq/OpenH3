@@ -939,11 +939,11 @@ test('CDN guard uses a deterministic exact owned block and restores only its blo
   const add = calls.find((c) => c[0] === 'cdn-enable')[1];
   const remove = calls.find((c) => c[0] === 'cdn-disable')[1];
   assert.equal(add.block, remove.block);
-  assert.match(add.block, /0\.0\.0\.0 static\.aionui\.com\r\n:: static\.aionui\.com/);
+  assert.match(add.block, /0\.0\.0\.0 openh3-legacy-update\.invalid\r\n:: openh3-legacy-update\.invalid/);
   assert.match(add.block, /OPENH3-ACCEPTANCE-[a-f0-9]{16}/);
   const decoded = planSource(subject.buildPowerShellPlan('cdn-enable', add, env));
   assert.match(decoded, /AppendAllText/);
-  assert.match(decoded, /GetHostAddresses/);
+  assert.match(decoded, /Acceptance isolation hosts block was not persisted/);
 });
 
 test('failed CDN enable still attempts only its exact block restoration', async () => {

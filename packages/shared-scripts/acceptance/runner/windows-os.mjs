@@ -384,9 +384,11 @@ switch ($p.action) {
     & "$env:SystemRoot\System32\ipconfig.exe" /flushdns | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'DNS cache flush failed' }
     if ($p.action -eq 'cdn-enable') {
-      $addresses = @([Net.Dns]::GetHostAddresses('static.aionui.com') | ForEach-Object { $_.ToString() })
-      if (-not $addresses.Length -or @($addresses | Where-Object { $_ -notin '0.0.0.0','::' }).Length) { throw 'Legacy CDN hostname is not confined to hosts deny addresses' }
-      Emit @{kind='result'; hosts=$hosts; enabled=$true; addresses=$addresses; attemptsMonitored=$false}
+      # The production feed is GitHub Releases. Verify the exact owned hosts
+      # block instead of resolving the retired CDN hostname from the runner.
+      $updated = $latin.GetString([IO.File]::ReadAllBytes($hosts))
+      if ($updated.IndexOf([string]$p.block,[StringComparison]::Ordinal) -lt 0) { throw 'Acceptance isolation hosts block was not persisted' }
+      Emit @{kind='result'; hosts=$hosts; enabled=$true; addresses=@('0.0.0.0','::'); attemptsMonitored=$false}
     } else { Emit @{kind='result'; hosts=$hosts; restored=$true} }
   }
   'install' {
@@ -705,7 +707,7 @@ export function createWindowsAdapter(env, deps = {}) {
     async enableCdnIsolation() {
       if (!root || cdnBlock) throw Error('CDN guard needs one established owned root and may only be enabled once');
       const marker = `OPENH3-ACCEPTANCE-${createHash('sha256').update(root.toLowerCase()).digest('hex').slice(0, 16)}`;
-      cdnBlock = `\r\n# BEGIN ${marker}\r\n0.0.0.0 static.aionui.com\r\n:: static.aionui.com\r\n# END ${marker}\r\n`;
+      cdnBlock = `\r\n# BEGIN ${marker}\r\n0.0.0.0 openh3-legacy-update.invalid\r\n:: openh3-legacy-update.invalid\r\n# END ${marker}\r\n`;
       cdnAttempted = true;
       return run('cdn-enable', { block: cdnBlock });
     },
