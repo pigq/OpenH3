@@ -18,6 +18,14 @@ import { load } from 'js-yaml';
 const projectRoot = resolve(__dirname, '../..');
 const itWithBashAndNode =
   spawnSync('bash', ['-lc', 'command -v node >/dev/null'], { encoding: 'utf8' }).status === 0 ? it : it.skip;
+// The publication guard runs on Ubuntu and requires GNU realpath flags.
+const itWithContentGuardTools =
+  spawnSync('bash', ['-c', 'command -v node >/dev/null && realpath -e -- . >/dev/null 2>&1'], {
+    cwd: projectRoot,
+    encoding: 'utf8',
+  }).status === 0
+    ? it
+    : it.skip;
 
 function readProjectFile(path: string): string {
   return readFileSync(resolve(projectRoot, path), 'utf8');
@@ -183,7 +191,7 @@ describe('manual build and official content mode isolation', () => {
     for (const step of publish.steps!) expect(step.run ?? '').not.toContain('${{ inputs.');
   });
 
-  itWithBashAndNode('rejects content sources outside the reviewed commit before building or signing', () => {
+  itWithContentGuardTools('rejects content sources outside the reviewed commit before building or signing', () => {
     const validation = manualWorkflow().jobs['publish-official-content'].steps!.find((step) =>
       step.run?.includes('scripts/content-catalog/build.mjs')
     );
