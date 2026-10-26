@@ -185,6 +185,12 @@ function CheckPath([string]$value, [bool]$create, [bool]$missingLeaf) {
     if ($i -lt $all.Length-1 -and -not $item.PSIsContainer) { throw 'Non-directory ancestor' }
   }
 }
+function Sha256File([string]$value) {
+  $algorithm = [Security.Cryptography.SHA256]::Create()
+  $stream = [IO.File]::OpenRead($value)
+  try { return [BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-','').ToLowerInvariant() }
+  finally { $stream.Dispose(); $algorithm.Dispose() }
+}
 function Record($proc,$cim) {
   [void]$proc.Handle
   $proc.Refresh()
@@ -286,7 +292,7 @@ switch ($p.action) {
     # This is a specific native-handoff observer, NOT a lossless OS trace.
     CheckPath $p.installerPath $false $false
     CheckPath $p.nsisTemp $false $false
-    if ((Get-FileHash -LiteralPath $p.installerPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $p.sha256) { throw 'Prepared native installer hash changed' }
+    if ((Sha256File $p.installerPath) -ne $p.sha256) { throw 'Prepared native installer hash changed' }
     $handles = @(); $complete = $false
     try {
       foreach ($r in @($p.registry)) {
@@ -323,7 +329,7 @@ switch ($p.action) {
             if (-not $role) { continue }
             CheckPath $r.executable $false $false
             if ($role -ne 'restart-candidate') {
-              $actualHash = (Get-FileHash -LiteralPath $r.executable -Algorithm SHA256).Hash.ToLowerInvariant()
+              $actualHash = Sha256File $r.executable
               if ($role -eq 'installer' -and $actualHash -ne $p.sha256) { throw 'Observed native installer bytes changed' }
               if ($role -eq 'nsis-installer' -and ([IO.Path]::GetFileName($r.executable) -notin 'old-uninstaller.exe','AionUi-fixed-uninstaller.exe' -or $actualHash -ne $p.uninstallerSha256)) { throw 'Unknown native installer helper image or bytes' }
               $r.sha256 = $actualHash

@@ -16,6 +16,7 @@ function fake(
     stopFails = false,
     invalidRefusal = false,
     damagedRelaunchContent = false,
+    transportLengthMismatch = false,
   } = {}
 ) {
   const calls = [];
@@ -69,7 +70,9 @@ function fake(
               ? 'permission denied'
               : scenario === 'corrupt'
                 ? 'sha512 checksum mismatch, expected X, got Y'
-                : 'Request has been aborted by the server',
+                : transportLengthMismatch
+                  ? 'net::ERR_CONTENT_LENGTH_MISMATCH'
+                  : 'Request has been aborted by the server',
             code: !wrongError && scenario === 'corrupt' ? 'ERR_CHECKSUM_MISMATCH' : undefined,
           });
           return { success: false, error: 'fixture download rejected' };
@@ -299,6 +302,8 @@ test('install cannot pass without a proven synchronous refusal or with damaged i
 });
 
 test('corrupt requires completed bad bytes plus checksum mismatch; disconnect requires actual partial server abort', async () => {
+  const truncated = fake('disconnect', { transportLengthMismatch: true });
+  assert.equal((await runUpdaterScenario(truncated.config, truncated.io, truncated.services)).status, 'PASS');
   for (const [scenario, options] of [
     ['corrupt', { wrongError: true }],
     ['corrupt', { incompleteCorrupt: true }],

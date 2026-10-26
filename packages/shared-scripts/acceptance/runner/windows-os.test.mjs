@@ -711,7 +711,13 @@ for (const variant of [
 test('handoff script binds native observed bytes and never owns arbitrary temp helpers', () => {
   const script = planSource(subject.buildPowerShellPlan('handoff-watch', {}, env));
   const observed = script.slice(script.indexOf("'handoff-watch'"), script.indexOf("{ $_ -in 'window'"));
-  assert.match(observed, /Get-FileHash -LiteralPath \$r\.executable/);
+  assert.match(
+    script,
+    /function Sha256File\(\[string\]\$value\)[\s\S]+?\[Security\.Cryptography\.SHA256\]::Create\(\)/
+  );
+  assert.doesNotMatch(script, /Get-FileHash/);
+  assert.match(observed, /Sha256File \$r\.executable/);
+  assert.match(observed, /Sha256File \$p\.installerPath/);
   assert.match(observed, /Unknown native installer helper/);
 });
 

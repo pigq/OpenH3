@@ -147,8 +147,10 @@ export async function runUpdaterScenario(config, io, services = {}) {
           assert.ok(
             errors.some(
               (e) =>
-                /ERR_(?:CONNECTION_(?:CLOSED|RESET)|INCOMPLETE_CHUNKED_ENCODING)|ECONNRESET/.test(e.code ?? '') ||
-                /aborted by the server|net::ERR_CONNECTION_(?:CLOSED|RESET)|socket hang up|premature close/i.test(
+                /ERR_(?:CONNECTION_(?:CLOSED|RESET)|INCOMPLETE_CHUNKED_ENCODING|CONTENT_LENGTH_MISMATCH)|ECONNRESET/.test(
+                  e.code ?? ''
+                ) ||
+                /aborted by the server|net::ERR_(?:CONNECTION_(?:CLOSED|RESET)|CONTENT_LENGTH_MISMATCH)|socket hang up|premature close/i.test(
                   e.error ?? ''
                 )
             ),
