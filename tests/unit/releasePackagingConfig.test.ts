@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -179,6 +188,7 @@ describe('manual build and official content mode isolation', () => {
       step.run?.includes('scripts/content-catalog/build.mjs')
     );
     const guard = validation!.run!.split('node scripts/content-catalog/build.mjs')[0];
+    mkdirSync(resolve(projectRoot, '.runtime'), { recursive: true });
     const tempDir = mkdtempSync(resolve(projectRoot, '.runtime/content-workflow-inputs-'));
     const untracked = resolve(tempDir, 'source.json');
     writeFileSync(untracked, '{}');
