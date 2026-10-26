@@ -92,5 +92,44 @@
       "promise4": "오픈소스 저장소는 계속 업데이트되며, 핵심 기능은 동기화되고, 오픈소스 정신은 변하지 않습니다.",
       "noRush": "아직 업그레이드하지 않으셔도 현재 버전은 평소처럼 사용할 수 있으며, 다만 업데이트는 제공되지 않습니다. 그러나 새 버전에서 첫 로그인을 마치면 로컬 데이터는 이미 그쪽으로 이전되므로, 이후에는 새 버전을 평소 사용 입구로 삼아 주세요."
     }
+  },
+  "content": {
+    "title": "공식 콘텐츠 라이브러리",
+    "scope": "공식 모델 설명, 템플릿 및 전시 작품만 업데이트합니다. 사용자 모델, 워크플로, 초안 및 생성 파일은 변경하지 않습니다.",
+    "source": "출처: pigq/OpenH3 · content-stable",
+    "version": "콘텐츠 버전 {{sequence}}",
+    "lastChecked": "마지막 확인: {{time}}",
+    "unconfigured": "공식 서명 공개 키가 클라이언트에 설정될 때까지 원격 동기화를 사용할 수 없습니다. 내장 콘텐츠는 사용할 수 있습니다.",
+    "autoSync": "공식 콘텐츠 자동 동기화",
+    "check": "콘텐츠 업데이트 확인",
+    "cancel": "동기화 취소",
+    "restore": "이전 콘텐츠 복원",
+    "restoreConfirm": "이전에 검증된 라이브러리를 복원할까요? 모델이나 작업 기록은 변경되지 않습니다.",
+    "summary": "모델 카드 {{models}}개 · 템플릿 {{templates}}개 · 전시 작품 {{showcases}}개",
+    "failed": "동기화가 완료되지 않았습니다. 현재 라이브러리가 유지됩니다.",
+    "actionFailed": "작업에 실패했거나 호스트 관리자 권한이 필요합니다.",
+    "unavailable": "콘텐츠 서비스를 사용할 수 없습니다. 호스트와 Core 버전을 확인하세요.",
+    "loading": "공식 콘텐츠 로드 중…",
+    "requiresClientUpdate": "클라이언트 업데이트 필요",
+    "viewWork": "공식 작품 보기",
+    "useLinkedTemplate": "연결된 템플릿 사용",
+    "attribution": "출처 및 라이선스",
+    "refreshPage": "새 콘텐츠 · 카드 새로 고침",
+    "phases": {
+      "idle": "대기",
+      "checking": "확인 중",
+      "downloading": "다운로드 중",
+      "verifying": "검증 중",
+      "activating": "적용 중",
+      "ready": "준비됨",
+      "incompatible": "클라이언트 업데이트 필요",
+      "failed": "실패",
+      "cancelled": "취소됨"
+    },
+    "changes": "변경 기록",
+    "added": "추가",
+    "changed": "변경",
+    "removed": "게시 중단",
+    "linkUnavailable": "연결된 템플릿의 게시가 중단되었거나 리비전이 일치하지 않거나 클라이언트 업데이트가 필요합니다. 이 작품은 보기 전용입니다."
   }
 }

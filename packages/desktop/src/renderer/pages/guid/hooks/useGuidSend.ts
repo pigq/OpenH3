@@ -5,6 +5,7 @@
  */
 
 import { ipcBridge } from '@/common';
+import { getGuidDraftScope, getGuidTemplateSnapshot } from './useGuidDraft';
 import { type ChatFileRef, chatFileRefPath } from '@/common/types/chatFile';
 import {
   isBuiltinImageGenerationName,
@@ -115,6 +116,8 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
   const sendingRef = useRef(false);
 
   const handleSend = useCallback(async () => {
+    const guidDraftScope = getGuidDraftScope();
+    if (!guidDraftScope) return false;
     if (!selectedAssistantId) {
       return false;
     }
@@ -206,7 +209,9 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
         : input;
     const creationRequestId = creationRequest ? crypto.randomUUID() : undefined;
     const requiresCreationBinding = creationRequest?.source === 'local';
-    const creationSnapshot = creationRequest ? { ...creationRequest, requestId: creationRequestId! } : undefined;
+    const creationSnapshot = creationRequest
+      ? { ...creationRequest, requestId: creationRequestId!, templateSnapshot: getGuidTemplateSnapshot() }
+      : undefined;
     if (creationRequest) {
       const wantsVideoMedia = requiresCreationBinding || creationRequest.kind === 'video';
       const matchesRequired = (server: IMcpServer) =>
@@ -277,6 +282,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
         : assistantOverrideMcpIds,
     };
 
+    if (guidDraftScope !== getGuidDraftScope()) return false;
     if (assistantBackend === 'aionrs') {
       if (!current_model) {
         Message.warning(t('conversation.noModelConfigured'));
@@ -317,6 +323,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
           ]);
         }
 
+        if (guidDraftScope !== getGuidDraftScope()) return false;
         emitter.emit('chat.history.refresh');
 
         // Empty input = "start chat": create the conversation but do not stash an
@@ -327,6 +334,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
             input: initialInput,
             files: files.length > 0 ? files : undefined,
             guidDraft: input,
+            guidDraftScope,
             creationRequestId,
             creationRequest: creationSnapshot,
           };
@@ -380,6 +388,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
         ]);
       }
 
+      if (guidDraftScope !== getGuidDraftScope()) return false;
       emitter.emit('chat.history.refresh');
 
       // Empty input = "start chat": create the conversation but do not stash an
@@ -390,6 +399,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
           input: initialInput,
           files: files.length > 0 ? files : undefined,
           guidDraft: input,
+          guidDraftScope,
           creationRequestId,
           creationRequest: creationSnapshot,
         };

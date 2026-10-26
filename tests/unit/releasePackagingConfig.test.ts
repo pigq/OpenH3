@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
+import { runInNewContext } from 'node:vm';
+import { load } from 'js-yaml';
 
 const projectRoot = resolve(__dirname, '../..');
 const itWithBashAndNode =
@@ -21,6 +23,184 @@ function yamlBlock(content: string, key: string): string {
   const nextTopLevelKey = rest.search(/^[a-zA-Z][a-zA-Z0-9]*:\s*$/m);
   return nextTopLevelKey === -1 ? rest : rest.slice(0, nextTopLevelKey);
 }
+
+type ManualWorkflow = {
+  on: { workflow_dispatch: { inputs: Record<string, { default?: unknown; required?: boolean; options?: string[] }> } };
+  permissions: Record<string, string>;
+  jobs: Record<
+    string,
+    {
+      if?: string;
+      uses?: string;
+      needs?: string;
+      with?: Record<string, unknown>;
+      secrets?: string;
+      environment?: string;
+      permissions?: Record<string, string>;
+      concurrency?: { group: string; 'cancel-in-progress': boolean };
+      steps?: {
+        name?: string;
+        uses?: string;
+        if?: string;
+        with?: Record<string, unknown>;
+        env?: Record<string, string>;
+        run?: string;
+      }[];
+    }
+  >;
+};
+
+function manualWorkflow(): ManualWorkflow {
+  return load(readProjectFile('.github/workflows/build-manual.yml')) as ManualWorkflow;
+}
+
+describe('manual build and official content mode isolation', () => {
+  it('reuses the existing workflow entry within its input and directory budget', () => {
+    const inputs = manualWorkflow().on.workflow_dispatch.inputs;
+    expect(inputs.mode).toMatchObject({
+      default: 'build',
+      options: expect.arrayContaining(['build', 'official-content']),
+    });
+    expect(Object.keys(inputs).length).toBeLessThanOrEqual(10);
+    expect(inputs.branch).toMatchObject({ default: 'main', required: true });
+    expect(inputs.platform.options).toEqual([
+      'macos-arm64',
+      'macos-x64',
+      'windows-x64',
+      'windows-arm64',
+      'linux-x64',
+      'linux-arm64',
+      'all',
+    ]);
+    expect(inputs.platform.default).toBe('macos-arm64');
+    expect(inputs.skip_code_quality.default).toBe(false);
+    expect(inputs.openh3_core_run_id.default).toBe('');
+    expect(inputs.aioncore_run_id.default).toBe('');
+    expect(inputs.content_source).toBeDefined();
+    expect(inputs.content_sequence).toBeDefined();
+    expect(inputs.content_source.required).not.toBe(true);
+    expect(inputs.content_sequence.required).not.toBe(true);
+    expect(inputs.rollback_reason.required).not.toBe(true);
+    expect(inputs.key_id).toBeUndefined();
+    expect(inputs.min_client_version).toBeUndefined();
+    expect(existsSync(resolve(projectRoot, '.github/workflows/publish-content-catalog.yml'))).toBe(false);
+    expect(readdirSync(resolve(projectRoot, '.github/workflows')).length).toBeLessThanOrEqual(14);
+  });
+
+  it.each([
+    ['build', 'pigq/OpenH3', 'refs/heads/main', ['prepare-matrix', 'build-pipeline']],
+    ['build', 'contributor/OpenH3', 'refs/heads/feature', ['prepare-matrix', 'build-pipeline']],
+    ['official-content', 'pigq/OpenH3', 'refs/heads/main', ['publish-official-content']],
+    ['official-content', 'pigq/OpenH3', 'refs/heads/feature', []],
+    ['official-content', 'contributor/OpenH3', 'refs/heads/main', []],
+    ['official-content', 'pigq/OpenH3', 'refs/tags/v3.0.1', []],
+    ['windows-upgrade-acceptance', 'pigq/OpenH3', 'refs/heads/main', []],
+    ['unknown', 'pigq/OpenH3', 'refs/heads/main', []],
+  ])('isolates %s jobs for %s at %s', (mode, repository, ref, expected) => {
+    const jobs = manualWorkflow().jobs;
+    const selected = ['prepare-matrix', 'build-pipeline', 'publish-official-content'].filter((id) => {
+      expect(jobs[id], id).toBeDefined();
+      const condition = jobs[id].if;
+      expect(condition, `${id} must have an explicit mode gate`).toBeTruthy();
+      // These job gates intentionally use only GitHub/JavaScript-compatible comparisons.
+      return runInNewContext(condition!.replace(/^\s*\$\{\{|\}\}\s*$/g, ''), {
+        inputs: { mode },
+        github: { repository, ref, event_name: 'workflow_dispatch' },
+      });
+    });
+    expect(selected).toEqual(expected);
+  });
+
+  it('preserves the ordinary six-platform reusable build inputs, permissions and secrets', () => {
+    const workflow = manualWorkflow();
+    expect(workflow.jobs['build-pipeline']).toMatchObject({
+      needs: 'prepare-matrix',
+      uses: './.github/workflows/_build-reusable.yml',
+      permissions: { contents: 'write', actions: 'write' },
+      with: {
+        matrix: '${{ needs.prepare-matrix.outputs.matrix }}',
+        ref: '${{ inputs.branch }}',
+        skip_code_quality: '${{ inputs.skip_code_quality }}',
+        openh3_core_run_id: '${{ inputs.openh3_core_run_id || inputs.aioncore_run_id }}',
+        append_commit_hash: true,
+        upload_installers_only: true,
+      },
+      secrets: 'inherit',
+    });
+    const matrixScript = workflow.jobs['prepare-matrix'].steps![0].run!;
+    for (const platform of workflow.on.workflow_dispatch.inputs.platform.options!.filter((value) => value !== 'all')) {
+      expect(matrixScript).toContain(`"platform":"${platform}"`);
+      expect(matrixScript).toContain(`[ "$PLATFORM" = "${platform}" ]`);
+    }
+  });
+
+  it('scopes publication writes, approval, concurrency and the private key to content publication', () => {
+    const workflow = manualWorkflow();
+    expect(workflow.permissions).toEqual({ contents: 'read', actions: 'read' });
+    const publish = workflow.jobs['publish-official-content'];
+    expect(publish).toMatchObject({
+      environment: 'official-content',
+      permissions: { contents: 'write' },
+      concurrency: { group: 'official-content-publication', 'cancel-in-progress': false },
+    });
+    expect(publish.needs).toBeUndefined();
+    expect(publish.uses).toBeUndefined();
+    expect(publish.secrets).toBeUndefined();
+    const checkout = publish.steps!.find((step) => step.uses?.startsWith('actions/checkout@'));
+    expect(checkout?.with).toEqual({ ref: '${{ github.sha }}', 'persist-credentials': false });
+    const signing = publish.steps!.filter((step) => JSON.stringify(step).includes('CONTENT_SIGNING_PRIVATE_KEY'));
+    expect(signing).toHaveLength(1);
+    expect(signing[0].env).toMatchObject({
+      SIGNING_PEM: '${{ secrets.CONTENT_SIGNING_PRIVATE_KEY }}',
+      CONTENT_KEY_ID: 'openh3-content-20261024',
+      CONTENT_MIN_CLIENT: '3.0.1',
+      CONTENT_ROLLBACK_REASON: '${{ inputs.rollback_reason }}',
+    });
+    expect(signing[0].run).toContain('scripts/content-catalog/publish.mjs --publish');
+    expect(signing[0].run).toContain('--rollback-reason "$CONTENT_ROLLBACK_REASON"');
+    expect(signing[0].run).toContain('trap ');
+    expect(signing[0].run).toContain("flag:'wx'");
+    const validation = publish.steps!.find((step) => step.run?.includes('scripts/content-catalog/build.mjs'));
+    expect(validation?.env).toMatchObject({
+      CONTENT_SOURCE: '${{ inputs.content_source }}',
+      CONTENT_SEQUENCE: '${{ inputs.content_sequence }}',
+    });
+    expect(publish.steps!.indexOf(validation!)).toBeLessThan(publish.steps!.indexOf(signing[0]));
+    expect(publish.steps!.some((step) => step.if === 'always()' && step.run?.includes('fs.rmSync'))).toBe(true);
+    expect(JSON.stringify(workflow.jobs['build-pipeline'])).not.toContain('CONTENT_SIGNING_PRIVATE_KEY');
+    expect(
+      readProjectFile('.github/workflows/build-manual.yml').match(/secrets\.CONTENT_SIGNING_PRIVATE_KEY/g)
+    ).toHaveLength(1);
+    for (const step of publish.steps!) expect(step.run ?? '').not.toContain('${{ inputs.');
+  });
+
+  itWithBashAndNode('rejects content sources outside the reviewed commit before building or signing', () => {
+    const validation = manualWorkflow().jobs['publish-official-content'].steps!.find((step) =>
+      step.run?.includes('scripts/content-catalog/build.mjs')
+    );
+    const guard = validation!.run!.split('node scripts/content-catalog/build.mjs')[0];
+    const tempDir = mkdtempSync(resolve(projectRoot, '.runtime/content-workflow-inputs-'));
+    const untracked = resolve(tempDir, 'source.json');
+    writeFileSync(untracked, '{}');
+    try {
+      for (const [source, sequence, success] of [
+        ['package.json', '1', true],
+        [relative(projectRoot, untracked).replaceAll('\\', '/'), '1', false],
+        ['', '1', false],
+        ['package.json', '', false],
+      ] as const) {
+        const result = spawnSync('bash', ['-c', guard], {
+          cwd: projectRoot,
+          encoding: 'utf8',
+          env: { ...process.env, GITHUB_WORKSPACE: projectRoot, CONTENT_SOURCE: source, CONTENT_SEQUENCE: sequence },
+        });
+        expect(result.status === 0, `${source} / ${sequence}: ${result.stdout}\n${result.stderr}`).toBe(success);
+      }
+    } finally {
+      rmSync(tempDir, { force: true, recursive: true });
+    }
+  });
+});
 
 describe('release packaging configuration', () => {
   it('checks the default branch and supports manual quality verification', () => {

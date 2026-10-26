@@ -1,3 +1,4 @@
+import ContentUpdatePanel from '@/renderer/components/ContentCatalog/ContentUpdatePanel';
 /**
  * @license
  * Copyright 2025 AionUi (aionui.com)
@@ -203,6 +204,8 @@ const AboutModalContent: React.FC = () => {
               </div>
             )}
           </div>
+
+          <ContentUpdatePanel />
 
           {/* Divider */}
           <Divider className='my-16px' />

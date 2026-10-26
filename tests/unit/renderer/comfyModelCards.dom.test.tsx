@@ -1,12 +1,14 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ComfyProfile } from '@/common/chat/document/creation/comfy';
 import ComfyModelCards from '@/renderer/pages/guid/components/ComfyModelCards';
+import { galleryFixture } from '../contentCatalog/galleryFixture';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
+    i18n: { language: 'zh-CN' },
     t: (key: string, values?: Record<string, string>) =>
       `${key}${values ? `: ${Object.values(values).join(', ')}` : ''}`,
   }),
@@ -18,7 +20,149 @@ const h3Profile = (id = 'h3-sample') => ({ ...profile(id, 'verified'), family: '
 const omniProfile = (id = 'fasth3-omni-v1') =>
   ({ ...profile(id, 'verified'), family: 'fasth3-omni', kind: 'video' }) as ComfyProfile;
 
+beforeEach(() => vi.stubGlobal('__APP_VERSION__', '3.0.0'));
+
 describe('ComfyUI family cards', () => {
+  it.each(['h3', 'fasth3-omni'] as const)(
+    'keeps the remote %s cover separate from its explicitly requested bundled video sample',
+    async (family) => {
+      const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+      const card = galleryFixture.models.find((model) => model.family === family)!;
+      const props = { profiles: [], onAction: vi.fn(), onUseProfile: vi.fn() };
+      const view = render(<ComfyModelCards {...props} catalog={galleryFixture} />);
+      try {
+        const region = within(screen.getByRole('region', { name: card.name }));
+        const bundled = region.getByLabelText(`guid.comfy.preview.video: ${card.name}`);
+        const source = bundled.getAttribute('src');
+        const poster = bundled.getAttribute('poster');
+        view.rerender(<ComfyModelCards {...props} catalog={{ ...galleryFixture, releaseSequence: 1 }} />);
+        expect(screen.getAllByRole('region')).toHaveLength(8);
+        const cover = region.getByRole('img', { name: `guid.comfy.preview.image: ${card.name}` });
+        expect(cover).toHaveAttribute('src', `/api/content-catalog/assets/1/${card.cover}`);
+        fireEvent.mouseEnter(cover.parentElement!);
+        expect(play).not.toHaveBeenCalled();
+        const sample = family === 'h3' ? 'guid.comfy.preview.projectDemo' : 'guid.comfy.preview.officialSample';
+        fireEvent.click(region.getByRole('button', { name: `guid.comfy.preview.play: ${sample}` }));
+        const video = region.getByLabelText(`guid.comfy.preview.video: ${card.name}`);
+        expect(video).toHaveAttribute('src', source);
+        expect(video).toHaveAttribute('poster', poster);
+        expect(video.getAttribute('poster')).not.toContain('/api/content-catalog/');
+        await waitFor(() => expect(play).toHaveBeenCalled());
+        expect(region.getByText(sample)).toBeInTheDocument();
+        if (family === 'fasth3-omni') {
+          expect(region.getByRole('link')).toHaveAttribute('href', 'https://nuvalab.ai/fasth3/');
+          expect(region.getByText('guid.comfy.preview.sampleVersion: FastH3-Omni-8-Step-V1')).toBeInTheDocument();
+        }
+        view.rerender(<ComfyModelCards {...props} catalog={{ ...galleryFixture, releaseSequence: 2 }} />);
+        expect(region.getByRole('img')).toHaveAttribute('src', `/api/content-catalog/assets/2/${card.cover}`);
+        expect(region.queryByLabelText(`guid.comfy.preview.video: ${card.name}`)).not.toBeInTheDocument();
+      } finally {
+        view.unmount();
+        play.mockRestore();
+      }
+    }
+  );
+
+  it('does not invent bundled playback for remote image cards or unknown families', () => {
+    const imageCards = galleryFixture.models.filter((model) => model.kind === 'image');
+    const unknown = {
+      ...galleryFixture.models[0],
+      id: 'official:model-unknown',
+      family: 'unknown-family',
+      name: 'Unknown video family',
+    };
+    const { container } = render(
+      <ComfyModelCards
+        profiles={[]}
+        onAction={vi.fn()}
+        onUseProfile={vi.fn()}
+        catalog={{ ...galleryFixture, releaseSequence: 1, models: [...imageCards, unknown] }}
+      />
+    );
+    expect(container.querySelectorAll('video')).toHaveLength(0);
+    expect(screen.queryAllByRole('button', { name: /guid.comfy.preview.play/ })).toHaveLength(0);
+    expect(screen.getAllByRole('img')).toHaveLength(imageCards.length + 1);
+  });
+
+  it('releases and reattaches video observers when switching between local and remote covers', () => {
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+    const observers = new Map<
+      Element,
+      { callback: IntersectionObserverCallback; disconnect: ReturnType<typeof vi.fn> }
+    >();
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        disconnect = vi.fn();
+        constructor(readonly callback: IntersectionObserverCallback) {}
+        observe(element: Element) {
+          observers.set(element, this);
+        }
+      }
+    );
+    const props = { profiles: [], onAction: vi.fn(), onUseProfile: vi.fn() };
+    const view = render(<ComfyModelCards {...props} catalog={galleryFixture} />);
+    try {
+      const preview = () =>
+        within(screen.getByRole('region', { name: 'H3' })).getByLabelText('guid.comfy.preview.video: H3');
+      const first = preview();
+      Object.defineProperty(first, 'paused', { value: false, configurable: true });
+      const firstObserver = observers.get(first)!;
+      expect(firstObserver).toBeDefined();
+      view.rerender(<ComfyModelCards {...props} catalog={{ ...galleryFixture, releaseSequence: 1 }} />);
+      expect(firstObserver.disconnect).toHaveBeenCalledOnce();
+      expect(pause.mock.instances).toContain(first);
+
+      view.rerender(<ComfyModelCards {...props} catalog={galleryFixture} />);
+      const restored = preview();
+      Object.defineProperty(restored, 'paused', { value: false, configurable: true });
+      expect(restored).not.toBe(first);
+      const restoredObserver = observers.get(restored)!;
+      expect(restoredObserver).toBeDefined();
+      pause.mockClear();
+      restoredObserver.callback([{ isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver);
+      expect(pause.mock.instances).toContain(restored);
+      view.unmount();
+      expect(restoredObserver.disconnect).toHaveBeenCalledOnce();
+    } finally {
+      view.unmount();
+      vi.unstubAllGlobals();
+      pause.mockRestore();
+    }
+  });
+
+  it('preserves every supported family and the real video preview in the offline catalog', () => {
+    render(<ComfyModelCards catalog={galleryFixture} profiles={[]} onAction={vi.fn()} onUseProfile={vi.fn()} />);
+    expect(screen.getAllByRole('region')).toHaveLength(galleryFixture.models.length);
+    expect(
+      within(screen.getByRole('region', { name: 'H3' })).getByLabelText('guid.comfy.preview.video: H3')
+    ).toBeInTheDocument();
+  });
+
+  it('applies remote description and cover metadata without altering the installed model profile', () => {
+    const installed = profile('local-qwen', 'verified');
+    const onUse = vi.fn();
+    const original = structuredClone(installed);
+    const card = galleryFixture.models.find((model) => model.family === 'qwen-edit')!;
+    const catalog = {
+      ...galleryFixture,
+      releaseSequence: 10,
+      models: [
+        { ...card, name: 'Qwen official revision 2', description: { 'zh-CN': 'Updated official introduction' } },
+      ],
+    };
+    render(<ComfyModelCards catalog={catalog} profiles={[installed]} onAction={vi.fn()} onUseProfile={onUse} />);
+    const region = within(screen.getByRole('region', { name: 'Qwen official revision 2' }));
+    expect(region.getByText('Updated official introduction')).toBeInTheDocument();
+    expect(region.getByRole('img', { name: 'guid.comfy.preview.image: Qwen official revision 2' })).toHaveAttribute(
+      'src',
+      `/api/content-catalog/assets/10/${card.cover}`
+    );
+    expect(region.queryByRole('link')).not.toBeInTheDocument();
+    fireEvent.click(region.getByRole('button', { name: 'guid.comfy.use' }));
+    expect(onUse).toHaveBeenCalledWith(installed);
+    expect(installed).toEqual(original);
+  });
   it.each([
     ['flux-3-image-klein', 'FLUX 3 Image Klein'],
     ['moss-image-base', 'MOSS-Image-Base'],

@@ -39,6 +39,23 @@ describe('httpRequest 401 → refresh → replay (WebUI #4124 fix)', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     delete (window as WindowWithPort).__backendPort;
+    document.cookie = 'aionui-csrf-token=; Max-Age=0; Path=/';
+  });
+
+  it('uses the Core double-submit cookie only for writes and includes WebUI credentials', async () => {
+    document.cookie = 'aionui-csrf-token=test-csrf; Path=/';
+    const fetchMock = vi.fn(async () => jsonResponse(200, { data: { ok: true } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await httpRequest('POST', '/api/content-catalog/check', {});
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({
+      credentials: 'include',
+      headers: { 'x-csrf-token': 'test-csrf' },
+    });
+    await httpRequest('GET', '/api/content-catalog/catalog');
+    expect(fetchMock.mock.calls[1][1].headers).not.toHaveProperty('x-csrf-token');
+    (window as WindowWithPort).__backendPort = 12345;
+    await httpRequest('GET', '/api/content-catalog/catalog');
+    expect(fetchMock.mock.calls[2][1].credentials).toBe('same-origin');
   });
 
   it('refreshes once and replays the original request on 401, returning unwrapped data', async () => {

@@ -13,6 +13,7 @@
  */
 
 import type { IConfirmation } from '@/common/chat/chatLib';
+export { contentCatalog } from '../contentCatalog/bridge';
 import type { AcpSlashCommandApiItem } from '@/common/chat/slash/types';
 import { bridge } from '@/common/platform/bridge';
 import { buildListTasksPath } from './teamTaskPath';

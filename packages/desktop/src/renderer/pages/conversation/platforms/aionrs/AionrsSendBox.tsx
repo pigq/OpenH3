@@ -7,7 +7,11 @@
 import { ipcBridge } from '@/common';
 import { h3JobApi } from '@/common/chat/document/h3JobApi';
 import { comfyApi } from '@/common/chat/document/creation/comfyApi';
-import { clearGuidDraftIfMatches } from '@/renderer/pages/guid/hooks/useGuidDraft';
+import {
+  clearGuidDraftIfMatches,
+  getGuidDraftScope,
+  isGuidDraftScopeCurrent,
+} from '@/renderer/pages/guid/hooks/useGuidDraft';
 import type { IConversationMcpStatus } from '@/common/config/storage';
 import { mergeLoadedSkillNames } from '@/common/chat/slash/mergeSlashCommands';
 import AgentModeSelector from '@/renderer/components/agent/AgentModeSelector';
@@ -402,7 +406,16 @@ const AionrsSendBox: React.FC<{
       let bindingPending = false;
       let finishBinding: (() => void) | undefined;
       try {
-        const { input, files: initialFiles, guidDraft, creationRequestId, creationRequest } = JSON.parse(storedMessage);
+        const {
+          input,
+          files: initialFiles,
+          guidDraft,
+          guidDraftScope: storedScope,
+          creationRequestId,
+          creationRequest,
+        } = JSON.parse(storedMessage);
+        const guidDraftScope = getGuidDraftScope();
+        if (!isGuidDraftScopeCurrent(storedScope)) return;
         // Guid-page initial files are source-tagged ChatFileRefs (`local` for
         // backend-machine picks, `upload` for device uploads). Legacy string[]
         // entries (a stale pre-upgrade session) coerce to upload refs.
@@ -421,6 +434,7 @@ const AionrsSendBox: React.FC<{
             {
               source: creationRequest.source ?? 'local',
               kind: creationRequest.kind ?? 'image',
+              templateSnapshot: creationRequest.templateSnapshot,
             }
           );
           if (!bound.ok) throw new Error(t('guid.creation.toolsUnavailable'));
@@ -431,9 +445,9 @@ const AionrsSendBox: React.FC<{
           await h3JobApi.bindCreation(creationRequestId, conversation_id);
           bindingPending = false;
         }
-        if (!input.trim()) return;
+        if (!input.trim() || guidDraftScope !== getGuidDraftScope()) return;
         await executeCommand({ input, files: initialRefs });
-        if (typeof guidDraft === 'string') clearGuidDraftIfMatches(guidDraft);
+        if (typeof guidDraft === 'string') clearGuidDraftIfMatches(guidDraft, guidDraftScope);
       } catch (error) {
         console.error('[AionrsSendBox] Failed to send initial message:', error);
         if (bindingPending) {

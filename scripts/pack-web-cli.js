@@ -69,6 +69,9 @@ fs.writeFileSync(path.join(tarballContentDir, 'package.json'), JSON.stringify(sr
 // 6. Copy static files (SPA) from desktop renderer build output
 // Note: electron-vite writes to the repo-root `out/`, NOT packages/desktop/out/
 console.log('6. Copying static files...');
+fs.cpSync(path.join(projectRoot, 'out/content-catalog'), path.join(tarballContentDir, 'content-catalog'), {
+  recursive: true,
+});
 const rendererOutDir = path.join(projectRoot, 'out/renderer');
 const staticDest = path.join(tarballContentDir, 'static');
 if (fs.existsSync(rendererOutDir)) {

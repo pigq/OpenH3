@@ -1,4 +1,6 @@
 import type { WebHostOptions, WebHostHandle } from './types.js';
+import path from 'node:path';
+import { createContentRuntime } from '../../desktop/src/process/services/contentCatalog/builtin';
 
 export type { AppMetadata, BackendBinaryResolver, WebHostOptions, WebHostHandle } from './types.js';
 export { startStaticServer, stopStaticServer } from './static-server.js';
@@ -30,14 +32,27 @@ export async function startWebHost(opts: WebHostOptions): Promise<WebHostHandle>
 
   // 1. Start backend (M4)
   let backendHandle;
+  let content: Awaited<ReturnType<typeof createContentRuntime>> | undefined;
   if (opts.backend.kind === 'ownBackend') {
-    backendHandle = await startBackend({
-      app: opts.app,
-      resolveBackend: opts.backend.resolveBackend,
-      dataDir: opts.dataDir,
-      logDir: opts.logDir,
-      dirs: opts.dirs,
-    });
+    content = await createContentRuntime(
+      opts.contentCatalogDir ??
+        path.join(opts.app.resourcesPath, opts.app.isPackaged ? 'content-catalog' : 'out/content-catalog'),
+      opts.dataDir ?? opts.app.userDataPath,
+      opts.app.version
+    );
+    try {
+      backendHandle = await startBackend({
+        app: opts.app,
+        resolveBackend: opts.backend.resolveBackend,
+        dataDir: opts.dataDir,
+        logDir: opts.logDir,
+        dirs: opts.dirs,
+        contentHost: content.host,
+      });
+    } catch (error) {
+      await content.stop();
+      throw error;
+    }
   } else {
     // useExistingBackend: create a fake handle
     backendHandle = {
@@ -60,6 +75,7 @@ export async function startWebHost(opts: WebHostOptions): Promise<WebHostHandle>
   } catch (err) {
     // If static-server fails, clean up backend
     await backendHandle.stop();
+    await content?.stop();
     throw err;
   }
 
@@ -74,6 +90,7 @@ export async function startWebHost(opts: WebHostOptions): Promise<WebHostHandle>
     async stop() {
       await staticHandle.stop();
       await backendHandle.stop();
+      await content?.stop();
     },
   };
 }

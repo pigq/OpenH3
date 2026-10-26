@@ -92,5 +92,44 @@
       "promise4": "Le dépôt open source reste activement maintenu, les fonctionnalités clés restent synchronisées, l'esprit open source demeure.",
       "noRush": "Si vous préférez attendre, la version actuelle continue de fonctionner normalement — elle ne recevra simplement plus de mises à jour. En revanche, dès votre première connexion à la nouvelle version, vos données locales y ont déjà été transférées : utilisez alors la nouvelle version comme point d'accès quotidien."
     }
+  },
+  "content": {
+    "title": "Bibliothèque officielle",
+    "scope": "Met à jour uniquement les descriptions de modèles, les modèles de création et les œuvres officielles. Vos modèles téléchargés, flux, brouillons et fichiers générés restent inchangés.",
+    "source": "Source : pigq/OpenH3 · content-stable",
+    "version": "Version du contenu {{sequence}}",
+    "lastChecked": "Dernière vérification : {{time}}",
+    "unconfigured": "La synchronisation distante nécessite une clé publique de signature officielle dans le client. Le contenu intégré reste utilisable.",
+    "autoSync": "Synchroniser automatiquement le contenu officiel",
+    "check": "Vérifier les mises à jour du contenu",
+    "cancel": "Annuler la synchronisation",
+    "restore": "Restaurer le contenu précédent",
+    "restoreConfirm": "Restaurer la bibliothèque vérifiée précédente ? Les modèles et les tâches restent inchangés.",
+    "summary": "{{models}} fiches de modèles · {{templates}} modèles de création · {{showcases}} œuvres",
+    "failed": "Synchronisation inachevée. La bibliothèque actuelle est conservée.",
+    "actionFailed": "Échec de l’action ou droits administrateur de l’hôte requis.",
+    "unavailable": "Service de contenu indisponible. Vérifiez l’hôte et la version de Core.",
+    "loading": "Chargement du contenu officiel…",
+    "requiresClientUpdate": "Mise à jour du client requise",
+    "viewWork": "Voir l’œuvre officielle",
+    "useLinkedTemplate": "Utiliser le modèle associé",
+    "attribution": "Source et licence",
+    "refreshPage": "Nouveau contenu · Actualiser les fiches",
+    "phases": {
+      "idle": "En attente",
+      "checking": "Vérification",
+      "downloading": "Téléchargement",
+      "verifying": "Validation",
+      "activating": "Activation",
+      "ready": "Prêt",
+      "incompatible": "Mise à jour du client requise",
+      "failed": "Échec",
+      "cancelled": "Annulé"
+    },
+    "changes": "Historique des modifications",
+    "added": "Ajouté",
+    "changed": "Modifié",
+    "removed": "Retiré",
+    "linkUnavailable": "Le modèle associé a été retiré, sa révision ne correspond pas ou une mise à jour du client est nécessaire. Cette œuvre est uniquement consultable."
   }
 }

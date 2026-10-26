@@ -2,17 +2,27 @@ import { Button } from '@arco-design/web-react';
 import { ArrowRightUp, Picture, Video, Play, Pause } from '@icon-park/react';
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { CreationTemplate } from '../utils/creationTemplates';
+import type { ContentCatalog, OfficialEntry, OfficialTemplate } from '@/common/contentCatalog/schema';
+import { localize, resolveEntryAction, CONTENT_CAPABILITIES } from '@/common/contentCatalog/policy';
+import { contentAssetUrl } from '@/common/contentCatalog/bridge';
 import styles from '../index.module.css';
 
 type CreationTemplateCardProps = {
-  template: CreationTemplate;
-  onUseTemplate: (prompt: string, template: CreationTemplate) => void;
+  template: OfficialEntry;
+  catalog: ContentCatalog;
+  onDetails: (entry: OfficialEntry) => void;
+  onUseTemplate: (prompt: string, template: OfficialTemplate) => void;
   style?: React.CSSProperties;
 };
 
-const CreationTemplateCard: React.FC<CreationTemplateCardProps> = ({ template, onUseTemplate, style }) => {
-  const { t } = useTranslation();
+const CreationTemplateCard: React.FC<CreationTemplateCardProps> = ({
+  template,
+  catalog,
+  onDetails,
+  onUseTemplate,
+  style,
+}) => {
+  const { t, i18n } = useTranslation();
   const [previewFailed, setPreviewFailed] = useState(false);
   const [playing, setPlaying] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -31,15 +41,24 @@ const CreationTemplateCard: React.FC<CreationTemplateCardProps> = ({ template, o
     observer.observe(video);
     return () => observer.disconnect();
   }, []);
-  const title = t(`guid.templates.${template.key}.title`);
-  const authoredPrompt = t(`guid.templates.${template.key}.prompt`);
-  const prompt = template.requiresReference
+  const title = localize(template.title, i18n.language, catalog.defaultLocale);
+  const authoredPrompt =
+    template.entryType === 'template'
+      ? localize(template.prompt, i18n.language, catalog.defaultLocale)
+      : localize(template.description, i18n.language, catalog.defaultLocale);
+  const requiresReference = template.entryType === 'template' && template.requiresReference;
+  const prompt = requiresReference
     ? t('guid.templateReferencePrompt', {
         ratio: template.ratio,
         prompt: authoredPrompt,
         interpolation: { escapeValue: false },
       })
     : authoredPrompt;
+  const action = resolveEntryAction(template, catalog.entries, {
+    version: __APP_VERSION__,
+    capabilities: CONTENT_CAPABILITIES,
+  });
+  const cover = contentAssetUrl(catalog.releaseSequence, template.cover);
 
   return (
     <article
@@ -60,8 +79,8 @@ const CreationTemplateCard: React.FC<CreationTemplateCardProps> = ({ template, o
             ref={videoRef}
             className={styles.creationTemplateMedia}
             aria-label={title}
-            src={template.src}
-            poster={template.cover}
+            src={template.media ? contentAssetUrl(catalog.releaseSequence, template.media) : undefined}
+            poster={cover}
             muted
             loop
             playsInline
@@ -73,7 +92,7 @@ const CreationTemplateCard: React.FC<CreationTemplateCardProps> = ({ template, o
         ) : (
           <img
             className={styles.creationTemplateMedia}
-            src={template.cover}
+            src={cover}
             alt={title}
             loading='lazy'
             decoding='async'
@@ -83,7 +102,7 @@ const CreationTemplateCard: React.FC<CreationTemplateCardProps> = ({ template, o
         <span className={styles.creationTemplateBadge}>
           {template.kind === 'video' ? <Video theme='outline' size='12' /> : <Picture theme='outline' size='12' />}
           {t(`guid.templateFilters.${template.kind}`)}
-          {template.requiresReference && (
+          {requiresReference && (
             <>
               · <span title={t('guid.templateReferenceHint')}>{t('guid.templateReferenceRequired')}</span>
             </>
@@ -111,8 +130,24 @@ const CreationTemplateCard: React.FC<CreationTemplateCardProps> = ({ template, o
         <p className={styles.creationTemplatePrompt} title={prompt}>
           {prompt}
         </p>
-        <Button type='secondary' long size='small' onClick={() => onUseTemplate(prompt, template)}>
-          {t('guid.templateUse')}
+        <Button
+          type='secondary'
+          long
+          size='small'
+          disabled={action.primary === 'requires-client-update'}
+          onClick={() =>
+            template.entryType === 'showcase'
+              ? onDetails(template)
+              : action.template && onUseTemplate(prompt, action.template)
+          }
+        >
+          {t(
+            action.primary === 'requires-client-update'
+              ? 'update.content.requiresClientUpdate'
+              : template.entryType === 'showcase'
+                ? 'update.content.viewWork'
+                : 'guid.templateUse'
+          )}
           <ArrowRightUp theme='outline' size='14' className='ms-4px' />
         </Button>
       </div>

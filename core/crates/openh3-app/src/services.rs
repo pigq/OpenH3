@@ -29,6 +29,7 @@ use openh3_sidebar::UserOrderDeleteHook;
 use tokio::sync::Notify;
 
 pub struct AppServices {
+    pub content_catalog_proxy: Option<Arc<crate::ContentCatalogProxy>>,
     pub database: Database,
     pub jwt_service: Arc<JwtService>,
     pub user_repo: Arc<dyn IUserRepository>,
@@ -428,6 +429,7 @@ impl AppServices {
             .with_turn_cancelled_hook(Arc::new(QueueClearingCancelHook::new(session_message_queue.clone())));
 
         Ok(Self {
+            content_catalog_proxy: crate::ContentCatalogProxy::from_env(config.effective_identity_mode().is_local())?,
             database,
             jwt_service: Arc::new(JwtService::new(secret.clone())),
             antigravity_hook_tokens,

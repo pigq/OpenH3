@@ -92,5 +92,44 @@
       "promise4": "O repositório open source continua ativo, os recursos principais permanecem sincronizados e o espírito open source se mantém.",
       "noRush": "Se preferir esperar, a versão atual continua funcionando normalmente — apenas não receberá mais atualizações. Mas, assim que você concluir o primeiro login na nova versão, seus dados locais já terão sido migrados para lá; use então a nova versão como seu ponto de acesso do dia a dia."
     }
+  },
+  "content": {
+    "title": "Biblioteca oficial",
+    "scope": "Atualiza apenas descrições de modelos, templates e obras oficiais. Não altera modelos baixados, fluxos, rascunhos ou arquivos gerados.",
+    "source": "Fonte: pigq/OpenH3 · content-stable",
+    "version": "Versão do conteúdo {{sequence}}",
+    "lastChecked": "Última verificação: {{time}}",
+    "unconfigured": "A sincronização remota exige uma chave pública de assinatura oficial no cliente. O conteúdo integrado continua disponível.",
+    "autoSync": "Sincronizar conteúdo oficial automaticamente",
+    "check": "Verificar atualizações de conteúdo",
+    "cancel": "Cancelar sincronização",
+    "restore": "Restaurar conteúdo anterior",
+    "restoreConfirm": "Restaurar a biblioteca verificada anterior? Modelos e histórico de tarefas não serão alterados.",
+    "summary": "{{models}} cartões de modelos · {{templates}} templates · {{showcases}} obras",
+    "failed": "Sincronização incompleta. A biblioteca atual foi mantida.",
+    "actionFailed": "A operação falhou ou exige permissão do administrador do servidor.",
+    "unavailable": "Serviço de conteúdo indisponível. Verifique o servidor e a versão do Core.",
+    "loading": "Carregando conteúdo oficial…",
+    "requiresClientUpdate": "Atualização do cliente necessária",
+    "viewWork": "Ver obra oficial",
+    "useLinkedTemplate": "Usar template vinculado",
+    "attribution": "Fonte e licença",
+    "refreshPage": "Novo conteúdo · Atualizar cartões",
+    "phases": {
+      "idle": "Ocioso",
+      "checking": "Verificando",
+      "downloading": "Baixando",
+      "verifying": "Validando",
+      "activating": "Ativando",
+      "ready": "Pronto",
+      "incompatible": "Atualização do cliente necessária",
+      "failed": "Falha",
+      "cancelled": "Cancelado"
+    },
+    "changes": "Histórico de alterações",
+    "added": "Adicionado",
+    "changed": "Alterado",
+    "removed": "Retirado",
+    "linkUnavailable": "O modelo vinculado foi retirado, sua revisão não corresponde ou é necessário atualizar o cliente. Esta obra é apenas para visualização."
   }
 }

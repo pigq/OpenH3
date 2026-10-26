@@ -257,7 +257,7 @@ async function main(): Promise<void> {
 
   const handle = await startWebHost({
     app: {
-      version: '0.0.0',
+      version: JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).version,
       isPackaged: false,
       resourcesPath: repoRoot,
       userDataPath: workDir,

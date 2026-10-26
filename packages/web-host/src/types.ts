@@ -32,6 +32,7 @@ export type BackendSystemDirs = {
  * Options for starting WebHost
  */
 export type WebHostOptions = {
+  contentCatalogDir?: string;
   app: AppMetadata;
   staticDir: string;
   port?: number;

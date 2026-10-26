@@ -462,6 +462,7 @@ describe('httpBridge', () => {
 
       expect(result).toEqual({ result: 'ok' });
       expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining('/api/test'), {
+        credentials: 'same-origin',
         method: 'GET',
         headers: {},
         body: undefined,
