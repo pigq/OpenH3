@@ -32,6 +32,8 @@
 - `windows-upgrade-acceptance`：只验证已审查的 Windows x64 `3.0.1` 提交及该次构建的原始安装包，运行六个隔离安装场景和总验收门禁；不发布安装包或官方内容。必须填写与本次触发提交完全一致的 `reviewed_source_sha`；普通构建的分支、平台、质量开关与外部 Core 输入在此模式不生效。
 - `official-content`：只运行官方内容发布 job，绝不准备桌面构建矩阵或调用桌面 reusable build。必须在 `pigq/OpenH3` 的 `main` 上手工触发；`branch`、`platform`、质量开关及 Core run ID 在此模式不生效。内容来源固定为此次触发的 `main` 提交，不能用 `branch` 偷换为另一来源。
 
+质量检查默认运行。只有在已对同一提交完成等价本地质量检查、且只是避免重复执行时，才可在验收入口显式设置 `skip_code_quality=true`；这不会跳过版本、源码树、Core 来源、安装包 provenance 或六个真实 Windows 安装场景的门禁。
+
 三个模式共享十个 dispatch 输入；内容模式只需 `content_source`、`content_sequence`，回退时再填 `rollback_reason`。这两个内容输入在 dispatch 表单上可留空，避免改变普通构建必填项；内容 job 会拒绝缺失序号或无效源。官方 key ID 与协议最低客户端 `3.0.1` 固定在发布 step 中，不占额外输入，也不随未来桌面包版本无故提高最低兼容门槛。该入口不绕过正常发布审查，不创建客户端 tag / Release。
 
 ## 官方内容库（独立频道）

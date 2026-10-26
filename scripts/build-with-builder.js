@@ -697,9 +697,8 @@ function cleanupWindowsPackOutput() {
   }
 }
 
-// electron-builder can sign the NSIS payload after it has calculated updater
-// metadata. Refresh the manifest from the final bytes so update validation and
-// published assets always describe the installer that users will download.
+// Recompute updater metadata from the final installer so the manifest always
+// contains the exact bytes and size that will be published and downloaded.
 function refreshWindowsUpdateMetadata() {
   const outDir = path.resolve(__dirname, '../out');
   const manifestPath = path.join(outDir, 'latest.yml');
