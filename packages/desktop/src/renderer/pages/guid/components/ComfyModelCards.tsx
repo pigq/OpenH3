@@ -211,17 +211,22 @@ export default function ComfyModelCards({
 }: Props) {
   const { t, i18n } = useTranslation();
   const [displayed, setDisplayed] = useState<Partial<Record<ComfyFamily, string>>>({});
+  const cards = COMFY_FAMILIES.map((base) => {
+    const official = catalog?.models.find((model) => model.family === base.family);
+    return {
+      base,
+      official,
+      card: official ? { ...base, ...official } : base,
+    };
+  });
   return (
     <div className={styles.familySection}>
       <div className={styles.familyHeading}>{t('guid.comfy.title')}</div>
       <div className={styles.familyGrid}>
-        {(catalog?.models ?? COMFY_FAMILIES).map((card) => {
+        {cards.map(({ official, card }) => {
           const { family, name, kind } = card;
-          const official = 'cover' in card ? card : undefined;
-          const known = COMFY_FAMILIES.some((item) => item.family === family);
           const compatible =
-            known &&
-            (!official || supportsEntry(official, { version: __APP_VERSION__, capabilities: CONTENT_CAPABILITIES }));
+            !official || supportsEntry(official, { version: __APP_VERSION__, capabilities: CONTENT_CAPABILITIES });
           const versions = profiles.filter((profile) => profile.family === family);
           const profile =
             versions.find((item) => item.id === displayed[family as ComfyFamily]) ??

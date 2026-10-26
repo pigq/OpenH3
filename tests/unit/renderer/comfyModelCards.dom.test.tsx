@@ -23,6 +23,37 @@ const omniProfile = (id = 'fasth3-omni-v1') =>
 beforeEach(() => vi.stubGlobal('__APP_VERSION__', '3.0.0'));
 
 describe('ComfyUI family cards', () => {
+  it.each(['empty', 'partial'] as const)(
+    'retains supported families and local actions for a %s remote catalog',
+    (mode) => {
+      const onAction = vi.fn();
+      const onUseProfile = vi.fn();
+      const installed = h3Profile();
+      const card = galleryFixture.models.find((model) => model.family === 'qwen-edit')!;
+      render(
+        <ComfyModelCards
+          catalog={{ ...galleryFixture, releaseSequence: 1, models: mode === 'empty' ? [] : [card] }}
+          profiles={[installed]}
+          onAction={onAction}
+          onUseProfile={onUseProfile}
+        />
+      );
+      expect(screen.getAllByRole('region')).toHaveLength(8);
+      const h3 = within(screen.getByRole('region', { name: 'H3' }));
+      expect(h3.getByLabelText('guid.comfy.preview.video: H3')).toBeInTheDocument();
+      fireEvent.click(h3.getByRole('button', { name: 'guid.comfy.use' }));
+      expect(onUseProfile).toHaveBeenCalledWith(installed);
+      fireEvent.click(h3.getByRole('button', { name: 'guid.comfy.actions.repair' }));
+      expect(onAction).toHaveBeenCalledWith({ family: 'h3', intent: 'repair', profileId: installed.id });
+      fireEvent.click(
+        within(screen.getByRole('region', { name: 'Krea 2' })).getByRole('button', {
+          name: 'guid.comfy.actions.install',
+        })
+      );
+      expect(onAction).toHaveBeenCalledWith({ family: 'krea2', intent: 'install', profileId: undefined });
+    }
+  );
+
   it.each(['h3', 'fasth3-omni'] as const)(
     'keeps the remote %s cover separate from its explicitly requested bundled video sample',
     async (family) => {
@@ -79,9 +110,10 @@ describe('ComfyUI family cards', () => {
         catalog={{ ...galleryFixture, releaseSequence: 1, models: [...imageCards, unknown] }}
       />
     );
-    expect(container.querySelectorAll('video')).toHaveLength(0);
-    expect(screen.queryAllByRole('button', { name: /guid.comfy.preview.play/ })).toHaveLength(0);
-    expect(screen.getAllByRole('img')).toHaveLength(imageCards.length + 1);
+    expect(container.querySelectorAll('video')).toHaveLength(2);
+    expect(screen.queryAllByRole('button', { name: /guid.comfy.preview.play/ })).toHaveLength(2);
+    expect(screen.getAllByRole('region')).toHaveLength(8);
+    expect(screen.queryByRole('region', { name: 'Unknown video family' })).not.toBeInTheDocument();
   });
 
   it('releases and reattaches video observers when switching between local and remote covers', () => {
