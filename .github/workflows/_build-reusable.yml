@@ -432,6 +432,10 @@ jobs:
           # Legacy aliases remain populated for downstream scripts.
           AIONUI_BACKEND_RUN_ID: ${{ inputs.openh3_core_run_id || inputs.aioncore_run_id }}
           AIONUI_BACKEND_ARCH: ${{ matrix.arch }}
+          # Installed-upgrade acceptance validates the desktop updater and
+          # intentionally reuses the pinned Core release instead of compiling
+          # the monorepo Core on every Windows runner.
+          OPENH3_CORE_SOURCE: ${{ inputs.acceptance_provenance && 'release' || '' }}
           GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
