@@ -1338,7 +1338,24 @@ export function createWindowsAdapter(env, deps = {}) {
             const logPath = path.win32.join(nsisTemp, names[0]);
             const logBytes = await adapter.readFile(logPath);
             const events = parseInstallerJsonl(logBytes.toString('utf8'));
-            const sessions = [...new Set(events.map((e) => e.session))];
+            // The same isolated TEMP is used for the initial install and the
+            // update handoff. NSIS appends both sessions to its default log,
+            // so uniqueness must be scoped to the update terminus observed
+            // after this handoff rather than the whole file.
+            const handoffAt = Date.parse(evidence.handoffStarted);
+            const sessions = [
+              ...new Set(
+                events
+                  .filter(
+                    (e) =>
+                      e.event === 'session-end' &&
+                      e.updated === true &&
+                      Number.isFinite(Date.parse(e.ts)) &&
+                      Date.parse(e.ts) >= handoffAt
+                  )
+                  .map((e) => e.session)
+              ),
+            ];
             if (sessions.length !== 1 || !/^[a-f0-9]{12}$/.test(sessions[0]))
               throw Error('Native NSIS log session is not unique');
             assertInstallerSuccess(events, { session: sessions[0], version: '3.0.1', updated: true, installDir });
