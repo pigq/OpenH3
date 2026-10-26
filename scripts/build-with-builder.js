@@ -670,6 +670,8 @@ function cleanupWindowsPackOutput() {
   const removed = [];
   const winUnpackedDirRe = /^win(?:-[a-z0-9]+)?-unpacked$/i;
   const winArtifactFileRe = /-win-[^.]+\.(?:exe|msi|zip|7z)$/i;
+  const winUpdateMetadataRe = /^(?:latest|beta)\.yml$/i;
+  const winBlockmapRe = /-win-[^.]+\.exe\.blockmap$/i;
 
   for (const entry of fs.readdirSync(outDir, { withFileTypes: true })) {
     const fullPath = path.join(outDir, entry.name);
@@ -680,7 +682,10 @@ function cleanupWindowsPackOutput() {
       continue;
     }
 
-    if (entry.isFile() && winArtifactFileRe.test(entry.name)) {
+    if (
+      entry.isFile() &&
+      (winArtifactFileRe.test(entry.name) || winUpdateMetadataRe.test(entry.name) || winBlockmapRe.test(entry.name))
+    ) {
       fs.rmSync(fullPath, { force: true });
       removed.push(entry.name);
     }
