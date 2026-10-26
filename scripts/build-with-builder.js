@@ -14,6 +14,7 @@ const { execSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const yaml = require('js-yaml');
 
 // DMG retry logic for macOS: detects DMG creation failures by checking artifacts
 // (.app exists but .dmg missing) and retries only the DMG step using
@@ -696,6 +697,31 @@ function cleanupWindowsPackOutput() {
   }
 }
 
+// electron-builder can sign the NSIS payload after it has calculated updater
+// metadata. Refresh the manifest from the final bytes so update validation and
+// published assets always describe the installer that users will download.
+function refreshWindowsUpdateMetadata() {
+  const outDir = path.resolve(__dirname, '../out');
+  const manifestPath = path.join(outDir, 'latest.yml');
+  if (!fs.existsSync(manifestPath)) return;
+
+  const manifest = yaml.load(fs.readFileSync(manifestPath, 'utf8'));
+  if (!manifest || !Array.isArray(manifest.files) || manifest.files.length !== 1) return;
+
+  const file = manifest.files[0];
+  const installerPath = path.join(outDir, file.url);
+  if (!file.url || !fs.existsSync(installerPath)) return;
+
+  const installerBytes = fs.readFileSync(installerPath);
+  const sha512 = crypto.createHash('sha512').update(installerBytes).digest('base64');
+  file.size = installerBytes.length;
+  file.sha512 = sha512;
+  manifest.path = file.url;
+  manifest.sha512 = sha512;
+  fs.writeFileSync(manifestPath, yaml.dump(manifest, { lineWidth: -1 }));
+  console.log(`🔐 Refreshed Windows updater metadata for ${file.url}`);
+}
+
 // Parse command line arguments
 const args = process.argv.slice(2);
 const archList = ['x64', 'arm64', 'ia32', 'armv7l'];
@@ -1021,6 +1047,10 @@ try {
         ].join('\n')
       );
     }
+  }
+
+  if (isWindowsBuild) {
+    refreshWindowsUpdateMetadata();
   }
 
   console.log('✅ Build completed!');
