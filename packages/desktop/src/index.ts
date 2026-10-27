@@ -231,7 +231,7 @@ let backendStartedOk = false;
 let backendStartupFailed = false;
 let backendStartupFailureInfo: BackendStartupFailureInfo | null = null;
 let rendererInitialLanguage: string | null = null;
-let backendMigrationsPromise: Promise<void> | null = null;
+let backendMigrationsPromise: Promise<boolean> | null = null;
 let ensureAdminUserPromise: Promise<void> | null = null;
 let mediaServiceProcess: MediaServiceProcess | null = null;
 ipcMain.handle('media-service:get-ui-token', () => mediaServiceProcess?.uiToken ?? null);
@@ -356,7 +356,7 @@ function registerCronResumeBridge(backendPort: number): void {
  * main process. The renderer can also await the same promise before reading
  * bootstrap-dependent catalogs.
  */
-const scheduleBackendMigrations = (): Promise<void> | null => {
+const scheduleBackendMigrations = (): Promise<boolean> | null => {
   if (!backendStartedOk) return null;
   if (backendMigrationsPromise) return backendMigrationsPromise;
   backendMigrationsPromise = (async () => {
@@ -364,8 +364,10 @@ const scheduleBackendMigrations = (): Promise<void> | null => {
       const { runBackendMigrations } = await import('./process/utils/runBackendMigrations');
       await runBackendMigrations(ProcessConfig);
       console.info('[OpenH3] runBackendMigrations completed');
+      return true;
     } catch (error) {
       console.error('[OpenH3] Backend migration hook threw:', error);
+      return false;
     }
   })();
   return backendMigrationsPromise;
@@ -374,8 +376,7 @@ const scheduleBackendMigrations = (): Promise<void> | null => {
 ipcMain.handle('backend:wait-for-migrations', async () => {
   const migrations = scheduleBackendMigrations();
   if (!migrations) return false;
-  await migrations;
-  return true;
+  return migrations;
 });
 
 function exposeBackendPort(backendPort: number): void {
