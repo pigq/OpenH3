@@ -4,6 +4,7 @@ export type ComfyDraftIntent = {
   family: ComfyFamily;
   intent: Exclude<ComfyIntent, 'generate'>;
   profileId?: string;
+  requestId?: string;
 };
 
 let pendingIntent: ComfyDraftIntent | undefined;
@@ -11,7 +12,8 @@ export function readComfyDraftIntent() {
   return pendingIntent;
 }
 export function writeComfyDraftIntent(intent?: ComfyDraftIntent) {
-  pendingIntent = intent;
+  pendingIntent = intent ? { ...intent, requestId: intent.requestId ?? crypto.randomUUID() } : undefined;
+  return pendingIntent;
 }
 
 export const COMFY_FAMILIES = [

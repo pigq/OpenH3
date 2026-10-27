@@ -75,6 +75,7 @@ describe('media service process', () => {
       expect(started?.args).toEqual([scriptPath]);
       expect(started?.env.AIONUI_MEDIA_PORT).toBe('33002');
       expect(started?.env.AIONUI_DATA_DIR).toBe(root);
+      expect(started?.env.OPENH3_RESOURCES_ROOT).toBe(path.resolve('resources'));
       expect(started?.env.OPENH3_MEDIA_BACKEND_PORT).toBe('13421');
       expect(started?.env.AIONUI_H3_BUNDLE_ROOT).toBe(path.join(root, 'h3-bundle'));
       expect(started?.env.NODE_USE_SYSTEM_CA).toBe(expected);

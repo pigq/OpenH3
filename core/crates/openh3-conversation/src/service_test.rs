@@ -6410,6 +6410,211 @@ async fn startup_recovery_closes_stale_runtime_messages_without_failure_tip() {
     );
 }
 
+async fn restart_task_context_scenario(completed: bool, plan_only: bool, fail_first_build: bool) {
+    let db = init_database_memory().await.unwrap();
+    seed_test_user(db.pool(), "user_1").await;
+    let repo = Arc::new(openh3_db::SqliteConversationRepository::new(db.pool().clone()));
+    let task_mgr = Arc::new(MockTaskManager::new());
+    let task_mgr_dyn: Arc<dyn IWorkerTaskManager> = task_mgr.clone();
+    let make_restarted_service = || {
+        ConversationService::new(
+            std::env::temp_dir(),
+            Arc::new(MockBroadcaster::new()),
+            Arc::new(FixedSkillResolver { names: vec![] }),
+            task_mgr_dyn.clone(),
+            repo.clone(),
+            Arc::new(StubAgentMetadataRepo),
+            Arc::new(StubAcpSessionRepo::default()),
+        )
+    };
+    let service = make_restarted_service();
+    let conv = service.create("user_1", make_create_req()).await.unwrap();
+    let plan = json!({
+        "turn_id": "interrupted-turn",
+        "entries": [
+            { "content": "inspect sources", "status": "completed" },
+            { "content": "download selected weights", "status": if completed { "completed" } else { "in_progress" } },
+            { "content": "validate workflow", "status": if completed { "completed" } else { "pending" } }
+        ]
+    });
+    for (id, ty, content, status, position, created_at) in [
+        (
+            "old-user",
+            "text",
+            json!({ "content": "Install the model" }),
+            "finish",
+            "right",
+            10,
+        ),
+        ("plan:old-asst", "plan", plan.clone(), "finish", "left", 20),
+        (
+            "old-asst",
+            "text",
+            json!({ "content": "Checking installation" }),
+            "work",
+            "left",
+            21,
+        ),
+        (
+            "background-download",
+            "tool_call",
+            json!({ "call_id": "background-download", "name": "Bash", "description": "download weights", "args": { "command": "DO_NOT_REPLAY_SECRET_COMMAND" }, "status": if completed { "completed" } else { "running" } }),
+            if completed { "finish" } else { "work" },
+            "left",
+            22,
+        ),
+        (
+            "subagent-roster",
+            "tool_group",
+            json!([{ "call_id": "child-1", "name": "workflow checker", "status": if completed { "Success" } else { "Executing" } }]),
+            if completed { "finish" } else { "work" },
+            "left",
+            23,
+        ),
+    ] {
+        if plan_only && position == "left" && ty != "plan" {
+            continue;
+        }
+        repo.insert_message(
+            "user_1",
+            &MessageRow {
+                id: id.into(),
+                conversation_id: conv.id.clone(),
+                msg_id: Some(id.strip_prefix("plan:").unwrap_or(id).into()),
+                r#type: ty.into(),
+                content: content.to_string(),
+                status: Some(status.into()),
+                position: Some(position.into()),
+                hidden: false,
+                created_at,
+                backend_turn_id: Some("backend-old-turn".into()),
+            },
+        )
+        .await
+        .unwrap();
+    }
+    let agent = Arc::new(ScriptedAgent::new(&conv.id, vec![]));
+    std::fs::create_dir_all(agent.workspace()).unwrap();
+    task_mgr.insert_agent(&conv.id, AgentInstance::Mock(agent.clone()));
+    service.recover_stale_runtime_state_on_startup().await;
+    service.recover_stale_runtime_state_on_startup().await;
+    assert!(
+        agent.sent_contents().is_empty(),
+        "startup must never continue/replay work"
+    );
+    drop(service);
+    let service = make_restarted_service();
+    if fail_first_build {
+        let unavailable: Arc<dyn IWorkerTaskManager> =
+            Arc::new(FailingBuildTaskManager::new("temporarily unavailable"));
+        service
+            .send_message("user_1", &conv.id, make_send_req(), &unavailable)
+            .await
+            .unwrap();
+        wait_for_turn_released(&service, &conv.id).await;
+        assert!(
+            agent.sent_contents().is_empty(),
+            "failed build must not replay old tools"
+        );
+    }
+    drop(service);
+    let service = make_restarted_service();
+    let instruction = "Stop the previous task and explain the current state";
+    let req = serde_json::from_value(json!({ "content": instruction })).unwrap();
+    service
+        .send_message("user_1", &conv.id, req, &task_mgr_dyn)
+        .await
+        .unwrap();
+    wait_for_turn_released(&service, &conv.id).await;
+    let sent = agent.sent_contents();
+    assert_eq!(sent.len(), 1, "the new input must cause exactly one send");
+    if completed {
+        assert_eq!(sent[0], instruction, "completed Plan must not be reactivated");
+    } else {
+        assert!(
+            sent[0].contains("<openh3_task_recovery>"),
+            "next user input lost unfinished persisted work: {}",
+            sent[0]
+        );
+        assert!(sent[0].contains("download selected weights"));
+        assert!(sent[0].contains("validate workflow"));
+        if !plan_only {
+            assert!(sent[0].contains("background-download"));
+            assert!(sent[0].contains("child-1"));
+        }
+        assert!(
+            sent[0].contains("verify"),
+            "unknown side effects must be verified before repeating"
+        );
+        assert!(
+            sent[0].ends_with(instruction),
+            "latest user instruction must remain intact"
+        );
+        assert!(
+            !sent[0].contains("DO_NOT_REPLAY_SECRET_COMMAND"),
+            "recovery must not inject raw tool commands"
+        );
+    }
+    let history = repo
+        .list_messages_page(
+            "user_1",
+            &conv.id,
+            &MessagePageParams {
+                limit: 100,
+                direction: MessagePageDirection::InitialLatest,
+            },
+        )
+        .await
+        .unwrap()
+        .items;
+    let old_plan = history.iter().find(|row| row.id == "plan:old-asst").unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&old_plan.content).unwrap(),
+        plan,
+        "old Plan must remain inspectable without being rewritten"
+    );
+    let user = history
+        .iter()
+        .rev()
+        .find(|row| row.position.as_deref() == Some("right"))
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&user.content).unwrap()["content"],
+        instruction,
+        "recovery context is internal, not a replacement user message"
+    );
+    service
+        .send_message("user_1", &conv.id, make_send_req(), &task_mgr_dyn)
+        .await
+        .unwrap();
+    wait_for_turn_released(&service, &conv.id).await;
+    assert_eq!(
+        agent.sent_contents()[1],
+        "Hello",
+        "a handled restart must not keep resurfacing on later inputs"
+    );
+}
+
+#[tokio::test]
+async fn restart_task_context_is_persisted_until_next_user_input_without_tool_replay() {
+    restart_task_context_scenario(false, false, false).await;
+}
+
+#[tokio::test]
+async fn restart_task_context_does_not_reactivate_completed_plan() {
+    restart_task_context_scenario(true, false, false).await;
+}
+
+#[tokio::test]
+async fn restart_task_context_recovers_plan_only_turn_without_stale_text_or_tools() {
+    restart_task_context_scenario(false, true, false).await;
+}
+
+#[tokio::test]
+async fn restart_task_context_survives_failed_agent_build_until_a_successful_turn() {
+    restart_task_context_scenario(false, false, true).await;
+}
+
 #[tokio::test]
 async fn send_message_keeps_acp_task_after_normal_finish() {
     let (svc, _broadcaster, _repo, _default_task_mgr) = make_service();

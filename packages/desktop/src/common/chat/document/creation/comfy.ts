@@ -5,6 +5,7 @@ const pinnedVersion = z
   .string()
   .min(1)
   .refine((value) => !/^(latest|main|master|HEAD|stable|nightly)$/i.test(value), 'A fixed revision is required');
+const requestId = z.string().uuid();
 const absolutePath = z
   .string()
   .min(1)
@@ -178,6 +179,14 @@ export const comfyInstallPlanSchema = comfyProfileSchema.omit({ state: true, val
   reason: z.string().min(1),
   evidence: z.array(z.string().min(1)).min(1),
   workflow: graph,
+  /** Exact pinned source bytes, when reserializing would invalidate a bundled workflow identity. */
+  workflowSource: z
+    .string()
+    .min(1)
+    .max(8 * 1024 * 1024)
+    .optional(),
+  /** Existing registered component paths outside writable roots; checksum reuse only, never written. */
+  reuseOnlyPaths: z.array(absolutePath).max(256).optional(),
   commands: z
     .array(
       z.object({
@@ -194,13 +203,56 @@ export const comfyInstallPlanSchema = comfyProfileSchema.omit({ state: true, val
   repair: z.boolean().default(false),
 });
 export type ComfyInstallPlan = z.infer<typeof comfyInstallPlanSchema>;
+
+/**
+ * A model-card installation request. The card deliberately sends only the
+ * family/intent/profile identity; the media service owns environment probing,
+ * candidate selection and construction of the immutable install plan.
+ *
+ * `plan` is retained on the request branch for older clients which already
+ * constructed a complete plan. New clients must use the identity-only form.
+ */
+export const comfyInstallRequestSchema = z.union([
+  z.object({
+    action: z.literal('request'),
+    family: comfyFamilySchema,
+    intent: z.enum(['install', 'repair', 'install-other']),
+    profileId: z.string().min(1).optional(),
+    requestId: requestId.optional(),
+  }),
+  z.object({ action: z.literal('request'), plan: comfyInstallPlanSchema }),
+  z.object({ action: z.literal('plan'), plan: comfyInstallPlanSchema }),
+]);
+export type ComfyInstallIdentityRequest = {
+  action: 'request';
+  family: ComfyFamily;
+  intent: Exclude<ComfyIntent, 'generate'>;
+  profileId?: string;
+  requestId?: string;
+};
+export type ComfyInstallRequest =
+  | ComfyInstallIdentityRequest
+  | { action: 'request'; plan: ComfyInstallPlan }
+  | { action: 'plan'; plan: ComfyInstallPlan };
+
 export type ComfyApprovalDecision = { mode: 'automatic' | 'manual'; runtimeMode?: string };
+export type ComfyInstallPreparation = {
+  requestId: string;
+  conversationId: string;
+  family: ComfyFamily;
+  intent: Exclude<ComfyIntent, 'generate'>;
+  status: 'detecting' | 'failed' | 'interrupted';
+  error?: string;
+  updatedAt: string;
+};
 export type ComfyOperation = {
   id: string;
   requestId: string;
   conversationId: string;
   state: 'awaiting-consent' | 'authorized' | 'running' | 'paused' | 'failed' | 'completed' | 'cancelled';
   plan: ComfyInstallPlan;
+  /** Original model-card identity, persisted atomically with the immutable plan. */
+  installRequest?: ComfyInstallIdentityRequest;
   progress?: string;
   error?: string;
   profileId?: string;

@@ -43,6 +43,8 @@ pub(crate) struct TurnStartInput {
     pub stored_workspace: String,
     pub turn_id: String,
     pub turn_claim: TurnClaim,
+    /// User row carrying a bounded recovery hint. No tool execution is stored.
+    pub recovery_user_message_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +75,7 @@ struct TurnAttemptInput {
     required_runtime_mode: Option<String>,
     continuation_count: usize,
     defer_clean_terminal_errors: bool,
+    recovery_user_message_id: Option<String>,
     /// Shared by every attempt of this turn — see the field's use in run_attempt.
     superseding_tips: SupersedingTipTotals,
 }
@@ -416,6 +419,14 @@ impl ConversationTurnOrchestrator {
 
             let outcome = relay.consume_with_send_error(rx, send_error_rx).await;
             aggregate_summary.merge(&outcome.attempt);
+            if matches!(outcome.terminal, crate::stream_relay::RelayTerminal::Finish)
+                && !outcome.attempt.needs_auth
+                && let Some(user_message_id) = input.recovery_user_message_id.as_deref()
+            {
+                self.service
+                    .acknowledge_task_recovery(&input.user_id, &input.conv_id, user_message_id)
+                    .await;
+            }
 
             if let Some(session_key) = agent.get_session_key() {
                 persist_session_key(
@@ -495,6 +506,7 @@ impl ConversationTurnOrchestrator {
                     required_runtime_mode: input.required_runtime_mode.clone(),
                     continuation_count: 0,
                     defer_clean_terminal_errors: !replayed,
+                    recovery_user_message_id: input.recovery_user_message_id.clone(),
                     superseding_tips: superseding_tips.clone(),
                 })
                 .await

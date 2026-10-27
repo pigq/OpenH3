@@ -3,11 +3,13 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { resolveMediaBinary } from './mediaBinary';
+import { resolveComfyResourcesRoot } from './comfy/planning/catalog';
 
 export type MediaServiceProcessOptions = {
   scriptPath: string;
   dataDir: string;
   bundleRoot?: string;
+  resourcesRoot?: string;
   port?: number;
   backendPort?: number;
   command?: string;
@@ -51,6 +53,7 @@ export class MediaServiceProcess {
       AIONUI_MEDIA_PORT: String(this.port),
       OPENH3_DATA_DIR: this.options.dataDir,
       AIONUI_DATA_DIR: this.options.dataDir,
+      OPENH3_RESOURCES_ROOT: resolveComfyResourcesRoot(this.options.resourcesRoot),
       OPENH3_FFMPEG_PATH: resolveMediaBinary('ffmpeg'),
       OPENH3_FFPROBE_PATH: resolveMediaBinary('ffprobe'),
       AIONUI_FFMPEG_PATH: resolveMediaBinary('ffmpeg'),

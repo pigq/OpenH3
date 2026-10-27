@@ -1,12 +1,14 @@
 # Environment diagnosis and repair
 
+This reference describes backend planning, execution, and validation requirements. The chat agent reads the relevant section to diagnose an observed failure or review a legacy plan; it does not run this checklist before ordinary installation or generation. Use the existing operation or SKILL.md's identity-only request for installation, and the selected verified profile for generation. The backend owns probes, graph construction, runtime preflight, and bounded recovery.
+
 ## Probe the runtime that will run the graph
 
 Separate host detection, install planning and post-install execution checks. During cold planning, the host OS/GPU/driver/memory/disk must be known, while missing target Python/Torch, kernels, nodes and weights are expected installation steps. Use the target dependencies' pinned upstream support evidence now; run actual imports, kernels, loader schemas and representative generation after those dependencies exist. Inspect an already installed runtime immediately when available. Avoid re-running completed probes or scanning unrelated disks/templates.
 
-Start with `openh3_comfy_environment`. Reuse the registered profile's paths and check tool results before supplementing missing fields. For an install or a repair that may download files, pass the exact immutable model, node, package, or workflow URLs in `sources` and read the returned `network` object. A nonzero process exit, missing command, permission error, timeout, missing source result, or `NETWORK_*` issue is incomplete evidence, not evidence of no accelerator or a usable mirror. Avoid searching every disk; inspect configured roots and user-named locations first. A cold plan may record a CPU route only when the selected graph/runtime explicitly supports CPU and the plan uses its CPU launch mode; otherwise GPU/kernel evidence is required.
+The backend starts with its environment probe, reuses the registered profile's paths and completed results, and supplements only a specific missing field. Installation or repair downloads require its source probe to record the exact immutable model, node, package, or workflow URLs. `openh3_comfy_environment` exposes this evidence for a targeted diagnosis when needed; it is not a mandatory extra chat step. A nonzero process exit, missing command, permission error, timeout, missing source result, or `NETWORK_*` issue is incomplete evidence, not evidence of no accelerator or a usable mirror. Avoid searching every disk; inspect configured roots and user-named locations first. A cold plan may record a CPU route only when the selected graph/runtime explicitly supports CPU and the plan uses its CPU launch mode; otherwise GPU/kernel evidence is required.
 
-Collect an evidence record:
+The backend collects this evidence record:
 
 | Layer          | Evidence needed                                                                                                                   |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------- |

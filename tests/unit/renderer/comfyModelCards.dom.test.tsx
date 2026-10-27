@@ -55,7 +55,7 @@ describe('ComfyUI family cards', () => {
   );
 
   it.each(['h3', 'fasth3-omni'] as const)(
-    'keeps the remote %s cover separate from its explicitly requested bundled video sample',
+    'keeps the real %s video sample visible when the remote catalog supplies a cover',
     async (family) => {
       const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
       const card = galleryFixture.models.find((model) => model.family === family)!;
@@ -68,13 +68,12 @@ describe('ComfyUI family cards', () => {
         const poster = bundled.getAttribute('poster');
         view.rerender(<ComfyModelCards {...props} catalog={{ ...galleryFixture, releaseSequence: 1 }} />);
         expect(screen.getAllByRole('region')).toHaveLength(8);
-        const cover = region.getByRole('img', { name: `guid.comfy.preview.image: ${card.name}` });
-        expect(cover).toHaveAttribute('src', `/api/content-catalog/assets/1/${card.cover}`);
-        fireEvent.mouseEnter(cover.parentElement!);
-        expect(play).not.toHaveBeenCalled();
-        const sample = family === 'h3' ? 'guid.comfy.preview.projectDemo' : 'guid.comfy.preview.officialSample';
-        fireEvent.click(region.getByRole('button', { name: `guid.comfy.preview.play: ${sample}` }));
         const video = region.getByLabelText(`guid.comfy.preview.video: ${card.name}`);
+        expect(region.queryByRole('img')).not.toBeInTheDocument();
+        fireEvent.mouseEnter(video.parentElement!);
+        expect(play).toHaveBeenCalled();
+        const sample = family === 'h3' ? 'guid.comfy.preview.projectDemo' : 'guid.comfy.preview.officialSample';
+        fireEvent.click(region.getByRole('button', { name: 'guid.comfy.preview.play' }));
         expect(video).toHaveAttribute('src', source);
         expect(video).toHaveAttribute('poster', poster);
         expect(video.getAttribute('poster')).not.toContain('/api/content-catalog/');
@@ -85,8 +84,8 @@ describe('ComfyUI family cards', () => {
           expect(region.getByText('guid.comfy.preview.sampleVersion: FastH3-Omni-8-Step-V1')).toBeInTheDocument();
         }
         view.rerender(<ComfyModelCards {...props} catalog={{ ...galleryFixture, releaseSequence: 2 }} />);
-        expect(region.getByRole('img')).toHaveAttribute('src', `/api/content-catalog/assets/2/${card.cover}`);
-        expect(region.queryByLabelText(`guid.comfy.preview.video: ${card.name}`)).not.toBeInTheDocument();
+        expect(region.getByLabelText(`guid.comfy.preview.video: ${card.name}`)).toHaveAttribute('src', source);
+        expect(region.queryByRole('img')).not.toBeInTheDocument();
       } finally {
         view.unmount();
         play.mockRestore();

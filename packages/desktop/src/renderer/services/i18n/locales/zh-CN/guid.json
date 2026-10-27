@@ -353,7 +353,9 @@
         "completed": "验证通过，可使用",
         "cancelled": "已取消"
       },
-      "snapshotDirectory": "恢复快照"
+      "snapshotDirectory": "恢复快照",
+      "submittedContext": "应用已提交安装任务 {{id}}（{{state}}），工作进度面板会自动更新。请说明现有任务状态，不要重复提交安装或在聊天中再次要求确认。",
+      "preparationFailed": "安装准备未完成：{{reason}}。请求已保留，请查看工作进度中的具体诊断。"
     },
     "profileSummary": "已选本地配置：{{profile}}。请使用此配置。",
     "session": {

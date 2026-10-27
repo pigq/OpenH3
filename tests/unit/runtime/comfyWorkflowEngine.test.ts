@@ -381,6 +381,60 @@ describe('generic ComfyUI workflow engine', () => {
     expect(vi.mocked(fetchImpl).mock.calls.some(([url]) => String(url).endsWith('/free'))).toBe(false);
   });
 
+  it('does not confirm cleanup from HTTP 200 when memory remains allocated throughout the observation bound', async () => {
+    const fetchImpl = fetchFixture({
+      '/system_stats': { ...stats, devices: [{ vram_free: 400, torch_vram_total: 800 }] },
+    });
+    const runtime = engine(fetchImpl, { maxPollAttempts: 3 });
+    await expect(runtime.clearMemory(profile, 'oom', new AbortController().signal)).rejects.toThrow(
+      'COMFY_MEMORY_CLEAR_UNCONFIRMED'
+    );
+    expect(vi.mocked(fetchImpl).mock.calls.filter(([url]) => String(url).endsWith('/free'))).toHaveLength(1);
+    expect(vi.mocked(fetchImpl).mock.calls.filter(([url]) => String(url).endsWith('/system_stats'))).toHaveLength(4);
+  });
+
+  it('records a bounded memory diagnostic when another task appears after eviction was requested', async () => {
+    let requested = false;
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      const suffix = new URL(String(url)).pathname;
+      if (suffix === '/system_stats') return Response.json({ ...stats, devices: [{ vram_free: 400 }] });
+      if (suffix === '/free') {
+        requested = true;
+        return Response.json({});
+      }
+      if (suffix === '/queue')
+        return Response.json({ queue_running: requested ? [[0, 'external']] : [], queue_pending: [] });
+      return Response.json({});
+    }) as typeof fetch;
+    await expect(engine(fetchImpl).clearMemory(profile, 'idle', new AbortController().signal)).rejects.toThrow(
+      'COMFY_MEMORY_CLEAR_QUEUE_BUSY'
+    );
+    const diagnosticDirectory = path.join(root, 'results', 'diagnostics');
+    const diagnostics = fs.existsSync(diagnosticDirectory)
+      ? fs
+          .readdirSync(diagnosticDirectory)
+          .filter((file) => file.startsWith('memory-'))
+          .map((file) => JSON.parse(fs.readFileSync(path.join(diagnosticDirectory, file), 'utf8')))
+      : [];
+    expect(diagnostics).toEqual([
+      expect.objectContaining({
+        reason: 'idle',
+        confirmed: false,
+        before: [400],
+        observations: [],
+        error: 'COMFY_MEMORY_CLEAR_QUEUE_BUSY',
+      }),
+    ]);
+  });
+
+  it('rejects unavailable telemetry without sending a speculative free request', async () => {
+    const fetchImpl = fetchFixture({ '/system_stats': { ...stats, devices: [{ vram_free: null }] } });
+    await expect(engine(fetchImpl).clearMemory(profile, 'oom', new AbortController().signal)).rejects.toThrow(
+      'COMFY_MEMORY_CLEAR_TELEMETRY_UNAVAILABLE'
+    );
+    expect(vi.mocked(fetchImpl).mock.calls.some(([url]) => String(url).endsWith('/free'))).toBe(false);
+  });
+
   it('accepts an already empty allocator only after stable telemetry and rejects a replaced runtime', async () => {
     const fetchImpl = fetchFixture({
       '/system_stats': { ...stats, devices: [{ vram_free: 700, torch_vram_total: 0 }] },
@@ -432,6 +486,43 @@ describe('generic ComfyUI workflow engine', () => {
       '/history/prompt-1': { 'prompt-1': { status: { completed: false, status_str: 'running' } } },
     });
     await expect(engine(incomplete).cancel(profile, 'prompt-1', true)).rejects.toThrow('COMFY_CANCEL_UNCONFIRMED');
+  });
+
+  it.each(['generate', 'resume'] as const)(
+    'does not retain a GPU uncertainty fence after %s observed completion but artifact retrieval failed',
+    async (operation) => {
+      const base = fetchFixture();
+      let failOutput = true;
+      const fetchImpl = vi.fn(async (url, init) => {
+        if (new URL(String(url)).pathname === '/view' && failOutput) return new Response(null, { status: 503 });
+        return base(url, init);
+      }) as typeof fetch;
+      const runtime = engine(fetchImpl);
+      const first =
+        operation === 'generate'
+          ? runtime.generate(profile, { prompt: 'test' }, new AbortController().signal)
+          : runtime.resume(profile, 'prompt-1', new AbortController().signal);
+      await expect(first).rejects.toMatchObject({ message: 'COMFY_OUTPUT_DOWNLOAD_HTTP_503', remoteTerminal: true });
+      failOutput = false;
+      await expect(runtime.generate(profile, { prompt: 'next' }, new AbortController().signal)).resolves.toHaveProperty(
+        'promptId',
+        'prompt-1'
+      );
+    }
+  );
+
+  it('treats execution_interrupted history as remote terminal without broad cancellation', async () => {
+    const base = fetchFixture({
+      '/history/prompt-1': {
+        'prompt-1': { status: { messages: [['execution_interrupted', { prompt_id: 'prompt-1' }]] } },
+      },
+    });
+    const runtime = engine(base);
+    await expect(runtime.resume(profile, 'prompt-1', new AbortController().signal)).rejects.toMatchObject({
+      message: 'COMFY_JOB_CANCELLED',
+      remoteTerminal: true,
+    });
+    expect(vi.mocked(base).mock.calls.some(([url]) => String(url).endsWith('/interrupt'))).toBe(false);
   });
 
   it('does not reuse or kill a server from another interpreter and rejects non-loopback servers', async () => {

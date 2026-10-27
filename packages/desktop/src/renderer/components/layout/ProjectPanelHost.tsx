@@ -26,10 +26,42 @@
  * mount) is the live-test proof it is not remounted across switches or collapse.
  */
 
-import React, { useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 import { ExplorerContainer } from '@/renderer/pages/conversation/explorer/ExplorerContainer';
 import { useCurrentProject } from '@/renderer/pages/conversation/explorer/currentProjectStore';
+import { useCurrentConversation } from '@/renderer/pages/conversation/explorer/currentConversationStore';
+import { useWorkProgress } from '@/renderer/pages/conversation/PlanBar/workProgress';
+import ConversationWorkProgress from '@/renderer/pages/conversation/PlanBar/ConversationWorkProgress';
+import WorkProgressTabs from '@/renderer/pages/conversation/PlanBar/WorkProgressTabs';
+
+/** Shares the existing project column; the Explorer remains mounted while progress is visible. */
+export function ProjectPanelContent({ projectId }: { projectId: string }) {
+  const conversationId = useCurrentConversation();
+  const work = useWorkProgress(conversationId);
+  const workIdentity = work.tasks.map((task) => task.id).join('\n');
+  const [progressActive, setProgressActive] = useState(false);
+  useEffect(() => {
+    setProgressActive(Boolean(workIdentity));
+  }, [conversationId, workIdentity]);
+  return (
+    <div className='h-full flex flex-col min-h-0' data-project-panel-content>
+      {conversationId && (
+        <div className='px-12px py-6px border-b border-solid border-3 shrink-0'>
+          <WorkProgressTabs workspaceAvailable progressActive={progressActive} onChange={setProgressActive} />
+        </div>
+      )}
+      <div className='flex-1 min-h-0' style={{ display: progressActive ? 'none' : undefined }}>
+        <ExplorerContainer projectId={projectId} />
+      </div>
+      {progressActive && conversationId && (
+        <div className='flex-1 min-h-0'>
+          <ConversationWorkProgress conversationId={conversationId} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 export type ProjectPanelHostProps = {
   /** Rendered width in px (clamped by Layout against the chat+preview reserve). */
@@ -62,7 +94,7 @@ export const ProjectPanelHost: React.FC<ProjectPanelHostProps> = ({ widthPx, col
     >
       {!collapsed && dragHandle}
       {/* Hosted project component (this round: Explorer). Seam = projectId only. */}
-      <ExplorerContainer projectId={projectId} />
+      <ProjectPanelContent projectId={projectId} />
     </div>
   );
 };

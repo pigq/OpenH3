@@ -814,5 +814,34 @@
     "finalizing": "Checking output files",
     "noRecentProgress": "No new progress for over 1 minute; execution may still be active.",
     "cancelHint": "Cancel ends this generation; sampling cannot resume. Stopping chat does not cancel the video task."
+  },
+  "workProgress": {
+    "title": "작업 진행 상황",
+    "panel": "오른쪽 패널",
+    "empty": "여러 단계 작업과 백그라운드 작업이 여기에 표시됩니다.",
+    "waitingHint": "대화에서 확인 요청에 응답해 주세요.",
+    "prepareResume": "계속할 준비",
+    "resumePrompt": "현재 계획과 맥락에 따라 미완료 작업을 계속하세요. 기존 operation/job 상태를 먼저 확인하고 중복 제출하지 마세요.",
+    "statuses": {
+      "pending": "대기 중",
+      "running": "실행 중",
+      "completed": "완료",
+      "failed": "실패",
+      "interrupted": "일시 중지 / 상태 확인 중",
+      "waiting": "사용자 대기",
+      "cancelled": "취소됨"
+    },
+    "kinds": {
+      "plan": "계획",
+      "task": "작업",
+      "subagent": "하위 에이전트",
+      "background": "백그라운드 명령",
+      "workflow": "워크플로",
+      "install": "모델 설치 / 복구",
+      "generation": "생성 작업"
+    },
+    "detecting": "장치 감지 및 설치 계획 준비 중",
+    "deviceInsufficient": "장치 요구 사항이 충족되지 않습니다. 아래 부족한 항목을 확인하세요.",
+    "detectionIncomplete": "감지가 완료되지 않았습니다. 장치가 호환되지 않는다는 뜻은 아닙니다."
   }
 }

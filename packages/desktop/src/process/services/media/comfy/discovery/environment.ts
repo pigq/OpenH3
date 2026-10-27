@@ -82,10 +82,101 @@ export type ComfyEnvironmentProbeOptions = {
   sources?: string[];
 };
 
+/** A shallow, opt-in discovery result for already existing ComfyUI installs. */
+export type ComfyEnvironmentCandidate = {
+  root: string;
+  reason: 'configured' | 'known-path' | 'recent-path';
+  python?: string;
+  baseUrl?: string;
+};
+
+export type ComfyEnvironmentDiscoveryOptions = {
+  /** Explicit roots supplied by the app's persisted profile/recent-path store. */
+  roots?: string[];
+  /** Additional platform-specific roots known to the caller. */
+  knownRoots?: string[];
+  /** Keep discovery bounded; this is not a whole-disk search. */
+  maxCandidates?: number;
+  platform?: NodeJS.Platform;
+  homeDirectory?: string;
+  environment?: NodeJS.ProcessEnv;
+};
+
 const exec = promisify(execFile);
 export const runComfyCommand: ComfyCommandRunner = async (file, args, options) =>
   (await exec(file, args, options)).stdout;
 const commandOptions: ComfyCommandOptions = { timeout: 10_000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 };
+
+function existingDirectory(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const resolved = path.resolve(value);
+    return fs.statSync(resolved).isDirectory() ? resolved : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function candidateRoot(root: string): string | undefined {
+  const resolved = existingDirectory(root);
+  if (!resolved) return undefined;
+  if (fs.existsSync(path.join(resolved, 'main.py'))) return resolved;
+  // Common launchers point at a parent directory containing a ComfyUI checkout.
+  const nested = existingDirectory(path.join(resolved, 'ComfyUI'));
+  return nested && fs.existsSync(path.join(nested, 'main.py')) ? nested : undefined;
+}
+
+function candidatePython(root: string): string | undefined {
+  return [
+    path.join(root, '.venv', 'Scripts', 'python.exe'),
+    path.join(root, '.venv', 'bin', 'python'),
+    path.join(root, 'venv', 'Scripts', 'python.exe'),
+    path.join(root, 'venv', 'bin', 'python'),
+    path.join(root, 'python_embeded', 'python.exe'),
+    path.join(path.dirname(root), 'python_embeded', 'python.exe'),
+  ].find((value) => fs.existsSync(value));
+}
+
+/**
+ * Find existing ComfyUI roots without traversing an entire disk.
+ *
+ * The caller supplies persisted/recent roots when available. Built-in paths are
+ * deliberately small and platform-specific; each path is checked at most one
+ * level below its parent. No process is started and no files are downloaded.
+ */
+export function discoverComfyEnvironmentCandidates(
+  options: ComfyEnvironmentDiscoveryOptions = {}
+): ComfyEnvironmentCandidate[] {
+  const platform = options.platform ?? process.platform;
+  const env = options.environment ?? process.env;
+  const home = options.homeDirectory ?? os.homedir();
+  const maxCandidates = Math.max(1, Math.min(64, options.maxCandidates ?? 16));
+  const known = [
+    path.join(home, 'ComfyUI'),
+    path.join(home, 'comfyui'),
+    path.join(home, 'Documents', 'ComfyUI'),
+    path.join(home, 'Desktop', 'ComfyUI'),
+    ...(platform === 'win32'
+      ? [env.LOCALAPPDATA && path.join(env.LOCALAPPDATA, 'ComfyUI'), env.APPDATA && path.join(env.APPDATA, 'ComfyUI')]
+      : []),
+    ...(platform === 'linux' ? [path.join(home, '.local', 'share', 'ComfyUI')] : []),
+    ...(platform === 'darwin' ? [path.join(home, 'Library', 'Application Support', 'ComfyUI')] : []),
+    ...(options.knownRoots ?? []),
+  ];
+  const seen = new Set<string>();
+  const candidates: ComfyEnvironmentCandidate[] = [];
+  const add = (value: string | undefined, reason: ComfyEnvironmentCandidate['reason']): void => {
+    const root = value && candidateRoot(value);
+    if (!root) return;
+    const key = platform === 'win32' ? path.normalize(root).toLowerCase() : path.normalize(root);
+    if (seen.has(key) || candidates.length >= maxCandidates) return;
+    seen.add(key);
+    candidates.push({ root, reason, python: candidatePython(root), baseUrl: 'http://127.0.0.1:8188' });
+  };
+  for (const root of options.roots ?? []) add(root, 'recent-path');
+  for (const root of known) add(root, 'known-path');
+  return candidates;
+}
 
 const PYTHON_PROBE = `import sys, json, importlib.metadata as metadata, os
 result = {"executable": sys.executable, "version": sys.version.split()[0], "packages": {}, "packageMetadataFiles": [], "packageDirectories": []}

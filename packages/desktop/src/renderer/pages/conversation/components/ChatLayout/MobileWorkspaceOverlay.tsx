@@ -13,6 +13,10 @@ type MobileWorkspaceOverlayProps = {
   sider: React.ReactNode;
   workspacePath?: string;
   isTemporaryWorkspace?: boolean;
+  progressAvailable?: boolean;
+  workspaceAvailable?: boolean;
+  progressActive?: boolean;
+  onProgressChange?: (active: boolean) => void;
 };
 
 // Full-screen overlay + fixed workspace panel + floating collapse handle for mobile viewports
@@ -25,6 +29,10 @@ const MobileWorkspaceOverlay: React.FC<MobileWorkspaceOverlayProps> = ({
   sider,
   workspacePath,
   isTemporaryWorkspace,
+  progressAvailable = false,
+  workspaceAvailable = true,
+  progressActive = false,
+  onProgressChange,
 }) => (
   <>
     {/* Backdrop */}
@@ -54,6 +62,10 @@ const MobileWorkspaceOverlay: React.FC<MobileWorkspaceOverlayProps> = ({
         togglePlacement='left'
         workspacePath={workspacePath}
         isTemporaryWorkspace={isTemporaryWorkspace}
+        progressAvailable={progressAvailable}
+        workspaceAvailable={workspaceAvailable}
+        progressActive={progressActive}
+        onProgressChange={onProgressChange}
       >
         {siderTitle}
       </WorkspacePanelHeader>

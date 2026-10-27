@@ -66,7 +66,9 @@
         "completed": "Doğrulandı ve hazır",
         "cancelled": "İptal edildi"
       },
-      "snapshotDirectory": "Kurtarma anlık görüntüsü"
+      "snapshotDirectory": "Kurtarma anlık görüntüsü",
+      "submittedContext": "Uygulama {{id}} kurulumunu gönderdi ({{state}}); iş ilerleme paneli otomatik güncellenir. Yeni bir kurulum göndermeden veya sohbette tekrar onay istemeden mevcut işlemin durumunu açıklayın.",
+      "preparationFailed": "Kurulum hazırlığı tamamlanmadı: {{reason}}. İstek korundu; ayrıntılar için iş ilerlemesini kontrol edin."
     },
     "profileSummary": "Seçilen yerel profil: {{profile}}. Tam olarak bu profili kullan.",
     "session": {

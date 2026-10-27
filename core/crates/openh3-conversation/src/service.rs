@@ -3963,6 +3963,13 @@ impl ConversationService {
             (turn_id, turn_claim)
         };
 
+        // Recovery is contextual, not executable: read the persisted snapshot
+        // before this new user row becomes the newest input. Keep the prompt
+        // text intact; metadata retains the bounded hint until a turn succeeds.
+        let recovery_context = self
+            .unfinished_task_context_on_next_input(user_id, conversation_id)
+            .await;
+
         // Store user message. `msg_id` is server-generated so the WebSocket
         // stream, DB row, and client-side message index all agree on the same
         // key. We reuse the same value for `id` (primary key) and `msg_id`
@@ -3971,12 +3978,16 @@ impl ConversationService {
         // message — reuse its id instead of writing a duplicate row.
         let was_fallback = fallback_user_msg.is_some();
         let user_msg_id = fallback_user_msg.unwrap_or_else(Self::mint_msg_id);
+        let mut user_content = serde_json::json!({ "content": resolved.content });
+        if let Some(context) = recovery_context.as_ref() {
+            user_content[crate::startup_recovery::PENDING_RECOVERY_CONTEXT] = serde_json::json!(context);
+        }
         let user_msg = openh3_db::models::MessageRow {
             id: user_msg_id.clone(),
             conversation_id: conversation_id.to_owned(),
             msg_id: Some(user_msg_id.clone()),
             r#type: "text".into(),
-            content: serde_json::json!({ "content": resolved.content }).to_string(),
+            content: user_content.to_string(),
             position: Some("right".into()),
             status: Some("finish".into()),
             hidden: req.hidden,
@@ -4050,10 +4061,11 @@ impl ConversationService {
         let stored_workspace = build_opts.context.workspace.stored_path.clone();
 
         let user_msg_id_ret = user_msg_id.clone();
+        let recovery_user_message_id = recovery_context.as_ref().map(|_| user_msg_id.clone());
         ConversationTurnOrchestrator::new(self.clone(), Arc::clone(task_manager)).spawn_user_turn(TurnStartInput {
             user_id: user_id.to_owned(),
             conversation: row,
-            content: resolved.content,
+            content: recovery_context.map_or_else(|| resolved.content.clone(), |context| context + &resolved.content),
             files: resolved.files,
             inject_skills: req.inject_skills,
             required_runtime_mode: None,
@@ -4061,6 +4073,7 @@ impl ConversationService {
             stored_workspace,
             turn_id: turn_id.clone(),
             turn_claim,
+            recovery_user_message_id,
         });
 
         info!(
@@ -4183,6 +4196,7 @@ impl ConversationService {
                 stored_workspace,
                 turn_id: turn_id.clone(),
                 turn_claim,
+                recovery_user_message_id: None,
             })
             .await;
 

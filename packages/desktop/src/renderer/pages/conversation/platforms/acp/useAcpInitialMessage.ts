@@ -17,14 +17,15 @@ import type { ConversationRuntimeSendFailure } from '../../runtime/conversationR
 import { classifyConversationBusyError } from '../conversationBusyError';
 import { buildSendFailureError } from './buildSendFailureError';
 import { h3JobApi } from '@/common/chat/document/h3JobApi';
-import { comfyApi } from '@/common/chat/document/creation/comfyApi';
 import type { ComfyFamily, ComfyIntent } from '@/common/chat/document/creation/comfy';
+import { prepareCreationEntry } from '../../runtime/Creation/prepareCreationEntry';
 import {
   clearGuidDraftIfMatches,
   getGuidDraftScope,
   isGuidDraftScopeCurrent,
 } from '@/renderer/pages/guid/hooks/useGuidDraft';
 import { beginComfySelectionChange } from '../../runtime/Creation/useComfySelectionPending';
+import { mutate } from 'swr';
 
 type UseAcpInitialMessageParams = {
   conversation_id: string;
@@ -67,13 +68,14 @@ export const useAcpInitialMessage = ({
     sessionStorage.removeItem(storageKey);
 
     let bindingPending = false;
+    let installationPending = false;
     let finishBinding: (() => void) | undefined;
     const sendInitialMessage = async () => {
       try {
         const initialMessage = JSON.parse(storedMessage);
         const guidDraftScope = getGuidDraftScope();
         if (!isGuidDraftScopeCurrent(initialMessage.guidDraftScope)) return;
-        const input = typeof initialMessage.input === 'string' ? initialMessage.input : '';
+        let input = typeof initialMessage.input === 'string' ? initialMessage.input : '';
         // Guid-page initial files are source-tagged ChatFileRefs (`local` for
         // backend-machine picks, `upload` for device uploads). Body stays plain
         // text; the backend resolves each ref and injects the [[AION_FILES]]
@@ -96,19 +98,19 @@ export const useAcpInitialMessage = ({
             kind?: 'image' | 'video';
             templateSnapshot?: import('@/common/contentCatalog/snapshot').TemplateSnapshot;
           };
-          const bound = await comfyApi.bind(
-            initialMessage.creationRequestId,
-            conversation_id,
-            request.profileId,
-            request.family,
-            request.intent,
-            {
-              source: request.source ?? 'local',
-              kind: request.kind ?? 'image',
-              templateSnapshot: request.templateSnapshot,
-            }
-          );
-          if (!bound.ok) throw new Error(t('guid.creation.toolsUnavailable'));
+          installationPending =
+            request.source !== 'cloud' &&
+            Boolean(request.family) &&
+            (request.intent === 'install' || request.intent === 'repair' || request.intent === 'install-other');
+          const operation = await prepareCreationEntry(initialMessage.creationRequestId, conversation_id, request);
+          if (operation) {
+            input += `\n\n${t('guid.comfy.operation.submittedContext', {
+              id: operation.id,
+              state: t(`guid.comfy.operation.states.${operation.state}`),
+            })}`;
+            void mutate(['comfy.activity', conversation_id]).catch((): void => undefined);
+            emitter.emit('chat.history.refresh');
+          }
           bindingPending = false;
         } else if (typeof initialMessage.creationRequestId === 'string') {
           bindingPending = true;
@@ -137,8 +139,14 @@ export const useAcpInitialMessage = ({
       } catch (error) {
         // No message was sent if binding failed. Reopening the chat can retry safely.
         if (bindingPending) sessionStorage.setItem(storageKey, storedMessage);
-        const errorMessageText =
+        const reason =
           getConversationRuntimeWorkspaceErrorMessage(error, t) || parseError(error) || t('common.unknownError');
+        const errorMessageText = bindingPending
+          ? installationPending
+            ? t('guid.comfy.operation.preparationFailed', { reason: parseError(error) || reason })
+            : t('guid.creation.toolsUnavailable')
+          : reason;
+        if (bindingPending) void mutate(['comfy.activity', conversation_id]).catch((): void => undefined);
         const busyError = classifyConversationBusyError(error);
         if (busyError) {
           markSendFailed?.({

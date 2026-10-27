@@ -76,8 +76,7 @@ const GuidPage: React.FC = () => {
   const [templateFocusKey, setTemplateFocusKey] = useState<string>();
   const [creationIntent, setCreationIntentState] = useState<ComfyDraftIntent>(readComfyDraftIntent);
   const setCreationIntent = useCallback((intent?: ComfyDraftIntent) => {
-    writeComfyDraftIntent(intent);
-    setCreationIntentState(intent);
+    setCreationIntentState(writeComfyDraftIntent(intent));
   }, []);
   const guidContainerRef = useRef<HTMLDivElement>(null);
   const { activeBorderColor, inactiveBorderColor, activeShadow } = useInputFocusRing();
@@ -329,7 +328,7 @@ const GuidPage: React.FC = () => {
       );
       setTemplateFocusKey(crypto.randomUUID());
     },
-    [guidInput.setInput, t]
+    [guidInput.setInput, setCreationIntent, t]
   );
   const handleInputChange = useCallback(
     (value: string) => {

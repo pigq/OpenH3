@@ -78,6 +78,7 @@ vi.mock('@/renderer/pages/conversation/hooks/useWorkspaceCollapse', () => ({
 }));
 
 import ChatLayout from '@/renderer/pages/conversation/components/ChatLayout';
+import { publishWorkProgress, resetWorkProgressForTest } from '@/renderer/pages/conversation/PlanBar/workProgress';
 
 function renderChatLayout(previewHosted: boolean) {
   return render(
@@ -90,6 +91,7 @@ function renderChatLayout(previewHosted: boolean) {
 describe('ChatLayout mobile preview host fallback', () => {
   afterEach(() => {
     mockIsMobile = false;
+    resetWorkProgressForTest();
   });
 
   it('renders the preview overlay on mobile even for hoisted (project) conversations', () => {
@@ -110,5 +112,43 @@ describe('ChatLayout mobile preview host fallback', () => {
     mockIsMobile = false;
     renderChatLayout(false);
     expect(screen.getByTestId('preview-panel')).toBeInTheDocument();
+  });
+
+  it('does not allocate a second right column for project progress on either desktop or mobile', () => {
+    publishWorkProgress('project-chat', {
+      tasks: [{ id: 'install', title: 'Download model', kind: 'install', status: 'running' }],
+      isProcessing: false,
+      pendingConfirmations: 0,
+    });
+    const { container, rerender } = render(
+      <ChatLayout conversation_id='project-chat' previewHosted sider={<div>sider</div>} workspaceEnabled={false}>
+        <div>chat body</div>
+      </ChatLayout>
+    );
+    expect(container.querySelector('.chat-layout-right-sider')).toBeNull();
+    expect(screen.queryByTestId('conversation-work-progress')).not.toBeInTheDocument();
+    mockIsMobile = true;
+    rerender(
+      <ChatLayout conversation_id='project-chat' previewHosted sider={<div>sider</div>} workspaceEnabled={false}>
+        <div>chat body</div>
+      </ChatLayout>
+    );
+    expect(screen.queryByTestId('mobile-workspace-overlay')).not.toBeInTheDocument();
+  });
+
+  it('exposes progress for a non-project conversation even without a workspace', () => {
+    publishWorkProgress('no-workspace', {
+      tasks: [{ id: 'bash', title: 'Build preview', kind: 'background', status: 'running' }],
+      isProcessing: false,
+      pendingConfirmations: 0,
+    });
+    const { container } = render(
+      <ChatLayout conversation_id='no-workspace' sider={null} workspaceEnabled={false}>
+        <div>chat body</div>
+      </ChatLayout>
+    );
+    expect(container.querySelectorAll('.chat-layout-right-sider')).toHaveLength(1);
+    expect(screen.getByTestId('conversation-work-progress')).toHaveTextContent('Build preview');
+    expect(screen.queryByTestId('conversation-plan-bar')).not.toBeInTheDocument();
   });
 });

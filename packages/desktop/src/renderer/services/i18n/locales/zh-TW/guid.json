@@ -66,7 +66,9 @@
         "completed": "驗證通過，可使用",
         "cancelled": "已取消"
       },
-      "snapshotDirectory": "復原快照"
+      "snapshotDirectory": "復原快照",
+      "submittedContext": "應用程式已提交安裝工作 {{id}}（{{state}}），工作進度面板會自動更新。請說明現有工作狀態，不要重複提交安裝或在聊天中再次要求確認。",
+      "preparationFailed": "安裝準備未完成：{{reason}}。請求已保留，請查看工作進度中的具體診斷。"
     },
     "profileSummary": "已選本地設定：{{profile}}。請使用此設定。",
     "session": {

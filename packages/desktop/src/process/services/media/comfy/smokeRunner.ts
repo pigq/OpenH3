@@ -69,10 +69,14 @@ export async function runComfyInstallSmoke(
       failure = error instanceof Error ? error.message : String(error);
       throw error;
     } finally {
-      fs.appendFileSync(
-        path.join(receipt.snapshotDirectory, 'memory.jsonl'),
-        JSON.stringify({ at: new Date().toISOString(), reason, confirmed, error: failure }) + '\n'
-      );
+      try {
+        fs.appendFileSync(
+          path.join(receipt.snapshotDirectory, 'memory.jsonl'),
+          JSON.stringify({ at: new Date().toISOString(), reason, confirmed, error: failure }) + '\n'
+        );
+      } catch {
+        /* Diagnostics must not change a confirmed cleanup or mask its original failure. */
+      }
     }
   };
   const task = async (): Promise<ComfyGenerationResult> => {
@@ -115,7 +119,8 @@ export async function runComfyInstallSmoke(
         return result;
       } catch (error) {
         const diagnosis = (error as { diagnosis?: ComfyDiagnosis } | undefined)?.diagnosis;
-        if (diagnosis) uncertain = false;
+        if (diagnosis || (error as { remoteTerminal?: boolean } | undefined)?.remoteTerminal === true)
+          uncertain = false;
         const message = error instanceof Error ? error.message : String(error);
         if (
           diagnosis?.category === 'OOM' &&

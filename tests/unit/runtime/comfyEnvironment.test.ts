@@ -3,10 +3,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  discoverComfyEnvironmentCandidates,
   probeComfyEnvironment,
   readPythonRuntime,
   readComfyHardwareIdentity,
-} from '@/process/services/media/comfy/environment';
+} from '@/process/services/media/comfy/discovery/environment';
 
 const roots: string[] = [];
 function temporaryRoot(): string {
@@ -17,6 +18,47 @@ function temporaryRoot(): string {
 afterEach(() => roots.splice(0).forEach((root) => fs.rmSync(root, { recursive: true, force: true })));
 
 describe('generic ComfyUI environment probe', () => {
+  it('discovers configured and known ComfyUI roots with bounded shallow scanning', () => {
+    const parent = temporaryRoot();
+    const configured = path.join(parent, 'recent-install');
+    const known = path.join(parent, 'known-install');
+    fs.mkdirSync(path.join(configured, '.venv', 'Scripts'), { recursive: true });
+    fs.writeFileSync(path.join(configured, 'main.py'), '');
+    fs.writeFileSync(path.join(configured, '.venv', 'Scripts', 'python.exe'), '');
+    fs.mkdirSync(known, { recursive: true });
+    fs.writeFileSync(path.join(known, 'main.py'), '');
+    // A directory that merely contains a model must not be treated as ComfyUI.
+    fs.mkdirSync(path.join(parent, 'not-comfy', 'models'), { recursive: true });
+
+    const result = discoverComfyEnvironmentCandidates({
+      roots: [configured],
+      knownRoots: [known, path.join(parent, 'not-comfy')],
+      homeDirectory: parent,
+      environment: {},
+      platform: 'linux',
+      maxCandidates: 8,
+    });
+    expect(result).toEqual([
+      expect.objectContaining({
+        root: configured,
+        reason: 'recent-path',
+        python: path.join(configured, '.venv', 'Scripts', 'python.exe'),
+      }),
+      expect.objectContaining({ root: known, reason: 'known-path' }),
+    ]);
+  });
+
+  it('recognizes a ComfyUI checkout nested under a known launcher directory', () => {
+    const parent = temporaryRoot();
+    const launcher = path.join(parent, 'portable');
+    const root = path.join(launcher, 'ComfyUI');
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(path.join(root, 'main.py'), '');
+    expect(discoverComfyEnvironmentCandidates({ roots: [launcher], maxCandidates: 1 })).toEqual([
+      expect.objectContaining({ root, reason: 'recent-path' }),
+    ]);
+  });
+
   it('reads stable driver hardware identity without scanning Python, nodes, RAM or free GPU memory', async () => {
     const runCommand = vi.fn(async (file: string) => {
       if (file === 'nvidia-smi') return '0, NVIDIA RTX 5080, 16376, 15100, 581.42, 12.0';

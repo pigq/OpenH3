@@ -816,5 +816,34 @@
     "finalizing": "Checking output files",
     "noRecentProgress": "No new progress for over 1 minute; execution may still be active.",
     "cancelHint": "Cancel ends this generation; sampling cannot resume. Stopping chat does not cancel the video task."
+  },
+  "workProgress": {
+    "title": "İş ilerlemesi",
+    "panel": "Sağ panel",
+    "empty": "Çok adımlı ve arka plan görevleri burada gösterilir.",
+    "waitingHint": "Sohbette bekleyen isteği yanıtlayın.",
+    "prepareResume": "Devamı hazırla",
+    "resumePrompt": "Tamamlanmamış işe mevcut plan ve bağlamla devam et. Önce mevcut işlemleri kontrol et ve yeniden gönderme.",
+    "statuses": {
+      "pending": "Bekliyor",
+      "running": "Çalışıyor",
+      "completed": "Tamamlandı",
+      "failed": "Başarısız",
+      "interrupted": "Duraklatıldı / denetleniyor",
+      "waiting": "Yanıt bekliyor",
+      "cancelled": "İptal edildi"
+    },
+    "kinds": {
+      "plan": "Plan",
+      "task": "Görev",
+      "subagent": "Alt aracı",
+      "background": "Arka plan komutu",
+      "workflow": "İş akışı",
+      "install": "Model kurulumu / onarımı",
+      "generation": "Üretim"
+    },
+    "detecting": "Cihaz algılanıyor ve kurulum hazırlanıyor",
+    "deviceInsufficient": "Cihaz gereksinimleri karşılanmıyor. Eksikleri aşağıda inceleyin.",
+    "detectionIncomplete": "Algılama tamamlanmadı. Bu, cihazın uyumsuz olduğu anlamına gelmez."
   }
 }

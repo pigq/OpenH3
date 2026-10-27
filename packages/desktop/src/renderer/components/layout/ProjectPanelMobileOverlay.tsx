@@ -18,7 +18,7 @@
 
 import React, { useRef } from 'react';
 
-import { ExplorerContainer } from '@/renderer/pages/conversation/explorer/ExplorerContainer';
+import { ProjectPanelContent } from './ProjectPanelHost';
 
 export type ProjectPanelMobileOverlayProps = {
   projectId: string;
@@ -61,7 +61,7 @@ export const ProjectPanelMobileOverlay: React.FC<ProjectPanelMobileOverlayProps>
           borderLeft: '1px solid var(--bg-3)',
         }}
       >
-        <ExplorerContainer projectId={projectId} />
+        <ProjectPanelContent projectId={projectId} />
       </div>
 
       {/* Floating collapse handle */}

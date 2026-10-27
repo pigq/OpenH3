@@ -814,5 +814,34 @@
     "finalizing": "Checking output files",
     "noRecentProgress": "No new progress for over 1 minute; execution may still be active.",
     "cancelHint": "Cancel ends this generation; sampling cannot resume. Stopping chat does not cancel the video task."
+  },
+  "workProgress": {
+    "title": "工作進度",
+    "panel": "右側面板",
+    "empty": "多步驟任務和背景任務會顯示在這裡。",
+    "waitingHint": "請在對話中處理待確認事項。",
+    "prepareResume": "準備繼續",
+    "resumePrompt": "依目前計畫與上下文繼續未完成的工作；先核對現有 operation/job 狀態，不要重複提交。",
+    "statuses": {
+      "pending": "待處理",
+      "running": "進行中",
+      "completed": "已完成",
+      "failed": "失敗",
+      "interrupted": "已暫停 / 正在核對狀態",
+      "waiting": "等待使用者",
+      "cancelled": "已取消"
+    },
+    "kinds": {
+      "plan": "計畫",
+      "task": "任務",
+      "subagent": "子 Agent",
+      "background": "背景命令",
+      "workflow": "工作流程",
+      "install": "模型安裝 / 修復",
+      "generation": "生成任務"
+    },
+    "detecting": "正在偵測裝置並產生安裝計畫",
+    "deviceInsufficient": "裝置條件不足，請查看下方具體缺項。",
+    "detectionIncomplete": "環境偵測尚未完成，這不代表裝置不相容。"
   }
 }

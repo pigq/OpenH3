@@ -353,7 +353,9 @@
         "completed": "Verified and ready",
         "cancelled": "Cancelled"
       },
-      "snapshotDirectory": "Recovery snapshot"
+      "snapshotDirectory": "Recovery snapshot",
+      "submittedContext": "The app has submitted installation {{id}} ({{state}}); the work progress panel updates automatically. Explain this existing operation without submitting another installation or asking for confirmation in chat.",
+      "preparationFailed": "Installation preparation did not finish: {{reason}}. Your request was kept; check work progress for details."
     },
     "profileSummary": "Selected local profile: {{profile}}. Use this exact profile.",
     "session": {

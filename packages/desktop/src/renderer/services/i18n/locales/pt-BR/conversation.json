@@ -820,5 +820,34 @@
     "finalizing": "Checking output files",
     "noRecentProgress": "No new progress for over 1 minute; execution may still be active.",
     "cancelHint": "Cancel ends this generation; sampling cannot resume. Stopping chat does not cancel the video task."
+  },
+  "workProgress": {
+    "title": "Progresso do trabalho",
+    "panel": "Painel direito",
+    "empty": "Tarefas com várias etapas e em segundo plano aparecem aqui.",
+    "waitingHint": "Responda à solicitação pendente na conversa.",
+    "prepareResume": "Preparar continuação",
+    "resumePrompt": "Continue o trabalho pendente com o plano e contexto atuais. Verifique as operações existentes antes de continuar, sem enviá-las novamente.",
+    "statuses": {
+      "pending": "Pendente",
+      "running": "Em andamento",
+      "completed": "Concluído",
+      "failed": "Falhou",
+      "interrupted": "Pausado / verificando",
+      "waiting": "Aguardando resposta",
+      "cancelled": "Cancelado"
+    },
+    "kinds": {
+      "plan": "Plano",
+      "task": "Tarefa",
+      "subagent": "Subagente",
+      "background": "Comando em segundo plano",
+      "workflow": "Fluxo de trabalho",
+      "install": "Instalação / reparo do modelo",
+      "generation": "Geração"
+    },
+    "detecting": "Detectando dispositivo e preparando a instalação",
+    "deviceInsufficient": "O dispositivo não atende aos requisitos. Veja os itens ausentes abaixo.",
+    "detectionIncomplete": "A detecção está incompleta. Isso não significa que o dispositivo seja incompatível."
   }
 }

@@ -814,5 +814,34 @@
     "finalizing": "Checking output files",
     "noRecentProgress": "No new progress for over 1 minute; execution may still be active.",
     "cancelHint": "Cancel ends this generation; sampling cannot resume. Stopping chat does not cancel the video task."
+  },
+  "workProgress": {
+    "title": "پیشرفت کار",
+    "panel": "پنل سمت راست",
+    "empty": "کارهای چندمرحله‌ای و پس‌زمینه اینجا نمایش داده می‌شوند.",
+    "waitingHint": "در گفتگو به درخواست در انتظار پاسخ دهید.",
+    "prepareResume": "آماده‌سازی ادامه",
+    "resumePrompt": "کار ناتمام را بر اساس برنامه و زمینه فعلی ادامه بده. ابتدا وضعیت عملیات موجود را بررسی کن و دوباره ارسال نکن.",
+    "statuses": {
+      "pending": "در انتظار",
+      "running": "در حال اجرا",
+      "completed": "تکمیل شد",
+      "failed": "ناموفق",
+      "interrupted": "متوقف / بررسی وضعیت",
+      "waiting": "منتظر پاسخ شما",
+      "cancelled": "لغو شد"
+    },
+    "kinds": {
+      "plan": "برنامه",
+      "task": "کار",
+      "subagent": "عامل فرعی",
+      "background": "فرمان پس‌زمینه",
+      "workflow": "گردش کار",
+      "install": "نصب / تعمیر مدل",
+      "generation": "تولید"
+    },
+    "detecting": "شناسایی دستگاه و آماده‌سازی نصب",
+    "deviceInsufficient": "دستگاه الزامات را برآورده نمی‌کند. موارد لازم در پایین آمده‌اند.",
+    "detectionIncomplete": "شناسایی کامل نشده است. این به معنی ناسازگاری دستگاه نیست."
   }
 }

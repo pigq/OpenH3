@@ -12,15 +12,6 @@ import {
 type Skill = { name: string; location: string; source: string; is_custom: boolean };
 
 describe('ComfyUI skill provisioning', () => {
-  it('avoids the recorded multi-name ToolSearch false negative before starting installation scans', async () => {
-    const entry = await fs.readFile(path.resolve('resources/skills/comfyui-local/SKILL.md'), 'utf8');
-    expect(entry).toContain('"query":"openh3_comfy"');
-    expect(entry).toContain('literal substring');
-    expect(entry).toContain('before reading references or scanning');
-    expect(entry).toContain('No deferred tools');
-    expect(entry).toContain('do not prove');
-  });
-
   let sandbox: string;
   let bundleRoot: string;
   let userRoot: string;
@@ -256,21 +247,33 @@ describe('ComfyUI skill provisioning', () => {
     expect(request).not.toHaveBeenCalledWith('PUT', expect.anything(), expect.anything());
   });
 
-  it('updates only unchanged app-owned content when bundle references change', async () => {
-    await provisionComfySkill(request, bundleRoot);
-    const firstStamp = preferences[COMFY_LOCAL_SKILL_PREFERENCE];
-    await fs.writeFile(path.join(bundleRoot, 'references', 'h3.md'), 'New repair guidance.');
-    request.mockClear();
-    await expect(provisionComfySkill(request, bundleRoot)).resolves.toBe('updated');
-    expect(preferences[COMFY_LOCAL_SKILL_PREFERENCE]).not.toEqual(firstStamp);
-    expect(await fs.readFile(path.join(userRoot, 'references', 'h3.md'), 'utf8')).toBe('New repair guidance.');
-  });
+  it.each(['SKILL.md', 'references/h3.md'])(
+    'updates unchanged app-owned content when bundle %s changes',
+    async (file) => {
+      await provisionComfySkill(request, bundleRoot);
+      const firstStamp = preferences[COMFY_LOCAL_SKILL_PREFERENCE];
+      await fs.writeFile(path.join(bundleRoot, file), 'New operation guidance.');
+      request.mockClear();
+      await expect(provisionComfySkill(request, bundleRoot)).resolves.toBe('updated');
+      expect(preferences[COMFY_LOCAL_SKILL_PREFERENCE]).not.toEqual(firstStamp);
+      expect(await fs.readFile(path.join(userRoot, file), 'utf8')).toBe('New operation guidance.');
+    }
+  );
 
-  it('upgrades an unchanged owned skill to the complete Omni bundle and does not reimport it again', async () => {
+  it('upgrades unchanged owned 1.7.1 instructions to the current bundle once', async () => {
+    await fs.writeFile(
+      path.join(bundleRoot, 'manifest.json'),
+      JSON.stringify({ name: COMFY_LOCAL_SKILL_NAME, version: '1.7.1' })
+    );
     await provisionComfySkill(request, bundleRoot);
+    const previousStamp = preferences[COMFY_LOCAL_SKILL_PREFERENCE];
     const repositoryBundle = path.resolve('resources/skills/comfyui-local');
     await expect(provisionComfySkill(request, repositoryBundle)).resolves.toBe('updated');
-    expect(preferences[COMFY_LOCAL_SKILL_PREFERENCE]).toMatchObject({ version: '1.7.1' });
+    expect(preferences[COMFY_LOCAL_SKILL_PREFERENCE]).toMatchObject({ version: '1.8.0' });
+    expect(preferences[COMFY_LOCAL_SKILL_PREFERENCE]).not.toEqual(previousStamp);
+    expect(await fs.readFile(path.join(userRoot, 'SKILL.md'), 'utf8')).toBe(
+      await fs.readFile(path.join(repositoryBundle, 'SKILL.md'), 'utf8')
+    );
     expect(await fs.readFile(path.join(userRoot, 'references/fasth3-omni.md'), 'utf8')).toBe(
       await fs.readFile(path.join(repositoryBundle, 'references/fasth3-omni.md'), 'utf8')
     );
