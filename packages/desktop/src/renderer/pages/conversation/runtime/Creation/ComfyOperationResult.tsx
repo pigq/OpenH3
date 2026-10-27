@@ -166,7 +166,7 @@ export default function ComfyOperationResult({ id, conversationId }: { id: strin
       if (intent !== 'generate') {
         requestConversationSendBoxPrefill(
           conversationId,
-          `${t(`guid.comfy.prompts.${intent}`, { family: profile.name, profile: profile.id })}\n\n${t('guid.comfy.intentSummary', { model: profile.name, intent: t(`guid.comfy.actions.${intent}`), profile: next.profileId ?? '' })}`
+          t(`guid.comfy.prompts.${intent}`, { family: profile.name, profile: next.profileId ?? '' })
         );
       }
       await swrMutate(`conversation/${conversationId}`).catch((): void => undefined);

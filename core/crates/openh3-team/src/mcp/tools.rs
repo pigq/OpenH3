@@ -198,6 +198,10 @@ mod tests {
             desc.contains("explicitly approved"),
             "description must retain the explicit-approval precondition clause"
         );
+        assert!(
+            desc.contains("authorized delegation") && desc.contains("do not ask for confirmation again"),
+            "the tool description must honor the same existing authorization as the lead prompt"
+        );
     }
 
     #[test]

@@ -72,6 +72,11 @@ export const ensureBackendMcpCatalog = async (): Promise<{
   builtinServers: IMcpServer[];
   allServers: IMcpServer[];
 }> => {
+  if (typeof window !== 'undefined' && window.electronAPI?.waitForBackendMigrations) {
+    const ready = await window.electronAPI.waitForBackendMigrations();
+    if (!ready) throw new Error('BACKEND_MIGRATIONS_NOT_READY');
+  }
+
   const localServers = ((await getClientBusinessSetting('mcp.config').catch((): IMcpServer[] => [])) ||
     []) as IMcpServer[];
   const builtinServers = dedupeServers(localServers.filter(isBuiltinServer));

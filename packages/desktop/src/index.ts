@@ -229,7 +229,7 @@ let backendStartedOk = false;
 let backendStartupFailed = false;
 let backendStartupFailureInfo: BackendStartupFailureInfo | null = null;
 let rendererInitialLanguage: string | null = null;
-let backendMigrationsScheduled = false;
+let backendMigrationsPromise: Promise<void> | null = null;
 let ensureAdminUserPromise: Promise<void> | null = null;
 let mediaServiceProcess: MediaServiceProcess | null = null;
 ipcMain.handle('media-service:get-ui-token', () => mediaServiceProcess?.uiToken ?? null);
@@ -351,12 +351,13 @@ function registerCronResumeBridge(backendPort: number): void {
  * Run one-shot backend migrations after the renderer has loaded. Some steps
  * (ConfigStorage.get, ipcBridge.listProviders) route through the renderer via
  * BroadcastChannel, so invoking them before the renderer exists deadlocks the
- * main process. Called from did-finish-load.
+ * main process. The renderer can also await the same promise before reading
+ * bootstrap-dependent catalogs.
  */
-const scheduleBackendMigrations = (): void => {
-  if (backendMigrationsScheduled || !backendStartedOk) return;
-  backendMigrationsScheduled = true;
-  void (async () => {
+const scheduleBackendMigrations = (): Promise<void> | null => {
+  if (!backendStartedOk) return null;
+  if (backendMigrationsPromise) return backendMigrationsPromise;
+  backendMigrationsPromise = (async () => {
     try {
       const { runBackendMigrations } = await import('./process/utils/runBackendMigrations');
       await runBackendMigrations(ProcessConfig);
@@ -365,7 +366,15 @@ const scheduleBackendMigrations = (): void => {
       console.error('[OpenH3] Backend migration hook threw:', error);
     }
   })();
+  return backendMigrationsPromise;
 };
+
+ipcMain.handle('backend:wait-for-migrations', async () => {
+  const migrations = scheduleBackendMigrations();
+  if (!migrations) return false;
+  await migrations;
+  return true;
+});
 
 function exposeBackendPort(backendPort: number): void {
   // Expose the backend port to main-process callers of httpBridge (e.g. the
@@ -404,7 +413,10 @@ function markBackendReady(backendPort: number, source: string): void {
   // Backend is ready: tell the renderer to drop any "starting" view and show the App.
   broadcastBackendStartupState(null);
   void ensureAdminUserOnce(backendPort);
-  scheduleBackendMigrations();
+  // Keep migrations deferred until the renderer has finished loading. Several
+  // legacy migration steps use renderer-backed storage IPC; starting them from
+  // the backend-ready callback can leave the shared promise waiting forever
+  // before a renderer exists.
 }
 
 function resolveDebugBackendStartupFailure(): BackendStartupFailureInfo | null {
@@ -533,7 +545,7 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
     mainWindow.webContents.once('did-finish-load', () => {
       console.log('[OpenH3] Renderer did-finish-load');
       showWindow();
-      scheduleBackendMigrations();
+      void scheduleBackendMigrations();
     });
     // Fallback: show window after 5s even if events don't fire (e.g. loadURL failure)
     setTimeout(showWindow, 5000);

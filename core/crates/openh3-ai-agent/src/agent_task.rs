@@ -56,8 +56,8 @@ pub trait IAgentTask: Send + Sync {
     /// Timestamp (ms) of the last activity (message send, event received).
     fn last_activity_at(&self) -> TimestampMs;
 
-    /// Number of live (declared, not yet terminal) background containers —
-    /// workflows, background bashes, background subagents. These outlive their
+    /// Number of live background tasks — declared containers (workflows, bashes,
+    /// subagents) and detached exec calls. These outlive their
     /// launching turn by design and emit no mid-flight frames, so `status` and
     /// `last_activity_at` alone misread a busy agent as idle. Backends without
     /// a background-task subsystem report 0.
@@ -375,6 +375,21 @@ impl AgentInstance {
         }
     }
 
+    /// Acknowledge an approval only after the session backend has delivered it.
+    /// Legacy managers retain their synchronous confirmation contract.
+    pub async fn confirm_and_wait(
+        &self,
+        msg_id: &str,
+        call_id: &str,
+        data: serde_json::Value,
+        always_allow: bool,
+    ) -> Result<(), AgentError> {
+        match self {
+            Self::Session(m) => m.confirm_and_wait(msg_id, call_id, data, always_allow).await,
+            _ => self.confirm(msg_id, call_id, data, always_allow),
+        }
+    }
+
     /// Answer a structured question card via the dedicated channel.
     pub fn answer_ask(
         &self,
@@ -390,6 +405,18 @@ impl AgentInstance {
             Self::Session(m) => m.answer_ask(request_id, answers),
             #[cfg(any(test, feature = "test-support"))]
             Self::Mock(m) => m.answer_ask(request_id, answers),
+        }
+    }
+
+    /// Await question-answer delivery before the service removes its card.
+    pub async fn answer_ask_and_wait(
+        &self,
+        request_id: &str,
+        answers: Option<Vec<openh3_api_types::AskQuestionAnswer>>,
+    ) -> Result<(), AgentError> {
+        match self {
+            Self::Session(m) => m.answer_ask_and_wait(request_id, answers).await,
+            _ => self.answer_ask(request_id, answers),
         }
     }
 

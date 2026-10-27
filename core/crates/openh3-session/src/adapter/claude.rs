@@ -15,6 +15,13 @@ use super::{AgentIo, BackendAdapter, ManagedProcessIo, SessionSpec};
 use crate::capability::{Capabilities, CapabilityTier, ModeInfo, SignalSet};
 use crate::event::SessionEvent;
 
+#[path = "claude_tasks.rs"]
+mod tasks;
+
+#[cfg(test)]
+#[path = "claude_task_tests.rs"]
+mod task_tests;
+
 /// The claude backend adapter. Feature 004: ONE instance per persistent
 /// SESSION (not per turn). `buf` (the NDJSON half-line buffer) persists across
 /// turns/result spans — the persistent process's stdout does not EOF between
@@ -67,6 +74,9 @@ pub struct ClaudeAdapter {
     /// the renderer append a nameless junk card. Cleared at each turn
     /// terminal, so it never grows across a session.
     todo_tool_use_ids: std::collections::HashSet<String>,
+    /// Confirmed main-agent TaskCreate/TaskUpdate state. Unlike per-turn tool
+    /// correlation, the task list must survive result boundaries in this session.
+    task_plan: tasks::TaskPlan,
 }
 
 /// Per-message streaming state for `--include-partial-messages`. Reset on each
@@ -460,6 +470,7 @@ impl ClaudeAdapter {
                         // malformed payload falls through to the tool path: losing
                         // the plan is acceptable, losing the card is not.
                         if raw_name == "TodoWrite"
+                            && parent_tool_use_id.is_none()
                             && let Some(todos) = input.get("todos").and_then(Value::as_array)
                         {
                             let entries: Vec<crate::event::PlanEntry> = todos
@@ -485,6 +496,8 @@ impl ClaudeAdapter {
                             continue;
                         }
 
+                        self.task_plan
+                            .record_call(&tool_use_id, raw_name, &input, parent_tool_use_id.as_deref());
                         out.push(SessionEvent::ToolCall {
                             tool_use_id,
                             // Presentation only: a bare tool name ("Bash" × 73% of all
@@ -526,6 +539,14 @@ impl ClaudeAdapter {
             .cloned()
             .unwrap_or_default();
         let mut out = Vec::new();
+        // The captured structured output belongs to a single result block.
+        // Never attach a frame-level output to an arbitrary block in an
+        // unverified multi-result shape; ordinary tool cards still flow below.
+        let unambiguous = blocks
+            .iter()
+            .filter(|block| block.get("type").and_then(Value::as_str) == Some("tool_result"))
+            .count()
+            == 1;
         for b in &blocks {
             if b.get("type").and_then(Value::as_str) == Some("tool_result") {
                 let tool_use_id = b.get("tool_use_id").and_then(Value::as_str).unwrap_or("").to_string();
@@ -534,11 +555,18 @@ impl ClaudeAdapter {
                 if self.todo_tool_use_ids.remove(&tool_use_id) {
                     continue;
                 }
+                let is_error = b.get("is_error").and_then(Value::as_bool).unwrap_or(false);
+                let plan = self.task_plan.complete_call(
+                    &tool_use_id,
+                    if unambiguous { v.get("tool_use_result") } else { None },
+                    is_error,
+                    parent_tool_use_id.as_deref(),
+                );
                 out.push(SessionEvent::ToolResult {
                     tool_use_id,
                     // 009 R7/H3: the wire block carries is_error on a failed/rejected
                     // tool (default false = success). Carrying it keeps a red tool red.
-                    is_error: b.get("is_error").and_then(Value::as_bool).unwrap_or(false),
+                    is_error,
                     // 009 R8: carry the tool OUTPUT the parser used to drop. claude's
                     // tool_result.content is polymorphic — a String (e.g. Bash stdout)
                     // or an Array of blocks (text / a base64 `image` block, e.g. a
@@ -548,6 +576,12 @@ impl ClaudeAdapter {
                     // 009 H5: attribute the result to the subagent's turn, main = None.
                     parent_tool_use_id: parent_tool_use_id.clone(),
                 });
+                if let Some(entries) = plan {
+                    out.push(SessionEvent::Plan {
+                        entries,
+                        explanation: None,
+                    });
+                }
             }
             // non-tool_result user blocks are ignored (not P0-relevant).
         }
@@ -583,6 +617,7 @@ impl ClaudeAdapter {
         // Turn terminal: any TodoWrite whose tool_result never arrived is dead
         // correlation state. Clearing here bounds the set to one turn.
         self.todo_tool_use_ids.clear();
+        self.task_plan.finish_turn();
         let is_error = v.get("is_error").and_then(Value::as_bool).unwrap_or(false);
         let result_text = match v.get("result").and_then(Value::as_str) {
             Some(s) if !s.is_empty() => s.to_string(),

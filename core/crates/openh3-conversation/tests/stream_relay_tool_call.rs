@@ -415,3 +415,144 @@ async fn run_agent_turn_with_empty_call_id_tool_call_is_not_persisted() {
         "empty call_id tool_call must not be persisted through run_agent_turn"
     );
 }
+
+/// Models an answer transport failure independently of the session backend's
+/// pending-map implementation: the service must await delivery before removing
+/// the recovered card, and the same request must remain retryable.
+struct RetryableAnswerBackend {
+    fail: std::sync::atomic::AtomicBool,
+    pending: std::sync::atomic::AtomicBool,
+    ask: bool,
+}
+
+#[async_trait::async_trait]
+impl openh3_session::SessionBackend for RetryableAnswerBackend {
+    async fn dispatch(
+        &self,
+        command: openh3_session::Command,
+    ) -> Result<openh3_session::CommandReceipt, openh3_session::BackendError> {
+        assert!(matches!(
+            command,
+            openh3_session::Command::AnswerPermission { .. } | openh3_session::Command::AnswerAsk { .. }
+        ));
+        if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(openh3_session::BackendError::Transport("answer write failed".into()));
+        }
+        self.pending.store(false, std::sync::atomic::Ordering::SeqCst);
+        Ok(openh3_session::CommandReceipt {
+            accepted: true,
+            admission: openh3_session::Admission::NoTurn,
+            turn_gen: 1,
+        })
+    }
+
+    fn events(&self) -> futures_util::stream::BoxStream<'static, openh3_session::SessionEnvelope> {
+        use futures_util::StreamExt as _;
+        futures_util::stream::pending().boxed()
+    }
+
+    fn capabilities(&self) -> openh3_session::Capabilities {
+        openh3_session::Capabilities::default()
+    }
+
+    fn pending_permission_requests(&self) -> Vec<openh3_session::PendingPermissionView> {
+        if !self.pending.load(std::sync::atomic::Ordering::SeqCst) {
+            return Vec::new();
+        }
+        vec![openh3_session::PendingPermissionView {
+            request_id: "approval-1".into(),
+            tool_name: if self.ask { "AskUserQuestion" } else { "Bash" }.into(),
+            questions: self.ask.then(|| json!([{ "question": "Continue?", "options": [] }])),
+        }]
+    }
+}
+
+async fn answer_failure_preserves_recovery_card(ask: bool) {
+    let (repo, db) = setup_repo().await;
+    let bus = Arc::new(BroadcastEventBus::new(64));
+    let mut ws = bus.subscribe();
+    let backend = Arc::new(RetryableAnswerBackend {
+        fail: std::sync::atomic::AtomicBool::new(true),
+        pending: std::sync::atomic::AtomicBool::new(true),
+        ask,
+    });
+    let task = openh3_ai_agent::session_agent::SessionAgentTask::new(
+        AgentType::Acp,
+        "conv-1".into(),
+        "system_default_user".into(),
+        "/tmp".into(),
+        backend.clone(),
+        None,
+    );
+    let task_manager: Arc<dyn IWorkerTaskManager> = Arc::new(ToolCallTaskManager {
+        agent: AgentInstance::Session(task),
+    });
+    let service = ConversationService::new(
+        std::env::temp_dir(),
+        bus,
+        Arc::new(EmptySkillResolver),
+        task_manager.clone(),
+        repo,
+        Arc::new(SqliteAgentMetadataRepository::new(db.pool().clone())),
+        Arc::new(SqliteAcpSessionRepository::new(db.pool().clone())),
+    );
+    for fail in [true, false] {
+        backend.fail.store(fail, std::sync::atomic::Ordering::SeqCst);
+        let result = if ask {
+            service
+                .answer_ask("system_default_user", "conv-1", "approval-1", None, &task_manager)
+                .await
+        } else {
+            service
+                .confirm(
+                    "system_default_user",
+                    "conv-1",
+                    "approval-1",
+                    openh3_api_types::ConfirmRequest {
+                        msg_id: "permission-message".into(),
+                        data: json!("allow"),
+                        always_allow: false,
+                    },
+                    &task_manager,
+                )
+                .await
+        };
+        if fail {
+            let error = result.expect_err("failed answer delivery must reach the API caller");
+            assert!(error.to_string().contains("answer write failed"), "{error}");
+            assert!(matches!(ws.try_recv(), Err(broadcast::error::TryRecvError::Empty)));
+            assert_eq!(
+                service
+                    .list_confirmations("system_default_user", "conv-1", &task_manager)
+                    .await
+                    .unwrap()
+                    .len(),
+                1,
+                "failed answer must remain recoverable"
+            );
+        } else {
+            result.expect("retry delivers the original answer");
+            let event = ws.try_recv().expect("successful delivery removes the recovered card");
+            assert_eq!(event.name, "confirmation.remove");
+            assert_eq!(event.data["conversation_id"], "conv-1");
+            assert_eq!(event.data["id"], "approval-1");
+            assert!(
+                service
+                    .list_confirmations("system_default_user", "conv-1", &task_manager)
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn permission_answer_failure_preserves_recovery_card() {
+    answer_failure_preserves_recovery_card(false).await;
+}
+
+#[tokio::test]
+async fn question_answer_failure_preserves_recovery_card() {
+    answer_failure_preserves_recovery_card(true).await;
+}

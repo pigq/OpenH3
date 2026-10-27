@@ -716,6 +716,7 @@ impl ConversationService {
             runtime_state: Arc::clone(&self.runtime_state),
             title_only,
             pending_started_ttl: crate::background_stream::PENDING_STARTED_TTL,
+            orphan_turn_idle: std::time::Duration::from_millis(crate::background_stream::ORPHAN_TURN_IDLE_MS),
         };
         let rx = agent.subscribe();
         let join = tokio::spawn(watcher.run(rx));
@@ -3484,7 +3485,9 @@ impl ConversationService {
             .find(|c| c.call_id == call_id)
             .map(|c| c.id.clone());
 
-        agent.confirm(&req.msg_id, call_id, req.data, req.always_allow)?;
+        agent
+            .confirm_and_wait(&req.msg_id, call_id, req.data, req.always_allow)
+            .await?;
 
         if let Some(conf_id) = conf_id {
             let payload = serde_json::json!({
@@ -3532,7 +3535,7 @@ impl ConversationService {
             .find(|c| c.call_id == request_id)
             .map(|c| c.id.clone());
 
-        agent.answer_ask(request_id, answers)?;
+        agent.answer_ask_and_wait(request_id, answers).await?;
 
         if let Some(conf_id) = conf_id {
             let payload = serde_json::json!({

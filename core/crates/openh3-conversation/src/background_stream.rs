@@ -40,10 +40,13 @@ use crate::service::ConversationService;
 use crate::stream_persistence::StreamPersistenceAdapter;
 use crate::stream_relay::StreamRelay;
 
-/// An orphan turn with NO frame for this long is presumed abandoned (a stray
-/// content frame with no terminal); the feeder closes and the relay finalizes
-/// with what it has, so the watcher can never be wedged forever.
-const ORPHAN_TURN_IDLE_MS: u64 = 180_000;
+/// Emit a liveness warning after this long without a frame from an orphan turn.
+///
+/// This is deliberately an observability interval, not a turn deadline. A
+/// detached Bash command, a model's long thinking phase, or a remote provider
+/// can legitimately be silent for longer than three minutes. Closing the relay
+/// here would manufacture a terminal and lose the eventual output.
+pub(crate) const ORPHAN_TURN_IDLE_MS: u64 = 180_000;
 
 /// How long a `MessageLifecycle{Started}` echo stays armed as "the next
 /// agent-started turn serves a user message" before it is presumed lost.
@@ -74,6 +77,10 @@ pub(crate) struct BackgroundStreamWatcher {
     /// Expiry for a pending `MessageLifecycle{Started}` (see
     /// [`PENDING_STARTED_TTL`]); injectable so tests can use a short bound.
     pub pending_started_ttl: std::time::Duration,
+    /// Silence interval for orphan-turn liveness diagnostics. This is not a
+    /// terminal deadline; it is injectable so the no-truncation contract can
+    /// be tested without waiting three minutes.
+    pub orphan_turn_idle: std::time::Duration,
 }
 
 impl BackgroundStreamWatcher {
@@ -426,12 +433,14 @@ impl BackgroundStreamWatcher {
         let mut relay_task = tokio::spawn(relay.consume(feed_rx));
         let _ = feed_tx.send(first);
 
-        let idle = std::time::Duration::from_millis(ORPHAN_TURN_IDLE_MS);
+        let idle = self.orphan_turn_idle;
+        let mut warned_silent = false;
         let outcome = loop {
             tokio::select! {
                 joined = &mut relay_task => break joined,
                 next = tokio::time::timeout(idle, rx.recv()) => match next {
                     Ok(Ok(ev)) => {
+                        warned_silent = false;
                         // A user turn starting mid-orphan-turn takes the stream
                         // over; stop feeding so two relays never double-process.
                         // Our OWN claim (an agent turn serving a user message)
@@ -451,11 +460,24 @@ impl BackgroundStreamWatcher {
                         }
                         let _ = feed_tx.send(ev);
                     }
-                    // Source closed (instance torn down) or idle too long: close
-                    // the feed so the relay finalizes with what it has.
-                    Ok(Err(broadcast::error::RecvError::Closed)) | Err(_) => {
+                    // Source closed (instance torn down): close the feed so the
+                    // relay finalizes with the last confirmed state. A timeout
+                    // is only a liveness diagnostic; it must not finalize an
+                    // otherwise healthy long-running task.
+                    Ok(Err(broadcast::error::RecvError::Closed)) => {
                         drop(feed_tx);
                         break relay_task.await;
+                    }
+                    Err(_) => {
+                        if !warned_silent {
+                            warn!(
+                                conversation_id = %self.conversation_id,
+                                turn_id = %turn_id,
+                                idle_ms = idle.as_millis() as u64,
+                                "background stream: orphan turn silent; keeping relay alive"
+                            );
+                            warned_silent = true;
+                        }
                     }
                     Ok(Err(broadcast::error::RecvError::Lagged(n))) => {
                         warn!(lagged = n, "background stream: orphan turn feed lagged");
@@ -528,14 +550,28 @@ mod tests {
     }
 
     async fn rig() -> Rig {
-        rig_with_opts(false, PENDING_STARTED_TTL).await
+        rig_with_opts(
+            false,
+            PENDING_STARTED_TTL,
+            std::time::Duration::from_millis(ORPHAN_TURN_IDLE_MS),
+        )
+        .await
     }
 
     async fn rig_with(title_only: bool) -> Rig {
-        rig_with_opts(title_only, PENDING_STARTED_TTL).await
+        rig_with_opts(
+            title_only,
+            PENDING_STARTED_TTL,
+            std::time::Duration::from_millis(ORPHAN_TURN_IDLE_MS),
+        )
+        .await
     }
 
-    async fn rig_with_opts(title_only: bool, pending_started_ttl: std::time::Duration) -> Rig {
+    async fn rig_with_opts(
+        title_only: bool,
+        pending_started_ttl: std::time::Duration,
+        orphan_turn_idle: std::time::Duration,
+    ) -> Rig {
         let db = init_database_memory().await.unwrap();
         let user_repo = SqliteUserRepository::new(db.pool().clone());
         let user = user_repo.create_user("user-1", "hash").await.unwrap();
@@ -572,6 +608,7 @@ mod tests {
             runtime_state: Arc::clone(&runtime_state),
             title_only,
             pending_started_ttl,
+            orphan_turn_idle,
         };
         let handle = tokio::spawn(watcher.run(tx.subscribe()));
         Rig {
@@ -725,6 +762,53 @@ mod tests {
         }
         assert!(saw_content, "the report streams to the live view");
         assert!(saw_completed, "the orphan turn is book-kept like a real turn");
+    }
+
+    /// A long-running detached command may not emit a frame for several minutes.
+    /// The idle watchdog is diagnostic only: it must not turn silence into a
+    /// successful terminal before the CLI reports the actual finish.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn silent_orphan_turn_stays_open_until_terminal_frame() {
+        let rig = rig_with_opts(false, PENDING_STARTED_TTL, std::time::Duration::from_millis(20)).await;
+        let mut ws = rig.bus.subscribe();
+        rig.tx
+            .send(AgentStreamEvent::Text(TextEventData {
+                content: "started".into(),
+            }))
+            .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                let event = ws.recv().await.unwrap();
+                if event.name == "message.stream" && event.data["type"] == "content" {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("orphan output must reach the normal relay");
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let mut completed_during_silence = false;
+        while let Ok(event) = ws.try_recv() {
+            completed_during_silence |= event.name == "turn.completed";
+        }
+        assert!(
+            !completed_during_silence,
+            "idle diagnostics must not turn silence into a terminal"
+        );
+
+        rig.tx
+            .send(AgentStreamEvent::Finish(FinishEventData::default()))
+            .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                if ws.recv().await.unwrap().name == "turn.completed" {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("the eventual CLI terminal must complete the orphan turn");
     }
 
     /// A `settle_only` frame updates an EXISTING row and forwards; for an
@@ -982,7 +1066,12 @@ mod tests {
     /// exec (#758's regression).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn stale_started_without_terminal_echo_does_not_claim_a_later_turn() {
-        let rig = rig_with_opts(false, std::time::Duration::from_millis(50)).await;
+        let rig = rig_with_opts(
+            false,
+            std::time::Duration::from_millis(50),
+            std::time::Duration::from_millis(ORPHAN_TURN_IDLE_MS),
+        )
+        .await;
         rig.tx
             .send(AgentStreamEvent::MessageLifecycle(MessageLifecycleData {
                 client_msg_id: "cmsg-lost".into(),

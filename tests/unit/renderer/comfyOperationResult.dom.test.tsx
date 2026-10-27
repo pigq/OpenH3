@@ -121,6 +121,8 @@ describe('ComfyUI installation approval card', () => {
       mocks.bind,
       mocks.prefill,
     ].forEach((fn) => fn.mockReset());
+    mocks.mutate.mockResolvedValue(undefined);
+    mocks.globalMutate.mockResolvedValue(undefined);
     mocks.authorize.mockResolvedValue({ ...mocks.operation, state: 'authorized' });
     mocks.send.mockResolvedValue({ turn_id: 'turn-2', runtime: {}, msg_id: 'msg-2' });
     mocks.profiles.mockResolvedValue([
@@ -258,29 +260,27 @@ describe('ComfyUI installation approval card', () => {
     mocks.operation.state = 'completed';
     render(<ComfyOperationResult id={mocks.operation.id} conversationId='conv-1' />);
     fireEvent.click(screen.getByRole('button', { name: 'guid.comfy.actions.repair' }));
-    await waitFor(() =>
-      expect(mocks.prefill).toHaveBeenCalledWith('conv-1', expect.stringContaining('guid.comfy.prompts.repair'))
-    );
+    await waitFor(() => expect(mocks.prefill).toHaveBeenCalledWith('conv-1', 'guid.comfy.prompts.repair'));
     expect(mocks.bind).toHaveBeenCalledWith('request-1', 'conv-1', 'qwen-fp8', 'qwen-edit', 'repair', {
       source: 'local',
       kind: 'image',
     });
     expect(mocks.send).not.toHaveBeenCalled();
     expect(mocks.authorize).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('drafts another version without carrying the installed profile into the new target', async () => {
     mocks.operation.state = 'completed';
     render(<ComfyOperationResult id={mocks.operation.id} conversationId='conv-1' />);
     fireEvent.click(screen.getByRole('button', { name: 'guid.comfy.actions.install-other' }));
-    await waitFor(() =>
-      expect(mocks.prefill).toHaveBeenCalledWith('conv-1', expect.stringContaining('guid.comfy.prompts.install-other'))
-    );
+    await waitFor(() => expect(mocks.prefill).toHaveBeenCalledWith('conv-1', 'guid.comfy.prompts.install-other'));
     expect(mocks.bind).toHaveBeenCalledWith('request-1', 'conv-1', undefined, 'qwen-edit', 'install-other', {
       source: 'local',
       kind: 'image',
     });
     expect(mocks.send).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('keeps a completed profile unavailable for use if its latest verification is invalid', async () => {

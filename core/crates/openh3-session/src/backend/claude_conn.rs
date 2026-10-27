@@ -1092,11 +1092,17 @@ impl ClaudeSessionBackend {
         answers: &[super::types::QuestionAnswer],
     ) -> Result<CommandReceipt, BackendError> {
         use std::sync::atomic::Ordering;
+        // Serialize answer lookup/write/commit on the stdin writer. Keep the
+        // request in the recovery map until delivery succeeds; a failed write
+        // must not turn a retryable approval into an unknown request. Looking it
+        // up after this lock also prevents concurrent clients answering twice.
+        let mut guard = self.stdin.lock().await;
         let pending = self
             .pending_perms
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .remove(request_id);
+            .get(request_id)
+            .cloned();
         let Some(pending) = pending else {
             return Err(BackendError::Transport(format!(
                 "no pending permission for request_id {request_id}"
@@ -1104,7 +1110,6 @@ impl ClaudeSessionBackend {
         };
         let response = build_control_response(request_id, &pending, decision, selected, answers);
         {
-            let mut guard = self.stdin.lock().await;
             let stdin = guard
                 .as_mut()
                 .ok_or_else(|| BackendError::Transport("claude stdin unavailable".into()))?;
@@ -1113,6 +1118,11 @@ impl ClaudeSessionBackend {
                 .await
                 .map_err(|e| BackendError::Transport(format!("write control_response: {e}")))?;
         }
+        self.pending_perms
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(request_id);
+        drop(guard);
         // Production-diagnosable lifecycle marker: the wedge class "user approved
         // but claude never resumed" hinges on whether this write happened.
         tracing::info!(
@@ -1165,11 +1175,13 @@ impl ClaudeSessionBackend {
         answers: Option<Vec<super::types::QuestionAnswer>>,
     ) -> Result<CommandReceipt, BackendError> {
         use std::sync::atomic::Ordering;
+        let mut guard = self.stdin.lock().await;
         let pending = self
             .pending_perms
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .remove(request_id);
+            .get(request_id)
+            .cloned();
         let Some(pending) = pending else {
             return Err(BackendError::Transport(format!(
                 "no pending ask for request_id {request_id}"
@@ -1181,7 +1193,6 @@ impl ClaudeSessionBackend {
         };
         let response = build_control_response(request_id, &pending, decision, None, answer_slice);
         {
-            let mut guard = self.stdin.lock().await;
             let stdin = guard
                 .as_mut()
                 .ok_or_else(|| BackendError::Transport("claude stdin unavailable".into()))?;
@@ -1190,6 +1201,11 @@ impl ClaudeSessionBackend {
                 .await
                 .map_err(|e| BackendError::Transport(format!("write control_response: {e}")))?;
         }
+        self.pending_perms
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(request_id);
+        drop(guard);
         // Lifecycle marker, same wedge class as permission answers: "user answered
         // but claude never resumed" hinges on whether this write happened.
         tracing::info!(
@@ -5080,6 +5096,52 @@ mod tests {
             backend.pending_permission_requests().is_empty(),
             "answered permission no longer outstanding"
         );
+    }
+
+    #[tokio::test]
+    async fn failed_permission_write_keeps_request_recoverable() {
+        for ask in [false, true] {
+            let fake = FakeAgentIo::never_exits(Vec::new());
+            let backend = ClaudeSessionBackend::build_with_io("s", Box::new(fake)).await;
+            backend.pending_perms.lock().unwrap().insert(
+                "retry-request".into(),
+                PendingPerm {
+                    tool_use_id: "retry-tool".into(),
+                    tool_name: if ask { "AskUserQuestion" } else { "Bash" }.into(),
+                    input: serde_json::json!({}),
+                },
+            );
+            let stdin = backend.stdin.lock().await.take();
+            let command = if ask {
+                Command::AnswerAsk {
+                    request_id: "retry-request".into(),
+                    answers: None,
+                }
+            } else {
+                Command::AnswerPermission {
+                    request_id: "retry-request".into(),
+                    decision: super::super::types::PermissionDecision::Approved,
+                    selected: None,
+                    answers: Vec::new(),
+                }
+            };
+            let error = backend
+                .dispatch(command.clone())
+                .await
+                .expect_err("stdin is unavailable");
+            assert!(error.to_string().contains("stdin unavailable"), "{error}");
+            assert_eq!(
+                backend.pending_permission_requests().len(),
+                1,
+                "a failed answer must remain recoverable (ask={ask})"
+            );
+            *backend.stdin.lock().await = stdin;
+            backend
+                .dispatch(command)
+                .await
+                .expect("the original request can be answered again");
+            assert!(backend.pending_permission_requests().is_empty());
+        }
     }
 
     /// G-A regression: `dispatch(Cancel)` MUST write a `control_request{subtype:

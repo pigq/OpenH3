@@ -22,6 +22,8 @@ export interface ElectronBridgeAPI {
   // Forward feedback diagnostics logs to the main process console / 转发反馈诊断日志到主进程控制台
   logFeedbackEvent?: (payload: { details?: unknown; level: 'info' | 'warn' | 'error'; message: string }) => void;
   recoverCorruptedDatabase?: () => Promise<void>;
+  /** Waits until backend bootstrap migrations have completed. */
+  waitForBackendMigrations?: () => Promise<boolean>;
   /** Fetches a short-lived in-process capability for UI-only media consent. */
   getMediaServiceUiToken?: () => Promise<string | null>;
 }
