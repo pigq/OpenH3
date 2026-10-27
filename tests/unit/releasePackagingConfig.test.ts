@@ -1,12 +1,31 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
+import { runInNewContext } from 'node:vm';
+import { load } from 'js-yaml';
 
 const projectRoot = resolve(__dirname, '../..');
 const itWithBashAndNode =
   spawnSync('bash', ['-lc', 'command -v node >/dev/null'], { encoding: 'utf8' }).status === 0 ? it : it.skip;
+// The publication guard runs on Ubuntu and requires GNU realpath flags.
+const itWithContentGuardTools =
+  spawnSync('bash', ['-c', 'command -v node >/dev/null && realpath -e -- . >/dev/null 2>&1'], {
+    cwd: projectRoot,
+    encoding: 'utf8',
+  }).status === 0
+    ? it
+    : it.skip;
 
 function readProjectFile(path: string): string {
   return readFileSync(resolve(projectRoot, path), 'utf8');
@@ -21,6 +40,382 @@ function yamlBlock(content: string, key: string): string {
   const nextTopLevelKey = rest.search(/^[a-zA-Z][a-zA-Z0-9]*:\s*$/m);
   return nextTopLevelKey === -1 ? rest : rest.slice(0, nextTopLevelKey);
 }
+
+type ManualWorkflow = {
+  on: { workflow_dispatch: { inputs: Record<string, { default?: unknown; required?: boolean; options?: string[] }> } };
+  permissions: Record<string, string>;
+  jobs: Record<
+    string,
+    {
+      if?: string;
+      uses?: string;
+      needs?: string | string[];
+      with?: Record<string, unknown>;
+      secrets?: string;
+      environment?: string;
+      permissions?: Record<string, string>;
+      concurrency?: { group: string; 'cancel-in-progress': boolean };
+      'runs-on'?: string;
+      strategy?: { 'fail-fast'?: boolean; matrix: { scenario: string[] } };
+      steps?: {
+        id?: string;
+        name?: string;
+        uses?: string;
+        if?: string;
+        with?: Record<string, unknown>;
+        env?: Record<string, string>;
+        run?: string;
+      }[];
+    }
+  >;
+};
+
+function manualWorkflow(): ManualWorkflow {
+  return load(readProjectFile('.github/workflows/build-manual.yml')) as ManualWorkflow;
+}
+
+type JobResult = 'success' | 'failure' | 'cancelled' | 'skipped';
+
+function selectManualJobs(
+  mode: string,
+  repository: string,
+  ref: string,
+  completed: Record<string, JobResult> = {}
+): { selected: string[]; results: Record<string, JobResult> } {
+  const selected: string[] = [];
+  const results: Record<string, JobResult> = {};
+  for (const [id, job] of Object.entries(manualWorkflow().jobs)) {
+    expect(job.if, `${id} must have an explicit mode gate`).toBeTruthy();
+    const dependencies = job.needs ? (Array.isArray(job.needs) ? job.needs : [job.needs]) : [];
+    for (const dependency of dependencies)
+      expect(results[dependency], `Unresolved dependency ${dependency}`).toBeDefined();
+    const success = () => dependencies.every((dependency) => results[dependency] === 'success');
+    const expression = job.if!.replace(/^\s*\$\{\{|\}\}\s*$/g, '');
+    // GitHub implicitly adds success() unless the condition contains a status
+    // function. always() intentionally lets the evidence gate inspect failures
+    // and missing reports after a rejected/skipped producer.
+    const explicitStatus = /\b(?:always|success|failure|cancelled)\s*\(/.test(expression);
+    const condition = runInNewContext(expression, {
+      inputs: { mode },
+      github: {
+        repository,
+        ref,
+        ref_type: ref.startsWith('refs/tags/') ? 'tag' : 'branch',
+        event_name: 'workflow_dispatch',
+      },
+      needs: Object.fromEntries(dependencies.map((dependency) => [dependency, { result: results[dependency] }])),
+      always: () => true,
+      success,
+      failure: () => dependencies.some((dependency) => results[dependency] === 'failure'),
+      cancelled: () => dependencies.some((dependency) => results[dependency] === 'cancelled'),
+    });
+    if (condition && (explicitStatus || success())) {
+      selected.push(id);
+      results[id] = completed[id] ?? 'success';
+    } else results[id] = 'skipped';
+  }
+  return { selected, results };
+}
+
+describe('manual build, official content and installed acceptance mode isolation', () => {
+  it('reuses the existing workflow entry within its input and directory budget', () => {
+    const inputs = manualWorkflow().on.workflow_dispatch.inputs;
+    expect(inputs.mode).toMatchObject({
+      default: 'build',
+      options: ['build', 'official-content', 'windows-upgrade-acceptance'],
+    });
+    expect(Object.keys(inputs).length).toBeLessThanOrEqual(10);
+    expect(inputs.branch).toMatchObject({ default: 'main', required: true });
+    expect(inputs.platform.options).toEqual([
+      'macos-arm64',
+      'macos-x64',
+      'windows-x64',
+      'windows-arm64',
+      'linux-x64',
+      'linux-arm64',
+      'all',
+    ]);
+    expect(inputs.platform.default).toBe('macos-arm64');
+    expect(inputs.skip_code_quality.default).toBe(false);
+    expect(inputs.openh3_core_run_id.default).toBe('');
+    expect(inputs.aioncore_run_id.default).toBe('');
+    expect(inputs.content_source).toBeDefined();
+    expect(inputs.content_sequence).toBeDefined();
+    expect(inputs.content_source.required).not.toBe(true);
+    expect(inputs.content_sequence.required).not.toBe(true);
+    expect(inputs.rollback_reason.required).not.toBe(true);
+    expect(inputs.key_id).toBeUndefined();
+    expect(inputs.min_client_version).toBeUndefined();
+    expect(inputs.reviewed_source_sha).toMatchObject({ default: '', required: false });
+    expect(existsSync(resolve(projectRoot, '.github/workflows/publish-content-catalog.yml'))).toBe(false);
+    expect(readdirSync(resolve(projectRoot, '.github/workflows')).length).toBeLessThanOrEqual(14);
+  });
+
+  it.each([
+    ['build', 'pigq/OpenH3', 'refs/heads/main', ['prepare-matrix', 'build-pipeline']],
+    ['build', 'contributor/OpenH3', 'refs/heads/feature', ['prepare-matrix', 'build-pipeline']],
+    ['official-content', 'pigq/OpenH3', 'refs/heads/main', ['publish-official-content']],
+    ['official-content', 'pigq/OpenH3', 'refs/heads/feature', []],
+    ['official-content', 'contributor/OpenH3', 'refs/heads/main', []],
+    ['official-content', 'pigq/OpenH3', 'refs/tags/v3.0.1', []],
+    [
+      'windows-upgrade-acceptance',
+      'pigq/OpenH3',
+      'refs/heads/main',
+      ['acceptance-contracts', 'acceptance-candidate', 'acceptance-installed', 'acceptance-gate'],
+    ],
+    [
+      'windows-upgrade-acceptance',
+      'pigq/OpenH3',
+      'refs/heads/reviewed-candidate',
+      ['acceptance-contracts', 'acceptance-candidate', 'acceptance-installed', 'acceptance-gate'],
+    ],
+    ['windows-upgrade-acceptance', 'pigq/OpenH3', 'refs/tags/v3.0.1', ['acceptance-gate']],
+    ['windows-upgrade-acceptance', 'contributor/OpenH3', 'refs/heads/main', ['acceptance-gate']],
+    ['unknown', 'pigq/OpenH3', 'refs/heads/main', []],
+  ])('isolates %s jobs for %s at %s', (mode, repository, ref, expected) => {
+    expect(selectManualJobs(mode, repository, ref).selected).toEqual(expected);
+  });
+
+  it.each(['failure', 'cancelled', 'skipped'] as const)(
+    'skips dependent acceptance jobs after contracts %s while always running the evidence gate',
+    (result) => {
+      const selection = selectManualJobs('windows-upgrade-acceptance', 'pigq/OpenH3', 'refs/heads/main', {
+        'acceptance-contracts': result,
+      });
+      expect(selection.selected).toEqual(['acceptance-contracts', 'acceptance-gate']);
+      expect(selection.results['acceptance-candidate']).toBe('skipped');
+      expect(selection.results['acceptance-installed']).toBe('skipped');
+    }
+  );
+
+  it('keeps build dependencies gated and lets the final acceptance gate inspect an installed failure', () => {
+    expect(
+      selectManualJobs('build', 'pigq/OpenH3', 'refs/heads/main', { 'prepare-matrix': 'failure' }).selected
+    ).toEqual(['prepare-matrix']);
+    const acceptance = selectManualJobs('windows-upgrade-acceptance', 'pigq/OpenH3', 'refs/heads/main', {
+      'acceptance-installed': 'failure',
+    });
+    expect(acceptance.selected).toEqual([
+      'acceptance-contracts',
+      'acceptance-candidate',
+      'acceptance-installed',
+      'acceptance-gate',
+    ]);
+    expect(acceptance.results['acceptance-installed']).toBe('failure');
+  });
+
+  it('requires six isolated hosted acceptance scenarios from the reviewed dispatch SHA without inherited secrets', () => {
+    const workflow = manualWorkflow();
+    const names = ['acceptance-contracts', 'acceptance-candidate', 'acceptance-installed', 'acceptance-gate'];
+    expect(Object.keys(workflow.jobs).filter((name) => name.startsWith('acceptance-'))).toEqual(names);
+    for (const name of names) {
+      const job = workflow.jobs[name];
+      expect(job.permissions, name).toEqual({ contents: 'read', actions: 'read' });
+      expect(job.secrets, name).toBeUndefined();
+      expect(job.environment, name).toBeUndefined();
+      expect(job.if, name).toContain("inputs.mode == 'windows-upgrade-acceptance'");
+      expect(JSON.stringify(job), name).not.toContain('secrets.');
+      expect(JSON.stringify(job), name).not.toContain('CONTENT_SIGNING_PRIVATE_KEY');
+      for (const checkout of job.steps?.filter((step) => step.uses?.startsWith('actions/checkout@')) ?? [])
+        expect(checkout.with).toMatchObject({ ref: '${{ github.sha }}', 'persist-credentials': false, clean: true });
+    }
+    const contracts = workflow.jobs['acceptance-contracts'];
+    expect(contracts['runs-on']).toBe('windows-2022');
+    const preflight = contracts.steps!.find((step) => step.id === 'reviewed-source')!;
+    expect(preflight.env).toEqual({ REVIEWED_SOURCE_SHA: '${{ inputs.reviewed_source_sha }}' });
+    expect(preflight.run).toContain("'^[a-f0-9]{40}$'");
+    expect(preflight.run).toContain('$env:REVIEWED_SOURCE_SHA -cne $env:GITHUB_SHA');
+    expect(preflight.run).toContain('git rev-parse HEAD');
+    expect(preflight.run).toContain('$head -cne $env:GITHUB_SHA');
+    expect(preflight.run).toContain('git status --porcelain --untracked-files=no');
+    expect(preflight.run).toContain("$package.version -cne '3.0.1'");
+    const candidate = workflow.jobs['acceptance-candidate'];
+    expect(candidate.needs).toBe('acceptance-contracts');
+    expect(candidate.uses).toBe('./.github/workflows/_build-reusable.yml');
+    expect(candidate.with).toMatchObject({
+      ref: '${{ github.sha }}',
+      skip_code_quality: '${{ inputs.skip_code_quality }}',
+      append_commit_hash: false,
+      upload_installers_only: false,
+      acceptance_provenance: true,
+    });
+    expect(candidate.with).not.toHaveProperty('openh3_core_run_id');
+    expect(candidate.with).not.toHaveProperty('aioncore_run_id');
+    expect(JSON.parse(candidate.with!.matrix as string)).toEqual({
+      include: [
+        {
+          platform: 'windows-x64',
+          os: 'windows-2022',
+          arch: 'x64',
+          'artifact-name': 'windows-x64-installed-upgrade-build',
+          command: 'node scripts/build-with-builder.js x64 --win --x64',
+        },
+      ],
+    });
+    const installed = workflow.jobs['acceptance-installed'];
+    expect(installed.needs).toBe('acceptance-candidate');
+    expect(installed['runs-on']).toBe('windows-2022');
+    expect(installed.strategy).toEqual({
+      'fail-fast': false,
+      matrix: {
+        scenario: ['manual-migration', 'cancel', 'disconnect', 'corrupt', 'downloaded-quit', 'install'],
+      },
+    });
+    const download = installed.steps!.find((step) => step.uses?.startsWith('actions/download-artifact@'))!;
+    expect(download.with).toMatchObject({
+      name: 'windows-installed-upgrade-candidate-${{ github.run_id }}-${{ github.run_attempt }}',
+    });
+    expect(download.with).not.toHaveProperty('run-id');
+    expect(download.with).not.toHaveProperty('github-token');
+    const acceptance = installed.steps!.find((step) => step.id === 'installed-acceptance')!;
+    expect(acceptance.run).toContain('installed-upgrade.mjs --scenario $env:SCENARIO --source-sha $env:GITHUB_SHA');
+    expect(acceptance.run).toContain('$LASTEXITCODE -ne 0');
+    expect(acceptance.env).toEqual({ GITHUB_TOKEN: '${{ github.token }}' });
+    const upload = installed.steps!.find((step) => step.uses?.startsWith('actions/upload-artifact@'))!;
+    expect(upload.if).toContain('always()');
+    expect(upload.with).toMatchObject({
+      name: 'windows-upgrade-evidence-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.scenario }}',
+      'if-no-files-found': 'error',
+    });
+    const gate = workflow.jobs['acceptance-gate'];
+    expect(gate.if).toContain('always()');
+    expect(gate.needs).toEqual(names.slice(0, 3));
+    expect(
+      gate.steps!.some((step) => step.run?.includes('packages/shared-scripts/acceptance/runner/flows/gate.mjs'))
+    ).toBe(true);
+    expect(gate.steps!.find((step) => step.uses?.startsWith('actions/download-artifact@'))!.with).toMatchObject({
+      pattern: 'windows-upgrade-evidence-${{ github.run_id }}-${{ github.run_attempt }}-*',
+      'merge-multiple': false,
+    });
+  });
+
+  it('keeps reusable acceptance provenance opt-in and binds the original candidate bytes in the successful build job', () => {
+    const reusable = load(readProjectFile('.github/workflows/_build-reusable.yml')) as {
+      on: { workflow_call: { inputs: Record<string, { type: string; default: unknown }> } };
+      jobs: ManualWorkflow['jobs'];
+    };
+    expect(reusable.on.workflow_call.inputs.acceptance_provenance).toMatchObject({ type: 'boolean', default: false });
+    expect(manualWorkflow().jobs['build-pipeline'].with).not.toHaveProperty('acceptance_provenance');
+    const steps = reusable.jobs.build.steps!;
+    const packIndex = steps.findIndex((step) => step.id === 'acceptance-candidate');
+    expect(packIndex).toBeGreaterThan(steps.findIndex((step) => step.id === 'windows-build'));
+    expect(packIndex).toBeLessThan(steps.findIndex((step) => step.name === 'Clean up non-installer artifacts'));
+    const pack = steps[packIndex];
+    for (const predicate of [
+      'success()',
+      'inputs.acceptance_provenance',
+      "matrix.platform == 'windows-x64'",
+      "matrix.arch == 'x64'",
+      "steps.windows-build.outputs.result == 'success'",
+    ])
+      expect(pack.if).toContain(predicate);
+    expect(pack.run).toContain('$head -cne $env:GITHUB_SHA');
+    expect(pack.run).toContain('git diff --exit-code --');
+    expect(pack.run).toContain('git diff --cached --exit-code --');
+    expect(pack.run).toContain('Copy-Item -LiteralPath');
+    expect(pack.run).toContain('OpenH3-3.0.1-win-x64.exe');
+    expect(pack.run).toContain('latest.yml');
+    expect(pack.run).toContain('candidate-bundle.mjs --source-sha $env:GITHUB_SHA');
+    expect(pack.run).not.toContain('Set-Content');
+    expect(steps[packIndex + 1].with).toMatchObject({
+      name: 'windows-installed-upgrade-candidate-${{ github.run_id }}-${{ github.run_attempt }}',
+      'if-no-files-found': 'error',
+    });
+    expect(steps[packIndex + 1].with!.path).toMatch(/bundle\/$/);
+  });
+
+  it('preserves the ordinary six-platform reusable build inputs, permissions and secrets', () => {
+    const workflow = manualWorkflow();
+    expect(workflow.jobs['build-pipeline']).toMatchObject({
+      needs: 'prepare-matrix',
+      uses: './.github/workflows/_build-reusable.yml',
+      permissions: { contents: 'write', actions: 'write' },
+      with: {
+        matrix: '${{ needs.prepare-matrix.outputs.matrix }}',
+        ref: '${{ inputs.branch }}',
+        skip_code_quality: '${{ inputs.skip_code_quality }}',
+        openh3_core_run_id: '${{ inputs.openh3_core_run_id || inputs.aioncore_run_id }}',
+        append_commit_hash: true,
+        upload_installers_only: true,
+      },
+      secrets: 'inherit',
+    });
+    const matrixScript = workflow.jobs['prepare-matrix'].steps![0].run!;
+    for (const platform of workflow.on.workflow_dispatch.inputs.platform.options!.filter((value) => value !== 'all')) {
+      expect(matrixScript).toContain(`"platform":"${platform}"`);
+      expect(matrixScript).toContain(`[ "$PLATFORM" = "${platform}" ]`);
+    }
+  });
+
+  it('scopes publication writes, approval, concurrency and the private key to content publication', () => {
+    const workflow = manualWorkflow();
+    expect(workflow.permissions).toEqual({ contents: 'read', actions: 'read' });
+    const publish = workflow.jobs['publish-official-content'];
+    expect(publish).toMatchObject({
+      environment: 'official-content',
+      permissions: { contents: 'write' },
+      concurrency: { group: 'official-content-publication', 'cancel-in-progress': false },
+    });
+    expect(publish.needs).toBeUndefined();
+    expect(publish.uses).toBeUndefined();
+    expect(publish.secrets).toBeUndefined();
+    const checkout = publish.steps!.find((step) => step.uses?.startsWith('actions/checkout@'));
+    expect(checkout?.with).toEqual({ ref: '${{ github.sha }}', 'persist-credentials': false });
+    const signing = publish.steps!.filter((step) => JSON.stringify(step).includes('CONTENT_SIGNING_PRIVATE_KEY'));
+    expect(signing).toHaveLength(1);
+    expect(signing[0].env).toMatchObject({
+      SIGNING_PEM: '${{ secrets.CONTENT_SIGNING_PRIVATE_KEY }}',
+      CONTENT_KEY_ID: 'openh3-content-20261024',
+      CONTENT_MIN_CLIENT: '3.0.1',
+      CONTENT_ROLLBACK_REASON: '${{ inputs.rollback_reason }}',
+    });
+    expect(signing[0].run).toContain('scripts/content-catalog/publish.mjs --publish');
+    expect(signing[0].run).toContain('--rollback-reason "$CONTENT_ROLLBACK_REASON"');
+    expect(signing[0].run).toContain('trap ');
+    expect(signing[0].run).toContain("flag:'wx'");
+    const validation = publish.steps!.find((step) => step.run?.includes('scripts/content-catalog/build.mjs'));
+    expect(validation?.env).toMatchObject({
+      CONTENT_SOURCE: '${{ inputs.content_source }}',
+      CONTENT_SEQUENCE: '${{ inputs.content_sequence }}',
+    });
+    expect(publish.steps!.indexOf(validation!)).toBeLessThan(publish.steps!.indexOf(signing[0]));
+    expect(publish.steps!.some((step) => step.if === 'always()' && step.run?.includes('fs.rmSync'))).toBe(true);
+    expect(JSON.stringify(workflow.jobs['build-pipeline'])).not.toContain('CONTENT_SIGNING_PRIVATE_KEY');
+    expect(
+      readProjectFile('.github/workflows/build-manual.yml').match(/secrets\.CONTENT_SIGNING_PRIVATE_KEY/g)
+    ).toHaveLength(1);
+    for (const step of publish.steps!) expect(step.run ?? '').not.toContain('${{ inputs.');
+  });
+
+  itWithContentGuardTools('rejects content sources outside the reviewed commit before building or signing', () => {
+    const validation = manualWorkflow().jobs['publish-official-content'].steps!.find((step) =>
+      step.run?.includes('scripts/content-catalog/build.mjs')
+    );
+    const guard = validation!.run!.split('node scripts/content-catalog/build.mjs')[0];
+    mkdirSync(resolve(projectRoot, '.runtime'), { recursive: true });
+    const tempDir = mkdtempSync(resolve(projectRoot, '.runtime/content-workflow-inputs-'));
+    const untracked = resolve(tempDir, 'source.json');
+    writeFileSync(untracked, '{}');
+    try {
+      for (const [source, sequence, success] of [
+        ['package.json', '1', true],
+        [relative(projectRoot, untracked).replaceAll('\\', '/'), '1', false],
+        ['', '1', false],
+        ['package.json', '', false],
+      ] as const) {
+        const result = spawnSync('bash', ['-c', guard], {
+          cwd: projectRoot,
+          encoding: 'utf8',
+          env: { ...process.env, GITHUB_WORKSPACE: projectRoot, CONTENT_SOURCE: source, CONTENT_SEQUENCE: sequence },
+        });
+        expect(result.status === 0, `${source} / ${sequence}: ${result.stdout}\n${result.stderr}`).toBe(success);
+      }
+    } finally {
+      rmSync(tempDir, { force: true, recursive: true });
+    }
+  });
+});
 
 describe('release packaging configuration', () => {
   it('checks the default branch and supports manual quality verification', () => {

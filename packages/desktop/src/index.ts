@@ -32,6 +32,8 @@ import { ProcessConfig } from './process/utils/initStorage';
 import type { BackendStartupFailureInfo } from './common/types/platform/electron';
 import { registerWindowMaximizeListeners } from '@process/bridge';
 import { BackendLifecycleManager } from '@openh3/web-host';
+import { createContentRuntime } from './process/services/contentCatalog/builtin';
+let contentRuntime: Awaited<ReturnType<typeof createContentRuntime>> | undefined;
 import { resolveBinaryPath } from '@process/backend';
 import './process/bridge/feedbackBridge';
 import { wasLaunchedAtLogin } from '@process/bridge/applicationBridge';
@@ -576,6 +578,7 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
         autoUpdaterService.initialize(statusBroadcast);
         autoUpdaterService.setBeforeQuitAndInstall(async () => {
           await backendManager.stop();
+          await contentRuntime?.stop();
         });
         if (!process.env.IS_DISCONTINUED_BUILD) {
           const stopUpdateChecks = scheduleUpdateChecks(() => {
@@ -844,6 +847,16 @@ const handleAppReady = async (): Promise<void> => {
         const { getDataPath } = await import('./process/utils/utils');
         const { getSystemDir } = await import('./process/utils/initStorage');
         const sysDir = getSystemDir();
+        if (!contentRuntime) {
+          contentRuntime = await createContentRuntime(
+            app.isPackaged
+              ? path.join(process.resourcesPath, 'content-catalog')
+              : path.resolve(__dirname, '../content-catalog'),
+            getDataPath(),
+            app.getVersion()
+          );
+          backendManager.configureContentHost(contentRuntime.host);
+        }
         return backendManager.start(
           getDataPath(),
           sysDir.logDir,
@@ -1220,7 +1233,10 @@ installQuitCleanup({
   },
   // Stop aioncore subprocess — backend shutdown kills all agent children
   // transitively (no separate frontend workerTaskManager remains).
-  stopBackend: () => backendManager.stop(),
+  stopBackend: async () => {
+    await backendManager.stop();
+    await contentRuntime?.stop();
+  },
   destroyPetWindow: async () => {
     const { destroyPetWindow } = await import('./process/pet/petManager');
     destroyPetWindow();

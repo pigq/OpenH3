@@ -1,3 +1,6 @@
+import { useContentCatalog } from '@/renderer/components/ContentCatalog/useContentCatalog';
+import { captureTemplateSnapshot } from '@/common/contentCatalog/snapshot';
+import { setGuidTemplateSnapshot } from './hooks/useGuidDraft';
 /**
  * @license
  * Copyright 2025 AionUi (aionui.com)
@@ -69,6 +72,7 @@ const GuidPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const isAiCreationPage = location.pathname === '/ai-creation';
+  const content = useContentCatalog(isAiCreationPage);
   const [templateFocusKey, setTemplateFocusKey] = useState<string>();
   const [creationIntent, setCreationIntentState] = useState<ComfyDraftIntent>(readComfyDraftIntent);
   const setCreationIntent = useCallback((intent?: ComfyDraftIntent) => {
@@ -315,6 +319,7 @@ const GuidPage: React.FC = () => {
   // --- Coordinated handlers (depend on multiple hooks) ---
   const handleComfyAction = useCallback(
     (intent: ComfyDraftIntent) => {
+      setGuidTemplateSnapshot(undefined);
       setCreationIntent(intent);
       guidInput.setInput(
         t(`guid.comfy.prompts.${intent.intent}`, {
@@ -786,7 +791,15 @@ const GuidPage: React.FC = () => {
 
           {isAiCreationPage ? (
             <>
+              {content.pending && (
+                <Button type='secondary' onClick={content.accept}>
+                  {t('update.content.refreshPage')}
+                </Button>
+              )}
+              {content.error && <p role='status'>{t('update.content.unavailable')}</p>}
+              {content.loading && <p role='status'>{t('update.content.loading')}</p>}
               <ComfyModelCards
+                catalog={content.current}
                 profiles={creation.profiles}
                 selectedProfileId={creation.selection.source === 'local' ? creation.model.profileId : undefined}
                 loading={creation.isLoading}
@@ -804,9 +817,19 @@ const GuidPage: React.FC = () => {
                 }}
               />
               <CreationTemplates
+                catalog={content.current}
                 onUseTemplate={(prompt, template) => {
                   setCreationIntent(undefined);
                   guidInput.setInput(prompt);
+                  if (content.current)
+                    setGuidTemplateSnapshot(
+                      captureTemplateSnapshot(
+                        template,
+                        content.current.releaseSequence,
+                        i18n.language,
+                        content.current.defaultLocale
+                      )
+                    );
                   creation.setSelection((previous) => ({ ...previous, kind: template.kind }));
                   setTemplateFocusKey(crypto.randomUUID());
                 }}

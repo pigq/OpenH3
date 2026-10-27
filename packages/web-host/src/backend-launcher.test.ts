@@ -229,6 +229,26 @@ describe('buildSpawnArgs', () => {
 });
 
 describe('buildSpawnEnv', () => {
+  it('does not inherit stale content credentials and only injects the explicit host handle', () => {
+    const priorPort = process.env.OPENH3_CONTENT_PORT,
+      priorToken = process.env.OPENH3_CONTENT_TOKEN;
+    process.env.OPENH3_CONTENT_PORT = '1111';
+    process.env.OPENH3_CONTENT_TOKEN = 'stale';
+    try {
+      expect(buildSpawnEnv()).not.toHaveProperty('OPENH3_CONTENT_TOKEN');
+      expect(buildSpawnEnv()).not.toHaveProperty('OPENH3_CONTENT_PORT');
+      expect(buildSpawnEnv(undefined, { port: 2222, token: 'test-token' })).toMatchObject({
+        OPENH3_CONTENT_PORT: '2222',
+        OPENH3_CONTENT_TOKEN: 'test-token',
+      });
+      expect(process.env.OPENH3_CONTENT_TOKEN).toBe('stale');
+    } finally {
+      if (priorPort === undefined) delete process.env.OPENH3_CONTENT_PORT;
+      else process.env.OPENH3_CONTENT_PORT = priorPort;
+      if (priorToken === undefined) delete process.env.OPENH3_CONTENT_TOKEN;
+      else process.env.OPENH3_CONTENT_TOKEN = priorToken;
+    }
+  });
   it('merges process.env with canonical and legacy dir vars', () => {
     const env = buildSpawnEnv({
       cacheDir: '/c',

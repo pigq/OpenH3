@@ -19,7 +19,11 @@ import { buildSendFailureError } from './buildSendFailureError';
 import { h3JobApi } from '@/common/chat/document/h3JobApi';
 import { comfyApi } from '@/common/chat/document/creation/comfyApi';
 import type { ComfyFamily, ComfyIntent } from '@/common/chat/document/creation/comfy';
-import { clearGuidDraftIfMatches } from '@/renderer/pages/guid/hooks/useGuidDraft';
+import {
+  clearGuidDraftIfMatches,
+  getGuidDraftScope,
+  isGuidDraftScopeCurrent,
+} from '@/renderer/pages/guid/hooks/useGuidDraft';
 import { beginComfySelectionChange } from '../../runtime/Creation/useComfySelectionPending';
 
 type UseAcpInitialMessageParams = {
@@ -67,6 +71,8 @@ export const useAcpInitialMessage = ({
     const sendInitialMessage = async () => {
       try {
         const initialMessage = JSON.parse(storedMessage);
+        const guidDraftScope = getGuidDraftScope();
+        if (!isGuidDraftScopeCurrent(initialMessage.guidDraftScope)) return;
         const input = typeof initialMessage.input === 'string' ? initialMessage.input : '';
         // Guid-page initial files are source-tagged ChatFileRefs (`local` for
         // backend-machine picks, `upload` for device uploads). Body stays plain
@@ -88,6 +94,7 @@ export const useAcpInitialMessage = ({
             intent?: ComfyIntent;
             source?: 'local' | 'cloud';
             kind?: 'image' | 'video';
+            templateSnapshot?: import('@/common/contentCatalog/snapshot').TemplateSnapshot;
           };
           const bound = await comfyApi.bind(
             initialMessage.creationRequestId,
@@ -98,6 +105,7 @@ export const useAcpInitialMessage = ({
             {
               source: request.source ?? 'local',
               kind: request.kind ?? 'image',
+              templateSnapshot: request.templateSnapshot,
             }
           );
           if (!bound.ok) throw new Error(t('guid.creation.toolsUnavailable'));
@@ -109,7 +117,7 @@ export const useAcpInitialMessage = ({
           bindingPending = false;
         }
         // An empty creation entry only binds its tools; the chat opens idle.
-        if (!input.trim()) return;
+        if (!input.trim() || guidDraftScope !== getGuidDraftScope()) return;
 
         markSendStarted?.();
         setAiProcessing(true);
@@ -121,7 +129,8 @@ export const useAcpInitialMessage = ({
           files,
         });
         markSendAccepted?.(result.turn_id, result.runtime, result.msg_id);
-        if (typeof initialMessage.guidDraft === 'string') clearGuidDraftIfMatches(initialMessage.guidDraft);
+        if (typeof initialMessage.guidDraft === 'string')
+          clearGuidDraftIfMatches(initialMessage.guidDraft, guidDraftScope);
 
         // Initial message sent successfully
         emitter.emit('chat.history.refresh');

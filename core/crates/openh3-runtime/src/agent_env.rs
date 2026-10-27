@@ -67,6 +67,8 @@ fn clean_agent_env(env: &mut BTreeMap<OsString, OsString>) {
         "CLAUDECODE",
         "SSL_CERT_FILE",
         "SSL_CERT_DIR",
+        "OPENH3_CONTENT_TOKEN",
+        "OPENH3_CONTENT_PORT",
     ] {
         remove_env_key(env, key);
     }
@@ -263,6 +265,16 @@ mod tests {
     use std::path::Path;
 
     const CHILD_MARKER: &str = "AIONUI_RUNTIME_AGENT_ENV_TEST_CHILD";
+
+    #[test]
+    fn content_host_credentials_never_reach_agents() {
+        let env = build_agent_process_env(
+            vec![("OPENH3_CONTENT_TOKEN".into(), "private".into())],
+            vec![("OPENH3_CONTENT_PORT".into(), "1234".into())],
+        );
+        assert!(get_env_value(&env, "OPENH3_CONTENT_TOKEN").is_none());
+        assert!(get_env_value(&env, "OPENH3_CONTENT_PORT").is_none());
+    }
 
     #[cfg(unix)]
     #[tokio::test]

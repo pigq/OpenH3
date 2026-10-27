@@ -9,6 +9,20 @@ const usePresetAssistantInfoMock = vi.fn();
 const acpChatMock = vi.fn(() => <div data-testid='mock-acp-chat'>acp chat</div>);
 const acpModelSelectorMock = vi.fn(() => <div data-testid='mock-acp-model-selector'>model selector</div>);
 
+// Runtime lifecycle and the unselected Aionrs subtree have dedicated tests.
+// Keep this routing/rendering suite free of backend transports and bootstrap effects.
+vi.mock('@/renderer/pages/conversation/hooks/useActiveLease', () => ({
+  useActiveLease: vi.fn(),
+}));
+
+vi.mock('@/renderer/components/agent/AcpRuntimeRestartButton', () => ({
+  default: () => null,
+}));
+
+vi.mock('@/renderer/pages/conversation/platforms/aionrs/AionrsChat', () => ({
+  default: () => null,
+}));
+
 vi.mock('@/renderer/pages/conversation/Messages/MessageList', () => ({
   default: ({ className }: { className?: string }) => <div className={className}>message history</div>,
 }));

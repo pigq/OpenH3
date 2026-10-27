@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { z } from 'zod';
+import { templateSnapshotSchema, type TemplateSnapshot } from '@/common/contentCatalog/snapshot';
 import {
   comfyFamilySchema,
   comfyInstallPlanSchema,
@@ -36,6 +37,7 @@ const bindingSchema = z.object({
   intent: z.enum(['generate', 'install', 'repair', 'install-other']).default('generate'),
   source: z.enum(['local', 'cloud']).optional(),
   kind: z.enum(['image', 'video']).optional(),
+  templateSnapshot: templateSnapshotSchema.optional(),
 });
 export type ComfySelection = z.infer<typeof bindingSchema>;
 export type ComfyResourceScope = { requestId?: string; conversationId?: string };
@@ -282,6 +284,7 @@ export class ComfyService {
     if (profile && value.family && profile.family !== value.family) throw new Error('COMFY_FAMILY_MISMATCH');
     this.bindings.set(value.requestId, {
       ...value,
+      templateSnapshot: value.templateSnapshot ?? prior?.templateSnapshot,
       family: value.family ?? profile?.family,
       source: value.source ?? (value.family || profile ? 'local' : prior?.source),
       kind: value.kind ?? profile?.kind ?? (value.family ? comfyFamilyKind(value.family) : prior?.kind),
@@ -648,6 +651,7 @@ export class ComfyService {
       profile,
       input: parsed,
       submittedInput: clone(parsed),
+      templateSnapshot: clone(this.scope(requestId).templateSnapshot) as TemplateSnapshot | undefined,
       kind: profile.kind,
       status: 'queued',
       progress: 0,

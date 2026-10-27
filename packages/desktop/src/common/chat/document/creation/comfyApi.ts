@@ -1,4 +1,5 @@
 import type { ComfyFamily, ComfyGenerationJob, ComfyIntent, ComfyOperation, ComfyProfile } from './comfy';
+import type { TemplateSnapshot } from '@/common/contentCatalog/snapshot';
 
 /** Client for the application-owned local ComfyUI service. */
 async function request<T>(route: string, payload?: unknown): Promise<T> {
@@ -47,7 +48,7 @@ export const comfyApi = {
     profileId?: string,
     family?: ComfyFamily,
     intent?: ComfyIntent,
-    context?: { source: 'local' | 'cloud'; kind: 'image' | 'video' }
+    context?: { source: 'local' | 'cloud'; kind: 'image' | 'video'; templateSnapshot?: TemplateSnapshot }
   ): Promise<{ ok: boolean }> =>
     request('/api/comfy/bind', { requestId, conversationId, profileId, family, intent, ...context }),
 };

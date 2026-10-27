@@ -1,11 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { PREVIEW_SCOPE_KEY_PREFIX } from '@/renderer/pages/conversation/Preview/context/previewScope';
 import { refreshSession } from '@/common/adapter/sessionRefresh';
-// M6: CSRF removed with legacy webserver — stub functions for compatibility, re-implement in M7
-const withCsrfToken = <T extends Record<string, unknown>>(data: T): T => data;
-const hasValidCsrfToken = (): boolean => true;
-const clearCookie = (_name: string, _path?: string): void => {};
-const CSRF_COOKIE_NAME = 'csrf-token';
+import { resetGuidDraft, setGuidDraftOwner } from '@/renderer/pages/guid/hooks/useGuidDraft';
+import { resolveCoreCsrfToken } from '@/common/adapter/httpBridge';
+const CSRF_COOKIE_NAME = 'aionui-csrf-token';
 
 type AuthStatus = 'checking' | 'authenticated' | 'unauthenticated';
 
@@ -53,13 +51,12 @@ const isDesktopRuntime = typeof window !== 'undefined' && Boolean(window.electro
 
 // Clear expired auth cache including cookies and localStorage
 // 清除过期的认证缓存，包括 Cookie 和 localStorage
-function clearAuthCache(): void {
+function clearCachedAuthState(): void {
   if (typeof window === 'undefined') return;
 
   try {
     // Clear CSRF cookie
-    clearCookie(CSRF_COOKIE_NAME);
-    clearCookie(CSRF_COOKIE_NAME, '/');
+    document.cookie = `${CSRF_COOKIE_NAME}=; Max-Age=0; Path=/; SameSite=Lax`;
 
     // Clear localStorage auth-related items, plus per-user UI state that must not
     // leak across accounts. Preview scopes are keyed by project id and hold file
@@ -70,6 +67,7 @@ function clearAuthCache(): void {
       const key = localStorage.key(i);
       if (
         key &&
+        !key.startsWith('openh3.guid-draft.v1') &&
         (key.includes('auth') ||
           key.includes('csrf') ||
           key.includes('token') ||
@@ -84,6 +82,12 @@ function clearAuthCache(): void {
   }
 }
 
+function clearAuthCache(): void {
+  if (typeof window === 'undefined') return;
+  resetGuidDraft();
+  clearCachedAuthState();
+}
+
 async function fetchCurrentUser(signal?: AbortSignal): Promise<AuthUser | null> {
   try {
     let response = await fetch(AUTH_USER_ENDPOINT, {
@@ -91,6 +95,7 @@ async function fetchCurrentUser(signal?: AbortSignal): Promise<AuthUser | null> 
       credentials: 'include',
       signal,
     });
+    if (signal?.aborted) return null;
 
     // The access cookie may have expired — attempt one silent session refresh
     // and re-check before concluding the user is unauthenticated. Without this
@@ -98,6 +103,7 @@ async function fetchCurrentUser(signal?: AbortSignal): Promise<AuthUser | null> 
     // refreshSession() single-flights with the httpBridge refresh path.
     if (response.status === 401) {
       const refreshed = await refreshSession();
+      if (signal?.aborted) return null;
       if (refreshed) {
         response = await fetch(AUTH_USER_ENDPOINT, {
           method: 'GET',
@@ -145,9 +151,13 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    setGuidDraftOwner(null);
+    setUser(null);
     setStatus('checking');
 
     const currentUser = await fetchCurrentUser(controller.signal);
+    if (controller.signal.aborted || abortRef.current !== controller) return;
+    setGuidDraftOwner(currentUser?.id ?? null);
     if (currentUser) {
       setUser(currentUser);
       setStatus('authenticated');
@@ -162,26 +172,27 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
     void refresh();
     return () => {
       abortRef.current?.abort();
+      setGuidDraftOwner(null);
     };
   }, [refresh]);
 
   const login = useCallback(async ({ username, password, remember }: LoginParams): Promise<LoginResult> => {
+    let controller: AbortController | undefined;
     try {
       if (isDesktopRuntime) {
         setReady(true);
         return { success: true };
       }
 
-      // Check CSRF token availability before login
-      // If token is missing, clear cache and inform user
-      const csrfTokenValid = hasValidCsrfToken();
-      if (!csrfTokenValid) {
-        console.warn('CSRF token missing or invalid, clearing cache');
-        clearAuthCache();
-        // Allow login to proceed anyway - server will set new token
-      }
+      abortRef.current?.abort();
+      controller = new AbortController();
+      abortRef.current = controller;
+      setGuidDraftOwner(null);
+      setUser(null);
+      setStatus('unauthenticated');
+      setReady(true);
 
-      // P1 安全修复：登录请求需要 CSRF Token / P1 Security fix: Login needs CSRF token
+      // Core explicitly exempts /login from CSRF double-submit validation.
       // Backend route is /login; web-host's static-server explicitly proxies it.
       const response = await fetch('/login', {
         method: 'POST',
@@ -189,7 +200,8 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
           'Content-Type': 'application/json',
         },
         credentials: 'include',
-        body: JSON.stringify(withCsrfToken({ username, password, remember })),
+        body: JSON.stringify({ username, password, remember }),
+        signal: controller.signal,
       });
 
       const data = (await response.json()) as {
@@ -197,6 +209,10 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
         message?: string;
         user?: AuthUser;
       };
+
+      if (controller.signal.aborted || abortRef.current !== controller) {
+        return { success: false, code: 'unknown' };
+      }
 
       if (!response.ok || !data.success || !data.user) {
         let code: LoginErrorCode = 'unknown';
@@ -214,16 +230,11 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
           code = 'tooManyAttempts';
         } else if (response.status >= 500) {
           code = 'serverError';
-        } else if (!csrfTokenValid) {
-          // If we knew CSRF was invalid and login failed, suggest cache clear
-          code = 'csrfError';
-          message = 'Login failed due to cached data. Please clear your browser cache and try again.';
-          shouldClearCache = true;
         }
 
-        // Clear cache on CSRF-related errors
+        // Automatic login recovery must not delete the detached account's saved draft.
         if (shouldClearCache) {
-          clearAuthCache();
+          clearCachedAuthState();
         }
 
         return {
@@ -234,6 +245,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
         };
       }
 
+      setGuidDraftOwner(data.user.id);
       setUser(data.user);
       setStatus('authenticated');
       setReady(true);
@@ -245,13 +257,16 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
 
       return { success: true };
     } catch (error) {
+      if (controller && (controller.signal.aborted || abortRef.current !== controller)) {
+        return { success: false, code: 'unknown' };
+      }
       console.error('Login request failed:', error);
 
       // Check if error is related to CSRF token parsing
       const errorMessage = (error as Error).message;
       if (errorMessage?.includes('parse') || errorMessage?.includes('csrf') || errorMessage?.includes('cookie')) {
         // CSRF or cookie parsing error - clear cache
-        clearAuthCache();
+        clearCachedAuthState();
         return {
           success: false,
           message: 'Login failed due to cached data. Please clear your browser cache and try again.',
@@ -269,33 +284,36 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
   }, []);
 
   const logout = useCallback(async () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     if (isDesktopRuntime) {
+      resetGuidDraft();
       setUser(null);
       setStatus('authenticated');
       setReady(true);
       return;
     }
 
-    try {
-      await fetch('/logout', {
-        method: 'POST',
-        // Logout also needs CSRF token / 登出同样需要 CSRF Token
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify(withCsrfToken({})),
-      });
-    } catch (error) {
-      console.error('Logout request failed:', error);
-    } finally {
-      setUser(null);
-      setStatus('unauthenticated');
-      // Clear cache on logout for security
-      clearAuthCache();
-    }
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const csrfToken = resolveCoreCsrfToken();
+    if (csrfToken) headers['x-csrf-token'] = csrfToken;
+    const response = await fetch('/logout', {
+      method: 'POST',
+      headers,
+      credentials: 'include',
+      body: JSON.stringify({}),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`Logout failed (${response.status})`);
+    if (controller.signal.aborted || abortRef.current !== controller) return;
+    // Do not report success or destroy drafts when Core rejected the logout request.
+    clearAuthCache();
+    setGuidDraftOwner(null);
+    setUser(null);
+    setStatus('unauthenticated');
+    setReady(true);
   }, []);
-
   const value = useMemo<AuthContextValue>(
     () => ({
       ready,
