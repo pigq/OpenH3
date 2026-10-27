@@ -19,6 +19,10 @@ on:
         description: 'Append short commit hash to artifact names'
         type: boolean
         default: false
+      acceptance_provenance:
+        description: 'Bundle same-job Windows x64 build provenance for installed upgrade acceptance'
+        type: boolean
+        default: false
       upload_installers_only:
         description: 'Only upload primary installers (exe/msi/dmg/deb), skip zip/yml/blockmap'
         type: boolean
@@ -120,6 +124,8 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref }}
+          persist-credentials: ${{ !inputs.acceptance_provenance }}
+          clean: true
 
       - name: Get commit hash
         id: commit
@@ -697,6 +703,54 @@ jobs:
       # - 构建成功（所有平台）
       # - macOS: 公证超时但有产物（已在构建步骤中处理）
       # - Windows: 仅当 windows-build 步骤成功
+      # Preserve actual same-job bytes before installer-only cleanup removes yml.
+      - name: Bundle installed Windows upgrade candidate provenance
+        id: acceptance-candidate
+        if: >-
+          inputs.acceptance_provenance && success() &&
+          runner.os == 'Windows' && matrix.platform == 'windows-x64' && matrix.arch == 'x64' &&
+          steps.windows-build.outcome == 'success' && steps.windows-build.outputs.result == 'success'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $head = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve actual checkout HEAD.' }
+          if ($head -cne $env:GITHUB_SHA) { throw 'Build checkout must equal the exact workflow SHA.' }
+          & git diff --exit-code --
+          if ($LASTEXITCODE -ne 0) { throw 'Tracked worktree changed during build.' }
+          & git diff --cached --exit-code --
+          if ($LASTEXITCODE -ne 0) { throw 'Tracked index changed during build.' }
+          $candidateRoot = Join-Path $env:RUNNER_TEMP "openh3 candidate-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $raw = Join-Path $candidateRoot 'raw'
+          if (Test-Path -LiteralPath $candidateRoot) { throw 'Candidate root must be fresh for this build job.' }
+          node --input-type=module -e 'import path from "node:path"; import { createWindowsAdapter } from "./packages/shared-scripts/acceptance/runner/windows-os.mjs"; const io = createWindowsAdapter(process.env); const root = path.win32.join(process.env.RUNNER_TEMP, "openh3 candidate-"+process.env.GITHUB_RUN_ID+"-"+process.env.GITHUB_RUN_ATTEMPT); await io.ensureOwnedRoot(root); await io.ensureOwnedDirectory(path.win32.join(root,"raw"));'
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate physical root validation failed.' }
+          $installer = Join-Path $env:GITHUB_WORKSPACE 'out/OpenH3-3.0.1-win-x64.exe'
+          $manifest = Join-Path $env:GITHUB_WORKSPACE 'out/latest.yml'
+          foreach ($required in @($installer, $manifest)) {
+            if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Missing required same-job candidate: $required" }
+          }
+          Copy-Item -LiteralPath $installer -Destination $raw -ErrorAction Stop
+          Copy-Item -LiteralPath $manifest -Destination $raw -ErrorAction Stop
+          $blockmap = "$installer.blockmap"
+          if (Test-Path -LiteralPath $blockmap -PathType Leaf) { Copy-Item -LiteralPath $blockmap -Destination $raw -ErrorAction Stop }
+          node packages/shared-scripts/acceptance/runner/candidate-bundle.mjs --source-sha $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw "Candidate provenance producer exited $LASTEXITCODE." }
+
+      - name: Upload installed Windows upgrade candidate bundle
+        id: acceptance-candidate-upload
+        uses: actions/upload-artifact@v6
+        if: >-
+          inputs.acceptance_provenance && success() &&
+          runner.os == 'Windows' && matrix.platform == 'windows-x64' && matrix.arch == 'x64' &&
+          steps.windows-build.outcome == 'success' && steps.windows-build.outputs.result == 'success' &&
+          steps.acceptance-candidate.outcome == 'success'
+        with:
+          name: windows-installed-upgrade-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/openh3 candidate-${{ github.run_id }}-${{ github.run_attempt }}/bundle/
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Clean up non-installer artifacts
         if: >-
           inputs.upload_installers_only && success() &&

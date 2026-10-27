@@ -14,6 +14,7 @@ on:
         options:
           - build
           - official-content
+          - windows-upgrade-acceptance
         default: 'build'
       branch:
         description: 'Branch to build from (build mode only)'
@@ -60,6 +61,12 @@ on:
         default: ''
       rollback_reason:
         description: 'Audited reason for older payload, at least 8 characters (official-content only)'
+        required: false
+        type: string
+        default: ''
+
+      reviewed_source_sha:
+        description: 'Required for acceptance mode: reviewed full SHA, equal to this dispatch commit'
         required: false
         type: string
         default: ''
@@ -181,3 +188,149 @@ jobs:
         env:
           OPENH3_CONTENT_PRIVATE_KEY_FILE: ${{ runner.temp }}/content-private.pem
         run: node --input-type=module -e "import fs from 'node:fs';fs.rmSync(process.env.OPENH3_CONTENT_PRIVATE_KEY_FILE,{force:true});"
+
+  acceptance-contracts:
+    permissions:
+      contents: read
+      actions: read
+    runs-on: windows-2022
+    if: inputs.mode == 'windows-upgrade-acceptance' && github.repository == 'pigq/OpenH3' && github.ref_type != 'tag'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          clean: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Verify reviewed immutable source
+        id: reviewed-source
+        shell: pwsh
+        env:
+          REVIEWED_SOURCE_SHA: ${{ inputs.reviewed_source_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:REVIEWED_SOURCE_SHA -cnotmatch '^[a-f0-9]{40}$' -or $env:REVIEWED_SOURCE_SHA -cne $env:GITHUB_SHA) { throw 'Dispatch SHA was not explicitly reviewed.' }
+          $head = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -cne $env:GITHUB_SHA) { throw 'Checkout SHA differs.' }
+          $status = & git status --porcelain --untracked-files=no
+          if ($LASTEXITCODE -ne 0 -or $status) { throw 'Tracked checkout must be clean.' }
+          $package = Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json
+          if ($package.version -cne '3.0.1') { throw 'A genuine committed 3.0.1 source version is required; never rewrite 3.0.0.' }
+      - name: Frozen dependency install
+        shell: pwsh
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: |
+          bun install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { throw 'Frozen install failed.' }
+      - name: Pure harness regression
+        shell: pwsh
+        run: |
+          $tests = @(Get-ChildItem -LiteralPath packages/shared-scripts/acceptance -Recurse -Filter '*.test.mjs' | ForEach-Object FullName)
+          if ($tests.Count -lt 1) { throw 'Missing harness tests.' }
+          node --test @tests
+          if ($LASTEXITCODE -ne 0) { throw 'Harness regression failed.' }
+
+  acceptance-candidate:
+    permissions:
+      contents: read
+      actions: read
+    if: inputs.mode == 'windows-upgrade-acceptance'
+    needs: acceptance-contracts
+    uses: ./.github/workflows/_build-reusable.yml
+    with:
+      ref: ${{ github.sha }}
+      matrix: '{"include":[{"platform":"windows-x64","os":"windows-2022","arch":"x64","artifact-name":"windows-x64-installed-upgrade-build","command":"node scripts/build-with-builder.js x64 --win --x64"}]}'
+      skip_code_quality: ${{ inputs.skip_code_quality }}
+      append_commit_hash: false
+      upload_installers_only: false
+      acceptance_provenance: true
+
+  acceptance-installed:
+    permissions:
+      contents: read
+      actions: read
+    if: inputs.mode == 'windows-upgrade-acceptance'
+    needs: acceptance-candidate
+    runs-on: windows-2022
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [manual-migration, cancel, disconnect, corrupt, downloaded-quit, install]
+    env:
+      SCENARIO: ${{ matrix.scenario }}
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          clean: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Frozen harness dependency install
+        shell: pwsh
+        run: |
+          bun install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { throw 'Frozen install failed.' }
+      # No run-id/token: download-artifact can consume only this run's artifact.
+      # Attempt is also in its name, so a rerun cannot reuse a prior attempt.
+      - uses: actions/download-artifact@v6
+        with:
+          name: windows-installed-upgrade-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/openh3 acceptance-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.scenario }}/candidate
+      - name: Real installed acceptance
+        id: installed-acceptance
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node packages/shared-scripts/acceptance/runner/installed-upgrade.mjs --scenario $env:SCENARIO --source-sha $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw "Installed acceptance failed or is NOT-COVERED: $env:SCENARIO" }
+      - name: Upload scenario evidence even on failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-upgrade-evidence-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.scenario }}
+          path: ${{ runner.temp }}/openh3 acceptance-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.scenario }}/evidence/
+          if-no-files-found: error
+          retention-days: 7
+
+  acceptance-gate:
+    permissions:
+      contents: read
+      actions: read
+    if: ${{ always() && inputs.mode == 'windows-upgrade-acceptance' }}
+    needs: [acceptance-contracts, acceptance-candidate, acceptance-installed]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          clean: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: windows-upgrade-evidence-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: ${{ runner.temp }}/windows-upgrade-reports
+          merge-multiple: false
+      - name: Require all six real installed scenario reports
+        env:
+          OPENH3_ACCEPTANCE_REPORTS: ${{ runner.temp }}/windows-upgrade-reports
+        run: node packages/shared-scripts/acceptance/runner/flows/gate.mjs

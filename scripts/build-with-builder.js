@@ -14,6 +14,7 @@ const { execSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const yaml = require('js-yaml');
 
 // DMG retry logic for macOS: detects DMG creation failures by checking artifacts
 // (.app exists but .dmg missing) and retries only the DMG step using
@@ -670,6 +671,8 @@ function cleanupWindowsPackOutput() {
   const removed = [];
   const winUnpackedDirRe = /^win(?:-[a-z0-9]+)?-unpacked$/i;
   const winArtifactFileRe = /-win-[^.]+\.(?:exe|msi|zip|7z)$/i;
+  const winUpdateMetadataRe = /^(?:latest|beta)\.yml$/i;
+  const winBlockmapRe = /-win-[^.]+\.exe\.blockmap$/i;
 
   for (const entry of fs.readdirSync(outDir, { withFileTypes: true })) {
     const fullPath = path.join(outDir, entry.name);
@@ -680,7 +683,10 @@ function cleanupWindowsPackOutput() {
       continue;
     }
 
-    if (entry.isFile() && winArtifactFileRe.test(entry.name)) {
+    if (
+      entry.isFile() &&
+      (winArtifactFileRe.test(entry.name) || winUpdateMetadataRe.test(entry.name) || winBlockmapRe.test(entry.name))
+    ) {
       fs.rmSync(fullPath, { force: true });
       removed.push(entry.name);
     }
@@ -689,6 +695,30 @@ function cleanupWindowsPackOutput() {
   if (removed.length > 0) {
     console.log(`🧹 Cleaned stale Windows outputs: ${removed.join(', ')}`);
   }
+}
+
+// Recompute updater metadata from the final installer so the manifest always
+// contains the exact bytes and size that will be published and downloaded.
+function refreshWindowsUpdateMetadata() {
+  const outDir = path.resolve(__dirname, '../out');
+  const manifestPath = path.join(outDir, 'latest.yml');
+  if (!fs.existsSync(manifestPath)) return;
+
+  const manifest = yaml.load(fs.readFileSync(manifestPath, 'utf8'));
+  if (!manifest || !Array.isArray(manifest.files) || manifest.files.length !== 1) return;
+
+  const file = manifest.files[0];
+  const installerPath = path.join(outDir, file.url);
+  if (!file.url || !fs.existsSync(installerPath)) return;
+
+  const installerBytes = fs.readFileSync(installerPath);
+  const sha512 = crypto.createHash('sha512').update(installerBytes).digest('base64');
+  file.size = installerBytes.length;
+  file.sha512 = sha512;
+  manifest.path = file.url;
+  manifest.sha512 = sha512;
+  fs.writeFileSync(manifestPath, yaml.dump(manifest, { lineWidth: -1 }));
+  console.log(`🔐 Refreshed Windows updater metadata for ${file.url}`);
 }
 
 // Parse command line arguments
@@ -1016,6 +1046,10 @@ try {
         ].join('\n')
       );
     }
+  }
+
+  if (isWindowsBuild) {
+    refreshWindowsUpdateMetadata();
   }
 
   console.log('✅ Build completed!');

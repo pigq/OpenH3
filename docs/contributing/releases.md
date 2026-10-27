@@ -8,7 +8,7 @@
 
 已发布的官方 `3.0.0` 仍使用旧 CDN 更新源，不具备本次 GitHub feed 迁移和官方内容协议。在不访问旧 CDN 的前提下，它不能自动发现新的 GitHub 更新源。迁移到实际发布的 `3.0.1` 时，需要从官方 GitHub Releases 下载新安装包，正常退出旧版后做**一次手工覆盖安装**，不卸载、不删除原资料；之后的更新才使用新客户端的 GitHub feed。不能重编或修改旧版 feed，再把测试称为原版 `3.0.0` 自动升级。
 
-`3.0.1` 仍须完成发行验收后才能发布。源码版本号、Actions artifact 或本地单元测试不是已发布安装包，也不是已通过真实旧版覆盖安装的证明。
+`3.0.1` 的发布以实际发行验收记录为准。源码版本号、Actions artifact 或本地单元测试不是已发布安装包，也不是已通过真实旧版覆盖安装的证明。
 
 ## 下一版本的检查项
 
@@ -29,9 +29,12 @@
 继续使用 `🔨 Manual Build`（`.github/workflows/build-manual.yml`），通过显式 `mode` 分开操作，不新增内容发布 workflow：
 
 - `build`（默认）：保留原六平台及 `all`、`branch`、质量检查开关和 Core run ID / 旧别名输入行为。仍调用原 reusable build，只产构建附件，不因这次整合触发内容发布。
+- `windows-upgrade-acceptance`：只验证已审查的 Windows x64 `3.0.1` 提交及该次构建的原始安装包，运行六个隔离安装场景和总验收门禁；不发布安装包或官方内容。必须填写与本次触发提交完全一致的 `reviewed_source_sha`；普通构建的分支、平台、质量开关与外部 Core 输入在此模式不生效。
 - `official-content`：只运行官方内容发布 job，绝不准备桌面构建矩阵或调用桌面 reusable build。必须在 `pigq/OpenH3` 的 `main` 上手工触发；`branch`、`platform`、质量开关及 Core run ID 在此模式不生效。内容来源固定为此次触发的 `main` 提交，不能用 `branch` 偷换为另一来源。
 
-两个模式共享九个 dispatch 输入；内容模式只需 `content_source`、`content_sequence`，回退时再填 `rollback_reason`。这两个内容输入在 dispatch 表单上可留空，避免改变普通构建必填项；内容 job 会拒绝缺失序号或无效源。官方 key ID 与协议最低客户端 `3.0.1` 固定在发布 step 中，不占额外输入，也不随未来桌面包版本无故提高最低兼容门槛。该入口不绕过正常发布审查，不创建客户端 tag / Release。
+质量检查默认运行。只有在已对同一提交完成等价本地质量检查、且只是避免重复执行时，才可在验收入口显式设置 `skip_code_quality=true`；这不会跳过版本、源码树、Core 来源、安装包 provenance 或六个真实 Windows 安装场景的门禁。
+
+三个模式共享十个 dispatch 输入；内容模式只需 `content_source`、`content_sequence`，回退时再填 `rollback_reason`。这两个内容输入在 dispatch 表单上可留空，避免改变普通构建必填项；内容 job 会拒绝缺失序号或无效源。官方 key ID 与协议最低客户端 `3.0.1` 固定在发布 step 中，不占额外输入，也不随未来桌面包版本无故提高最低兼容门槛。该入口不绕过正常发布审查，不创建客户端 tag / Release。
 
 ## 官方内容库（独立频道）
 
@@ -80,9 +83,9 @@ node scripts/content-catalog/preview.mjs --after .runtime/content-preview/catalo
 - 随包信任锚已配置生产 Ed25519 公钥，key ID 为 `openh3-content-20261024`；仅公钥随客户端交付，私钥不进入源码、安装包或日志。
 - `sourceConfigured` 只说明客户端有受信任公钥，不代表远端频道已发布或媒体已获授权。当前媒体再分发授权及逐项上架审批材料尚未准备，本次不发布官方远端内容；频道未发布、请求失败或验签失败时保留随包内置库或上一份已验证缓存，不退化为无签名同步。
 - 内置库保留全部 8 个受支持模型家族、52 个模板和原有真实预览/播放；模型由用户自行下载和管理。作品卡区仅接受官方模板与审核上架展示，用户生成结果不混入官方目录。
-- 正式私钥离线加密备份及真实旧版 Windows 覆盖升级验收仍须完成。原完整 feature 树的历史测试和产物记录不作为本次独立内容分支已通过验收的证据；新分支须重新构建配套 Core 并执行跨进程内容测试。
+- 正式私钥须有离线加密备份；Windows 覆盖升级的放行须依据该次发布源码的隔离验收记录。原完整 feature 树的历史测试和产物记录不作为本次独立内容分支已通过验收的证据；新分支须重新构建配套 Core 并执行跨进程内容测试。
 
-## 左下角更新入口（下一个客户端版本）
+## 左下角更新入口（3.0.1 起）
 
 桌面客户端启动后延迟 30 秒静默检查，此后每 6 小时检查；已有下载缓存可先验证并恢复。发现新版本后在设置旁显示更新入口，用户点击才下载，下载完成后确认安装。普通退出不会自动安装。WebUI 不挂载桌面更新控制器。
 
@@ -100,6 +103,29 @@ NSIS 明确配置 `deleteAppDataOnUninstall: false`，保留现有安装 GUID �
 
 ### Desktop update source
 
-Desktop updates use only GitHub Releases in `pigq/OpenH3`. Publish the draft release after uploading installers, blockmaps and all platform/architecture `latest*.yml` files. The native GitHub updater reads these manifests; manual checks use the GitHub Releases API and preserve asset download URLs. Drafts are excluded, prereleases require opt-in, and older versions are not installed. GitHub failures can be retried; there is no upstream CDN fallback.
+Desktop updates use only GitHub Releases in `pigq/OpenH3`. Publish the draft release after uploading the accepted installers, any genuine blockmaps and matching `latest*.yml` files for the platforms actually being released. Version 3.0.1 ships Windows x64 only, with its original `latest.yml`; reuse the accepted bytes. The native GitHub updater reads these manifests; manual checks use the GitHub Releases API and preserve asset download URLs. Drafts are excluded, prereleases require opt-in, and older versions are not installed. GitHub failures can be retried; there is no upstream CDN fallback.
 
 The normal flow is: download in the background → confirm restart and update → silent replacement and restart. Existing configuration and user data are retained. Manual installer fallback remains a separately labelled action.
+
+## Windows x64 3.0.1 安装升级验收
+
+先审查并提交完整 `3.0.1` 源码，再在该提交触发 `🔨 Manual Build`，选择 `mode=windows-upgrade-acceptance` 并填写准确的完整 `reviewed_source_sha`。入口拒绝版本不符、SHA 不符和脏 tracked checkout。验收 job 仅有 `contents: read` / `actions: read`，不继承发布或签名 secret。仅 GitHub-hosted Windows x64 可运行安装动作；本机纯测试和注入 adapter 不算实际验收。
+
+候选包在真正构建的同一 Windows job 中，在清理更新元数据前保存 exe、原始 `latest.yml` 和 provenance；附件名绑定同一 run / attempt。消费端只读取此次运行的附件，重算安装包 SHA256、SHA512、元数据、package 和 lockfile hash，不能换用另一构建、重写版本或用模拟产物通过。
+
+六个 fresh Windows runner 分别验证：
+
+1. 官方原始 `3.0.0` 安装包的固定 GitHub asset/hash → 手工覆盖真实 `3.0.1`，重读配置、会话、历史记录、工作区和用户模型目录哨兵。此项仅证明一次手工迁移；模型哨兵不是有效模型权重，不声称测试过推理。
+2. 真实下载进度后取消，未产生安装；正常退出、重开后保留数据。
+3. 真正的部分传输断流，要求实际网络中断错误，不能用其他错误代替。
+4. 完整传输损坏文件，要求真实 SHA512 校验拒绝。
+5. 真实下载完成后普通退出，未触发安装；重开后保留数据。
+6. 真实下载后，通过暂时悬空同一 native singleton 的内存 helper 触发原 `BaseUpdater` 同步交接拒绝：真实 renderer 错误状态、native error、同 main 存活且零 `doInstall`；恢复原 helper 并重算缓存 hash 后经同一 IPC 重试，要求原 NSIS 覆盖、成功 session、自动新 main 和 backend ready。随后独立受控重开并重读资料。该拒绝测试不代表覆盖全部异步 OS spawn 或 UAC 失败。
+
+后五项始终运行真实已安装 `3.0.1`，只把已加载更新器的内存比较版本置为 `3.0.0`、传输指向 loopback fixture；磁盘版本和生产 `pigq/OpenH3` GitHub feed 保持真实值。它们验证真实下载、取消、校验与安装交接，不冒称官方原 `3.0.0` 已支持新 feed，也不代替正式 GitHub 版本发现检查。正式 GitHub 检查需单独记录。
+
+候选安装及覆盖后的受控重开均读取实际 `resources/content-catalog`：通过现有 schema，核对审查源码的 8 个模型家族、完整 52 个模板 ID、媒体长度/hash 和公钥文件；不重新运行 exporter 来替代安装资源证据。媒体授权与上架审批尚未齐备时，不触发远端官方内容发布。
+
+每个场景非零失败并保存脱敏证据，最后 gate 要求同一 source/run/attempt 的六份真实 hosted PASS，缺失、重复、注入 adapter 或 NOT-COVERED 都失败。只有通过验收的同一份 Windows x64 安装包及匹配原始 `latest.yml`、校验文件才可发布为稳定版；重新构建、改字节或补签名后必须重新验收。记录实际 Authenticode 状态，不能把内容 Ed25519 签名当作 Windows 代码签名。
+
+FFmpeg 继续使用固定来源与 hash 的预编译包；对应依赖源码等分发材料缺口按实际情况保留在源码提供说明中，不自动开展自建或工具链归档工程。
