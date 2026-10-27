@@ -38,11 +38,11 @@
       "install-other": "其他版本",
       "generate": "生成"
     },
-    "intentSummary": "本機模型任務：{{model}} · {{intent}}。目標設定：{{profile}}。保持目前家族與任務，按 comfyui-local 偵測、選配並提交任務；依實際對話核准模式，全自動核准直接安裝，其他模式只在安裝卡確認一次。生成驗證在安裝後完成。",
+    "intentSummary": "本機模型：{{model}} · {{intent}} · {{profile}}。",
     "prompts": {
-      "install": "幫我安裝本機 {{family}} 並接入 ComfyUI。 使用 comfyui-local，透過 openh3_comfy_environment 偵測裝置與現有環境，自動選出合適的固定版本、完整配套元件及相符工作流程。下載依序使用 ModelScope（魔搭）、已核驗國內鏡像、官方來源，支援續傳及 SHA-256 校驗；隨應用提供的工作流程直接重用。安裝前判斷硬體與目標相依套件支援情況，實際核心、載入與生成驗證在安裝後進行。方案齊備立即呼叫 openh3_comfy_install action=request，回傳 comfyOperationId 顯示安裝卡；遵循對話目前核准權限：全自動核准時直接執行，不再要求確認；其他模式在安裝卡確認一次後開始下載。不要停留於環境分析、重複掃描或另索口頭確認。保持目前模型家族；實際受阻時簡短說明確切錯誤與下一步。安裝不需我提供生成參數。",
-      "repair": "檢查並有界修復本機 {{family}} 設定 {{profile}}，先定位日誌故障並保存快照，保留其他可用設定。 使用 comfyui-local，透過 openh3_comfy_environment 偵測裝置與現有環境，自動選出合適的固定版本、完整配套元件及相符工作流程。下載依序使用 ModelScope（魔搭）、已核驗國內鏡像、官方來源，支援續傳及 SHA-256 校驗；隨應用提供的工作流程直接重用。安裝前判斷硬體與目標相依套件支援情況，實際核心、載入與生成驗證在安裝後進行。方案齊備立即呼叫 openh3_comfy_install action=request，回傳 comfyOperationId 顯示安裝卡；遵循對話目前核准權限：全自動核准時直接執行，不再要求確認；其他模式在安裝卡確認一次後開始下載。不要停留於環境分析、重複掃描或另索口頭確認。保持目前模型家族；實際受阻時簡短說明確切錯誤與下一步。安裝不需我提供生成參數。",
-      "install-other": "為本機 {{family}} 安裝獨立的其他版本或量化設定，保留目前可用版本。 使用 comfyui-local，透過 openh3_comfy_environment 偵測裝置與現有環境，自動選出合適的固定版本、完整配套元件及相符工作流程。下載依序使用 ModelScope（魔搭）、已核驗國內鏡像、官方來源，支援續傳及 SHA-256 校驗；隨應用提供的工作流程直接重用。安裝前判斷硬體與目標相依套件支援情況，實際核心、載入與生成驗證在安裝後進行。方案齊備立即呼叫 openh3_comfy_install action=request，回傳 comfyOperationId 顯示安裝卡；遵循對話目前核准權限：全自動核准時直接執行，不再要求確認；其他模式在安裝卡確認一次後開始下載。不要停留於環境分析、重複掃描或另索口頭確認。保持目前模型家族；實際受阻時簡短說明確切錯誤與下一步。安裝不需我提供生成參數。"
+      "install": "呼叫 comfyui-local，自動偵測裝置並選配、下載安裝本機 {{family}} 及相符工作流程。",
+      "repair": "呼叫 comfyui-local，偵測並修復本機 {{family}} 設定 {{profile}}，保留其他可用設定。",
+      "install-other": "呼叫 comfyui-local，自動偵測裝置並選配、下載安裝本機 {{family}} 的獨立其他版本及相符工作流程，保留現有可用版本。"
     },
     "operation": {
       "title": "ComfyUI 模型方案",
@@ -169,7 +169,7 @@
       "invalid": "請填寫名稱、有效位址、Key 與支援的圖片模型（如 gpt-image-2.5-all）。",
       "saveFailed": "儲存失敗，請重試。"
     },
-    "toolsCheckFailed": "本機創作工具檢查失敗（{{reason}}）。請重新啟動或更新應用程式，再從模型卡重試；尚未建立創作任務。"
+    "toolsCheckFailed": "本機 ComfyUI 工具檢查失敗（{{reason}}）。這是應用程式／工作階段工具連線問題，不代表裝置不相容；尚未檢查硬體或提交任務。請重新啟動或更新應用程式，再從模型卡重試。"
   },
   "aiCreation": "AI 創作",
   "aiCreationSubtitle": "把想像變成作品",

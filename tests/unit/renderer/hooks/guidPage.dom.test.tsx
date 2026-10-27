@@ -12,6 +12,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LayoutContext } from '@/renderer/hooks/context/LayoutContext';
+import { COMFY_FAMILIES } from '@/renderer/pages/guid/Creation/comfyDraft';
 
 const {
   modelSelectionMock,
@@ -502,6 +503,19 @@ describe('GuidPage', () => {
         ) as import('@/common/contentCatalog/schema').OfficialTemplate
       ).prompt['zh-CN']
     );
+  });
+
+  it.each(COMFY_FAMILIES)('drafts only the short Skill instruction for $name without sending', ({ family, name }) => {
+    locationMock.pathname = '/ai-creation';
+    guidInputMock.setInput.mockClear();
+    sendMock.sendMessageHandler.mockClear();
+    render(<GuidPage />);
+    const card = screen.getByRole('region', { name });
+    fireEvent.click(within(card).getByRole('button', { name: 'guid.comfy.actions.install' }));
+    expect(guidInputMock.setInput).toHaveBeenCalledExactlyOnceWith('guid.comfy.prompts.install');
+    expect(capturedGuidSendDeps.at(-1)?.creationIntent).toEqual({ family, intent: 'install', profileId: undefined });
+    expect(capturedGuidInputCardProps.at(-1)?.focusRequestKey).toBeTruthy();
+    expect(sendMock.sendMessageHandler).not.toHaveBeenCalled();
   });
 
   it('adds model installation requests to the editable composer without sending or changing the selected H3 target', () => {

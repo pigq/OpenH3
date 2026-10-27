@@ -58,7 +58,7 @@
       "invalid": "Enter a name, valid URL, key and supported image model (e.g. gpt-image-2.5-all).",
       "saveFailed": "Could not save. Try again."
     },
-    "toolsCheckFailed": "Local creation tools failed their check ({{reason}}). Restart or update the app, then retry from the model card. No creation task was submitted."
+    "toolsCheckFailed": "Local ComfyUI tools are unavailable ({{reason}}). This is an app/session tool-injection issue, not a device compatibility result; no hardware check or task was started. Restart or update OpenH3, then retry from the model card."
   },
   "templatePlay": "Play {{title}}",
   "templatePause": "Pause {{title}}",
@@ -325,11 +325,11 @@
       "install-other": "Other version",
       "generate": "Generate"
     },
-    "intentSummary": "{{model}} · {{intent}} · {{profile}}. comfyui-local: Follow the current session policy. Full automatic approval executes directly; other modes require one confirmation in the installation card.",
+    "intentSummary": "Local model: {{model}} · {{intent}} · {{profile}}.",
     "prompts": {
-      "install": "Install {{family}} locally through ComfyUI. Use comfyui-local and openh3_comfy_environment to inspect the device and existing runtime, then automatically choose a suitable pinned version, complete components and matching workflow. Prefer ModelScope, verified domestic mirrors, then upstream; resume transfers and verify SHA-256. Reuse bundled workflows. Assess hardware and target dependency support before installation; execute kernel, loading and generation checks after installation. When ready, call openh3_comfy_install action=request and return comfyOperationId for the installation card. Follow the active session policy: with full automatic approval, execute directly without another confirmation; otherwise confirm once in the installation card to start downloads. Do not stop at analysis, repeat completed scans or ask for verbal confirmation. Keep this family and report a real blocker with its exact error and next step. Installation needs no user generation parameters.",
-      "repair": "Diagnose and make one bounded repair to local {{family}} profile {{profile}}. Preserve a snapshot and other working profiles. Use comfyui-local and openh3_comfy_environment to inspect the device and existing runtime, then automatically choose a suitable pinned version, complete components and matching workflow. Prefer ModelScope, verified domestic mirrors, then upstream; resume transfers and verify SHA-256. Reuse bundled workflows. Assess hardware and target dependency support before installation; execute kernel, loading and generation checks after installation. When ready, call openh3_comfy_install action=request and return comfyOperationId for the installation card. Follow the active session policy: with full automatic approval, execute directly without another confirmation; otherwise confirm once in the installation card to start downloads. Do not stop at analysis, repeat completed scans or ask for verbal confirmation. Keep this family and report a real blocker with its exact error and next step. Installation needs no user generation parameters.",
-      "install-other": "Install a separate version or quantization profile of local {{family}}, preserving the working version. Use comfyui-local and openh3_comfy_environment to inspect the device and existing runtime, then automatically choose a suitable pinned version, complete components and matching workflow. Prefer ModelScope, verified domestic mirrors, then upstream; resume transfers and verify SHA-256. Reuse bundled workflows. Assess hardware and target dependency support before installation; execute kernel, loading and generation checks after installation. When ready, call openh3_comfy_install action=request and return comfyOperationId for the installation card. Follow the active session policy: with full automatic approval, execute directly without another confirmation; otherwise confirm once in the installation card to start downloads. Do not stop at analysis, repeat completed scans or ask for verbal confirmation. Keep this family and report a real blocker with its exact error and next step. Installation needs no user generation parameters."
+      "install": "Use comfyui-local to detect my device, choose a compatible local {{family}} version, then download and install it with its matching workflow.",
+      "repair": "Use comfyui-local to diagnose and repair local {{family}} profile {{profile}}, preserving other working profiles.",
+      "install-other": "Use comfyui-local to detect my device, choose and install a separate compatible {{family}} version with its matching workflow, preserving existing working versions."
     },
     "operation": {
       "title": "ComfyUI model plan",

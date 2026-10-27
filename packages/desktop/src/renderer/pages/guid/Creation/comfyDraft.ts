@@ -25,7 +25,7 @@ export const COMFY_FAMILIES = [
   { family: 'krea2', name: 'Krea 2', kind: 'image' },
 ] as const;
 
-/** Additional image recipes share the existing installation flow and remain editable in the composer. */
+/** Locate optional image recipe documentation without adding it to the Skill instruction. */
 export function comfyFamilyRecipeKey(family: ComfyFamily) {
   switch (family) {
     case 'flux-3-image-klein':

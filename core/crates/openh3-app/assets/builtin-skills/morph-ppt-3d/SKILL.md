@@ -112,9 +112,11 @@ Tell the user: "Your topic is [X]. I suggest using a 3D model of [description]. 
    ```
    Available models: Duck, Fox, Avocado, BrainStem, CesiumMan, DamagedHelmet, FlightHelmet, Lantern, Suzanne, WaterBottle, etc.
 
-### Step 3: Present candidates to user for confirmation
+### Step 3: Select a model within the user's request
 
-Show the user 2-3 model options with:
+If the user delegated model selection or asked you to build the deck, choose a suitable freely downloadable model with a verified license and proceed. Briefly record its source, license, and why it fits. Do not add another confirmation for the same authorized search or download. A purchase, account action, or license restriction outside the requested use needs a specific user decision.
+
+If the user requested options or reserved model selection, show 2-3 candidates with:
 
 - Model name and source
 - Preview link (Sketchfab URL or description)
@@ -143,11 +145,11 @@ Based on your topic "fox mascot", here are some models I found:
 Which one do you want? I'll download it and start building.
 ```
 
-**Wait for user confirmation before downloading.** Do not download without asking.
+Wait for a model choice only when the user reserved that choice or the remaining candidates require a decision outside the authorized scope.
 
-### Step 4: Download the confirmed model
+### Step 4: Download the selected model
 
-After user confirms, download directly:
+Download the model selected by the user or under their delegated selection:
 
 ```bash
 # For Sketchfab (if user has the download URL)
@@ -169,19 +171,7 @@ If Sketchfab requires login to download, tell the user:
 
 ### Step 5: When user says "anything" / "you decide" / "just make a demo"
 
-**Don't just grab a random model.** First guide the user to clarify their PPT topic:
-
-> Sure! I'll handle the model — but let me confirm the topic direction first so the model matches the content:
->
-> 1. Tech/Product — headphones, phone, robot...
-> 2. Animal/Character — cute pet, cartoon character...
-> 3. Architecture/Space — building, interior, city...
-> 4. Food/Lifestyle — dishes, everyday objects...
-> 5. Other — just tell me your idea
->
-> Pick a direction, or just give me a topic keyword.
-
-After user confirms a direction, THEN search and recommend models.
+Use the deck topic and existing context to choose the model. For an unconstrained demo, choose a simple sample and state the assumed topic. Ask for a topic only when it is necessary to meet a specific requirement and cannot be inferred; do not return delegated creative choices to the user as a mandatory questionnaire.
 
 ### Step 6: When user wants to find models themselves
 
@@ -213,21 +203,11 @@ Give specific website links with step-by-step guidance:
 
 ### Step 7: When user gives keywords and asks agent to search
 
-**Remind about token cost before searching:**
-
-> I can search for you, but web searches use extra tokens. Would you prefer:
->
-> A. I search — I use the Sketchfab API and recommend 2-3 options (uses a few tokens)
-> B. Self-service — I give you search links and filter steps, you pick and share with me (no extra tokens)
->
-> A or B?
-
-If user chooses A, proceed with Step 2 (agent-driven search).
-If user chooses B, proceed with Step 6 (self-service guidance).
+Proceed with Step 2 using the supplied keywords. If the user asked for options, return candidates; if they delegated selection and deck creation, continue through the selected download and build. Use Step 6 when the user wants to find the model themselves. Honor an actual tool or account approval requirement without inventing an extra chat-confirmation step.
 
 ### License reminder
 
-Always remind before confirming download: "Please check the model license before downloading. CC0 / CC BY = free to use; CC BY-NC = non-commercial only."
+Check the source's actual license before downloading, include any required attribution, and ensure it allows the requested use. If the license is unknown or incompatible, choose another suitable model within the user's request or ask for the specific missing usage decision.
 
 ---
 

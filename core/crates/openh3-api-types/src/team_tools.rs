@@ -7,9 +7,13 @@ pub const TEAM_SPAWN_AGENT_DESCRIPTION: &str = r#"Create a new teammate agent to
 
 Use this only when one of the following is true:
 - The user explicitly approved the proposed teammate lineup in a previous message
-- The user explicitly instructed you to create a specific teammate immediately
+- The user authorized delegation for this task, for example by asking for subagents, teammates, or parallel work
+- The user explicitly instructed you to create a teammate immediately
 
-Before calling this tool in the normal planning flow:
+If the user already authorized delegation, choose the minimum useful lineup from the
+available assistants and proceed; do not ask for confirmation again.
+
+Before calling this tool when delegation has not yet been authorized:
 - Start with one short sentence explaining why additional teammates would help
 - Tell the user which teammate(s) you recommend
 - Present the proposal as a table with: name, responsibility, and recommended assistant

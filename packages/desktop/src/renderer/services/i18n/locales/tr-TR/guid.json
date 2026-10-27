@@ -38,11 +38,11 @@
       "install-other": "Diğer sürüm",
       "generate": "Oluştur"
     },
-    "intentSummary": "{{model}} · {{intent}} · {{profile}}. comfyui-local: Tam otomatik onay modunda doğrudan çalıştır; diğer modlarda kartta bir kez onay al.",
+    "intentSummary": "Yerel model: {{model}} · {{intent}} · {{profile}}.",
     "prompts": {
-      "install": "{{family}} modelini ComfyUI üzerinden yerel olarak kur. Cihazı ve mevcut ortamı comfyui-local ve openh3_comfy_environment ile incele; uygun sabit sürümü, eksiksiz bileşenleri ve uyumlu iş akışını otomatik seç. ModelScope, doğrulanmış yerel aynalar ve resmi kaynağı sırayla tercih et; indirmeyi sürdür ve SHA-256 doğrula. Paketlenmiş iş akışlarını yeniden kullan. Kurulumdan önce donanımı ve hedef bağımlılık desteğini değerlendir; gerçek çekirdek, yükleme ve üretim denetimlerini kurulumdan sonra yap. Plan hazır olunca openh3_comfy_install action=request çağır ve kurulum kartı için comfyOperationId döndür. Etkin oturum politikasını izle: tam otomatik onay modunda ek onay istemeden doğrudan çalıştır; diğer modlarda indirmeyi başlatmak için kurulum kartında bir kez onay al. Analizde durma, tamamlanan taramaları tekrarlama veya sözlü onay isteme. Model ailesini koru; gerçek engeli tam hatası ve sonraki adımıyla kısaca bildir. Kurulum için kullanıcı üretim parametresi gerekmez.",
-      "repair": "Yerel {{family}} profili {{profile}} için tanı koy ve sınırlı bir onarım yap. Anlık görüntüyü ve diğer çalışan profilleri koru. Cihazı ve mevcut ortamı comfyui-local ve openh3_comfy_environment ile incele; uygun sabit sürümü, eksiksiz bileşenleri ve uyumlu iş akışını otomatik seç. ModelScope, doğrulanmış yerel aynalar ve resmi kaynağı sırayla tercih et; indirmeyi sürdür ve SHA-256 doğrula. Paketlenmiş iş akışlarını yeniden kullan. Kurulumdan önce donanımı ve hedef bağımlılık desteğini değerlendir; gerçek çekirdek, yükleme ve üretim denetimlerini kurulumdan sonra yap. Plan hazır olunca openh3_comfy_install action=request çağır ve kurulum kartı için comfyOperationId döndür. Etkin oturum politikasını izle: tam otomatik onay modunda ek onay istemeden doğrudan çalıştır; diğer modlarda indirmeyi başlatmak için kurulum kartında bir kez onay al. Analizde durma, tamamlanan taramaları tekrarlama veya sözlü onay isteme. Model ailesini koru; gerçek engeli tam hatası ve sonraki adımıyla kısaca bildir. Kurulum için kullanıcı üretim parametresi gerekmez.",
-      "install-other": "{{family}} için ayrı bir sürüm veya nicemleme profili kur; çalışan sürümü koru. Cihazı ve mevcut ortamı comfyui-local ve openh3_comfy_environment ile incele; uygun sabit sürümü, eksiksiz bileşenleri ve uyumlu iş akışını otomatik seç. ModelScope, doğrulanmış yerel aynalar ve resmi kaynağı sırayla tercih et; indirmeyi sürdür ve SHA-256 doğrula. Paketlenmiş iş akışlarını yeniden kullan. Kurulumdan önce donanımı ve hedef bağımlılık desteğini değerlendir; gerçek çekirdek, yükleme ve üretim denetimlerini kurulumdan sonra yap. Plan hazır olunca openh3_comfy_install action=request çağır ve kurulum kartı için comfyOperationId döndür. Etkin oturum politikasını izle: tam otomatik onay modunda ek onay istemeden doğrudan çalıştır; diğer modlarda indirmeyi başlatmak için kurulum kartında bir kez onay al. Analizde durma, tamamlanan taramaları tekrarlama veya sözlü onay isteme. Model ailesini koru; gerçek engeli tam hatası ve sonraki adımıyla kısaca bildir. Kurulum için kullanıcı üretim parametresi gerekmez."
+      "install": "comfyui-local ile cihazı otomatik algıla, uyumlu bir yerel {{family}} sürümü seç, uygun iş akışıyla birlikte indir ve kur.",
+      "repair": "comfyui-local ile yerel {{family}} profilini ({{profile}}) incele ve onar; diğer çalışan profilleri koru.",
+      "install-other": "comfyui-local ile cihazı algıla, uyumlu başka bir {{family}} sürümünü uygun iş akışıyla ayrı olarak indir ve kur; çalışan sürümleri koru."
     },
     "operation": {
       "title": "ComfyUI model planı",
@@ -169,7 +169,7 @@
       "invalid": "Ad, geçerli URL, anahtar ve desteklenen görsel modelini girin (ör. gpt-image-2.5-all).",
       "saveFailed": "Kaydedilemedi. Tekrar deneyin."
     },
-    "toolsCheckFailed": "Yerel üretim araçlarının denetimi başarısız oldu ({{reason}}). Uygulamayı yeniden başlatın veya güncelleyin ve model kartından tekrar deneyin. Hiçbir görev gönderilmedi."
+    "toolsCheckFailed": "Yerel ComfyUI araçları kullanılamıyor ({{reason}}). Bu, uygulama/oturum araç bağlantısı veya aktarımıyla ilgili bir sorundur; cihaz uyumsuzluğu anlamına gelmez. Donanım denetlenmedi ve görev başlatılmadı. OpenH3'ü yeniden başlatın veya güncelleyin ve model kartından tekrar deneyin."
   },
   "aiCreation": "Yapay zekâ ile oluştur",
   "aiCreationSubtitle": "Hayal gücünüzü esere dönüştürün",

@@ -328,18 +328,13 @@ character_book field in character card:
 
 ### Character Card and World Info Creation
 
-**When no files exist** (Important: Must actively guide user):
+**When the user requests a new character card or world info file**:
 
-1. **Active guidance process**:
-   - Step 1: Ask about story type and background setting
-   - Step 2: Ask about character details (type, personality, background, speaking style)
-   - Step 3: Ask about world setting (rules, locations, special settings, etc.)
+1. Use the story type, character details, and world setting already provided. Ask only for missing details that materially affect the result; if the user delegates creative choices, choose suitable details and proceed.
 
-2. **Confirm information**: Summarize user-provided information, wait for user confirmation before creating files
+2. Create `character.json` with the supplied character information. If the requested scope includes world-building, create `world-info.json` with relevant entries. An explicit creation request is sufficient authorization for these new local files; do not require a separate summary-confirmation turn. Preserve existing user files unless the user requested their replacement.
 
-3. **Create files**:
-   - After confirmation, create `character.json` with all character information
-   - If world-building elements mentioned, create `world-info.json` with relevant entries
+3. Report the created files and any creative assumptions. If no files exist but the user only requested roleplay, continue from the supplied context rather than requiring a file-creation interview.
 
 **Creation format**:
 

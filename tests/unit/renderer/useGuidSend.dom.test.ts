@@ -13,6 +13,7 @@ import { resetGuidDraft, setGuidTemplateSnapshot } from '@/renderer/pages/guid/h
 import { templateSnapshotFixture } from '../contentCatalog/galleryFixture';
 import { ensureBackendMcpCatalog } from '@/renderer/hooks/mcp/catalog';
 import { BackendHttpError } from '@/common/adapter/httpBridge';
+import { COMFY_FAMILIES } from '@/renderer/pages/guid/Creation/comfyDraft';
 
 const createConversationInvokeMock = vi.fn();
 const swrMutateMock = vi.fn();
@@ -90,6 +91,54 @@ const createDeps = (): GuidSendDeps => ({
 });
 
 describe('useGuidSend', () => {
+  it.each(
+    COMFY_FAMILIES.flatMap(({ family, name, kind }) =>
+      (['install', 'repair', 'install-other'] as const).flatMap((intent) =>
+        ['claude', 'aionrs'].map((backend) => ({ family, name, kind, intent, backend }))
+      )
+    )
+  )(
+    'keeps the short $family $intent Skill request bound in $backend sessions',
+    async ({ family, name, kind, intent, backend }) => {
+      const deps = createDeps();
+      const profileId = intent === 'repair' ? `${family}-existing` : undefined;
+      deps.creationIntent = { family, intent, profileId };
+      deps.input = `Use comfyui-local for ${name}.`;
+      deps.selectedAssistantBackend = backend;
+      deps.current_model = {
+        id: 'provider',
+        platform: 'openai',
+        use_model: 'test-model',
+        models: ['test-model'],
+      } as GuidSendDeps['current_model'];
+      deps.guidEnabledSkills = ['other-skill'];
+      deps.guidDisabledBuiltinSkills = ['comfyui-local', 'disabled-skill'];
+      const { result } = renderHook(() => useGuidSend(deps));
+      await act(async () => {
+        expect(await result.current.handleSend()).toBe(true);
+      });
+      const payload = createConversationInvokeMock.mock.calls[0][0];
+      expect(payload.assistant.conversation_overrides).toMatchObject({
+        skill_ids: ['other-skill', 'comfyui-local'],
+        disabled_builtin_skill_ids: ['disabled-skill'],
+        permission: 'bypassPermissions',
+      });
+      expect(payload.extra.creation_request).toMatchObject({ family, intent, profileId, name, kind, source: 'local' });
+      expect(payload.extra.selected_session_mcp_servers).toHaveLength(1);
+      expect(payload.extra.selected_session_mcp_servers[0].transport.env).toMatchObject({
+        OPENH3_CREATION_FAMILY: family,
+        OPENH3_CREATION_INTENT: intent,
+        ...(profileId ? { OPENH3_CREATION_PROFILE: profileId } : {}),
+      });
+      const storagePrefix = backend === 'aionrs' ? 'aionrs' : 'acp';
+      const initial = JSON.parse(sessionStorage.getItem(`${storagePrefix}_initial_message_conv-1`)!);
+      expect(initial.guidDraft).toBe(deps.input);
+      expect(initial.input).toBe(`${deps.input}\n\nguid.comfy.intentSummary`);
+      expect(initial.creationRequest).toEqual(payload.extra.creation_request);
+      expect(initial.creationRequestId).toBe(payload.extra.creation_request.requestId);
+    }
+  );
+
   it('refreshes the media transport and checks the actual tools before starting a Qwen installation chat', async () => {
     const deps = createDeps();
     deps.creationIntent = { family: 'qwen-edit', intent: 'install' };
@@ -193,6 +242,50 @@ describe('useGuidSend', () => {
     expect(createConversationInvokeMock).not.toHaveBeenCalled();
     expect(checkCreationToolsMock).not.toHaveBeenCalled();
     expect(deps.t).toHaveBeenCalledWith('guid.creation.toolsCheckFailed', { reason: 'COMFY_MCP_CATALOG_UNAVAILABLE' });
+  });
+
+  it('reports missing session tools instead of starting a model installation conversation', async () => {
+    const deps = createDeps();
+    deps.creationIntent = { family: 'qwen-edit', intent: 'install' };
+    vi.mocked(ensureBackendMcpCatalog).mockResolvedValueOnce({
+      allServers: [],
+      userServers: [],
+      builtinServers: [],
+    });
+
+    const { result } = renderHook(() => useGuidSend(deps));
+    await act(async () => {
+      expect(await result.current.handleSend()).toBe(false);
+    });
+
+    expect(checkCreationToolsMock).not.toHaveBeenCalled();
+    expect(createConversationInvokeMock).not.toHaveBeenCalled();
+    expect(deps.navigate).not.toHaveBeenCalled();
+    expect(Message.error).toHaveBeenCalledWith('guid.creation.toolsCheckFailed');
+    expect(deps.t).toHaveBeenCalledWith('guid.creation.toolsCheckFailed', {
+      reason: 'COMFY_MCP_SERVER_NOT_REGISTERED',
+    });
+  });
+
+  it('reports a missing environment tool as session-tool failure without creating a chat', async () => {
+    const deps = createDeps();
+    deps.creationIntent = { family: 'qwen-edit', intent: 'install' };
+    checkCreationToolsMock.mockResolvedValueOnce({
+      success: true,
+      tools: [{ name: 'openh3_comfy_profiles' }, { name: 'openh3_comfy_install' }],
+    });
+
+    const { result } = renderHook(() => useGuidSend(deps));
+    await act(async () => {
+      expect(await result.current.handleSend()).toBe(false);
+    });
+
+    expect(createConversationInvokeMock).not.toHaveBeenCalled();
+    expect(deps.navigate).not.toHaveBeenCalled();
+    expect(deps.t).toHaveBeenCalledWith(
+      'guid.creation.toolsCheckFailed',
+      expect.objectContaining({ reason: 'COMFY_REQUIRED_TOOLS_MISSING: openh3_comfy_environment' })
+    );
   });
   it('preserves an unsent draft when conversation creation fails', async () => {
     const deps = createDeps();

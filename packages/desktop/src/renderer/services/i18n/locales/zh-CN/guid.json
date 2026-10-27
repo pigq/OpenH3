@@ -58,7 +58,7 @@
       "invalid": "请填写名称、有效地址、Key 和支持的图片模型（如 gpt-image-2.5-all）。",
       "saveFailed": "保存失败，请重试。"
     },
-    "toolsCheckFailed": "本地创作工具检查失败（{{reason}}）。请重启或更新应用，再从模型卡重试；尚未创建创作任务。"
+    "toolsCheckFailed": "本地 ComfyUI 工具检查失败（{{reason}}）。这是应用/会话工具连接问题，不代表设备不兼容；尚未检测硬件或提交任务。请重启或更新应用，再从模型卡重试。"
   },
   "templatePlay": "播放 {{title}}",
   "templatePause": "暂停 {{title}}",
@@ -325,11 +325,11 @@
       "install-other": "其他版本",
       "generate": "生成"
     },
-    "intentSummary": "本地模型任务：{{model}} · {{intent}}。目标配置：{{profile}}。保持当前家族与任务，按 comfyui-local 检测、选配并提交任务；遵循会话实际审批模式，全自动审批直接安装，其他模式仅在安装卡确认一次。生成验证在安装后完成。",
+    "intentSummary": "本地模型：{{model}} · {{intent}} · {{profile}}。",
     "prompts": {
-      "install": "帮我安装本地 {{family}} 并接入 ComfyUI。 使用 comfyui-local，通过 openh3_comfy_environment 检测设备与现有环境，自动选出适合的固定版本、完整配套组件及匹配工作流。下载依次使用 ModelScope（魔搭）、已核验国内镜像、官方源，支持断点续传并校验 SHA-256；随应用提供的工作流直接复用。安装前判断硬件和目标依赖的支持情况，真实内核、加载与生成验证放在安装后。方案齐备立即调用 openh3_comfy_install action=request，返回 comfyOperationId 展示安装卡；遵循会话当前审批权限：全自动审批时直接执行，不再要求确认；其他模式在安装卡确认一次后开始下载。不要停在环境分析、反复扫描或另索口头确认。保持当前模型家族，遇到实际阻塞时简短说明准确错误及下一步；安装不需要我提供生成参数。",
-      "repair": "检查并有界修复本地 {{family}} 配置 {{profile}}，先定位日志中的故障并保存快照，保留其他可用配置。 使用 comfyui-local，通过 openh3_comfy_environment 检测设备与现有环境，自动选出适合的固定版本、完整配套组件及匹配工作流。下载依次使用 ModelScope（魔搭）、已核验国内镜像、官方源，支持断点续传并校验 SHA-256；随应用提供的工作流直接复用。安装前判断硬件和目标依赖的支持情况，真实内核、加载与生成验证放在安装后。方案齐备立即调用 openh3_comfy_install action=request，返回 comfyOperationId 展示安装卡；遵循会话当前审批权限：全自动审批时直接执行，不再要求确认；其他模式在安装卡确认一次后开始下载。不要停在环境分析、反复扫描或另索口头确认。保持当前模型家族，遇到实际阻塞时简短说明准确错误及下一步；安装不需要我提供生成参数。",
-      "install-other": "为本地 {{family}} 安装独立的其他版本或量化配置，保留当前可用版本。 使用 comfyui-local，通过 openh3_comfy_environment 检测设备与现有环境，自动选出适合的固定版本、完整配套组件及匹配工作流。下载依次使用 ModelScope（魔搭）、已核验国内镜像、官方源，支持断点续传并校验 SHA-256；随应用提供的工作流直接复用。安装前判断硬件和目标依赖的支持情况，真实内核、加载与生成验证放在安装后。方案齐备立即调用 openh3_comfy_install action=request，返回 comfyOperationId 展示安装卡；遵循会话当前审批权限：全自动审批时直接执行，不再要求确认；其他模式在安装卡确认一次后开始下载。不要停在环境分析、反复扫描或另索口头确认。保持当前模型家族，遇到实际阻塞时简短说明准确错误及下一步；安装不需要我提供生成参数。"
+      "install": "调用 comfyui-local，自动检测设备并选配、下载安装本地 {{family}} 及匹配工作流。",
+      "repair": "调用 comfyui-local，检测并修复本地 {{family}} 配置 {{profile}}，保留其他可用配置。",
+      "install-other": "调用 comfyui-local，自动检测设备并选配、下载安装本地 {{family}} 的独立其他版本及匹配工作流，保留现有可用版本。"
     },
     "operation": {
       "title": "ComfyUI 模型方案",

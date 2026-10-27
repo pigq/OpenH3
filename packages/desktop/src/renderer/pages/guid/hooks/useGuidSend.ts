@@ -231,7 +231,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
         return false;
       }
       if (!required) {
-        Message.error(t('guid.creation.toolsUnavailable'));
+        Message.error(t('guid.creation.toolsCheckFailed', { reason: 'COMFY_MCP_SERVER_NOT_REGISTERED' }));
         return false;
       }
       const sessionServers =

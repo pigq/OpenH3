@@ -1,7 +1,8 @@
-# Team 提示词体系（AionUi 参考实现）
+# Team 提示词体系
 
-> 本文档完整记录 AionUi main 分支中 team 模块的三层提示词设计。
-> 源码路径前缀：`/Volumes/Macintosh HD/Users/zhuqingyu/project/AionUi/src/process/team/prompts/`
+> 当前执行合同以 `openh3-team-prompts/src/role_prompt.rs` 和
+> `openh3-api-types/src/team_tools.rs` 为准。本文保留部分 AionUi 设计背景；
+> 历史 TypeScript 路径和旧 model 接口不代表当前 Rust 工具协议。
 
 **相关文档**：
 - [MCP 通信](./mcp.md) — Team 内部 MCP 的 `team_*` 工具定义
@@ -61,14 +62,14 @@
 ```
 Step 1:  收到用户请求
 Step 2:  判断是否需要更多 teammate
-Step 3:  需要 → 先调 team_list_models 查可用 model
-Step 4:  回复文本：一句话理由 + 阵容表（name / responsibility / type / model）
-Step 5:  问用户是否同意，同时告知"后续可以随时调整阵容"
-Step 6:  **结束 turn，不调 team_spawn_agent**
-Step 7:  等用户确认
+Step 3:  需要 → 先调 team_list_assistants 查可用 assistant
+Step 4:  用户已经明确要求委派、创建 teammate 或并行工作 → 选最小必要阵容并直接 team_spawn_agent
+Step 5:  尚未授权 → 回复一句话理由 + 阵容表（name / responsibility / assistant）
+Step 6:  仅对尚未授权的提案询问是否同意，告知后续可调整阵容
+Step 7:  未获授权时结束 turn，等待用户确认；已有授权不要重复确认
 Step 8:  确认后 → team_spawn_agent
 Step 9:  建任务 → team_task_create
-Step 10: 分配任务 → team_send_message
+Step 10: 任务 owner 已指定时无需重复 team_send_message
 ```
 
 ### Preset Assistant 选择逻辑
@@ -215,20 +216,22 @@ summary: string (optional) — A short 5-10 word summary for the UI
 ```
 Create a new teammate agent to join the team.
 
-Use this only when one of the following is true:
+Use this when one of the following is true:
 - The user explicitly approved the proposed teammate lineup in a previous message
-- The user explicitly instructed you to create a specific teammate immediately
+- The user authorized delegation for this task, for example by asking for subagents, teammates, or parallel work
 
-Before calling this tool in the normal planning flow:
+If delegation was already authorized, choose the minimum useful lineup and proceed without another confirmation.
+
+Before calling this tool when delegation has not yet been authorized:
 - Start with one short sentence explaining why additional teammates would help
 - Tell the user which teammate(s) you recommend
 - Present the proposal as a table with: name, responsibility, recommended agent type/backend, and recommended model
 - Include each teammate's responsibility, recommended agent type/backend, and model
 - Ask whether to create them as proposed or change any names, responsibilities, or agent types
 - In that approval question, remind the user that they can later ask you to replace or adjust any teammate if the lineup is not working well
-- Do NOT call this tool in that same turn; wait for explicit approval in a later user message
+- If the user already authorized delegation, do not ask for another confirmation turn
 
-When calling this tool, provide the model parameter if a specific model was recommended and approved.
+When calling this tool, provide assistant_id from team_list_assistants. Do not provide a model parameter.
 
 The new agent will be created and added to the team. You can then assign tasks and send messages to it.
 ```
@@ -402,8 +405,8 @@ agent_type: string (optional) — Agent type/backend to query (e.g. "gemini", "c
 
 ## 6. 关键设计决策（从 prompt 反推的产品意图）
 
-1. **"先确认再 spawn"不是建议，是硬性要求** — prompt 里用 "STRICT — follow every step, do NOT skip" 强调
-2. **Model 选择是 agent 的职责** — 用户确认的是阵容表（含 model 推荐），agent 要先查 `list_models` 再推荐
+1. **未经授权的阵容先确认** — 用户已明确要求委派/并行/立即创建时，不再重复确认
+2. **Assistant 选择是 agent 的职责** — 用户确认的是阵容表，agent 要先查 `team_list_assistants` 再推荐
 3. **Preset assistant 优先于通用 agent** — "When a task matches a preset's specialty, prefer spawning the preset over a generic CLI agent"
 4. **Standing by = 结束 turn** — 这是防止 LLM stream 超时的关键设计，不是可选的
 5. **依赖串行不能并行等待** — "B 等 A" 的正确做法是"A 完成后才派 B"，不是"同时派 A 和 B 让 B stand by"

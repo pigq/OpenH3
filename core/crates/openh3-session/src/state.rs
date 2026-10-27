@@ -314,8 +314,8 @@ pub fn is_requires_action(state: &SessionState) -> bool {
 ///
 /// The backend half (`background_active`, tasks that outlive the turn that
 /// started them) is OR'd in by the orchestrator when it builds
-/// `StateSnapshot.has_activity`. It is constant-false today — a KNOWN GAP, NOT a
-/// correct terminal value.
+/// `StateSnapshot.has_activity`. The orchestrator owns that roster because the
+/// reducer is intentionally a pure event fold.
 ///
 /// ⚠️ CORRECTION (2026-06-13): an earlier version claimed background_active=false
 /// was "empirically correct" / semantic-② "structurally unreachable", citing a C1
@@ -326,7 +326,7 @@ pub fn is_requires_action(state: &SessionState) -> bool {
 /// workflow's 60s sleep still runs, and `result` is deferred to workflow
 /// completion. So semantic-② (a task running while you can still talk) IS reachable.
 /// See `orchestrator::fold_one` + protocols/samples/claude-cli/2.1.176/
-/// WORKFLOW-VS-BASH-BACKGROUND.md for the full finding and the planned fix.
+/// WORKFLOW-VS-BASH-BACKGROUND.md for the measured behavior and implementation.
 pub fn has_foreground_activity(state: &SessionState) -> bool {
     match state {
         SessionState::Starting => true,

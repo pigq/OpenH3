@@ -258,8 +258,9 @@ mod tests {
         assert!(prompt.contains("## Workflow"));
         assert!(prompt.contains("FIRST call `team_members`"));
         assert!(prompt.contains("call `team_list_assistants`"));
-        assert!(prompt.contains("Wait for explicit confirmation before using team_spawn_agent"));
-        assert!(prompt.contains("End your turn after the proposal"));
+        assert!(prompt.contains("If the user explicitly authorizes you to delegate this task"));
+        assert!(prompt.contains("do not ask for confirmation again"));
+        assert!(prompt.contains("End your turn after an unapproved proposal"));
 
         // Assistant selection, not model selection.
         assert!(prompt.contains("## Assistant Selection Guidelines"));

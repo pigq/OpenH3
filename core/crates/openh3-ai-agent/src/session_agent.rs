@@ -781,6 +781,31 @@ impl SessionAgentTask {
         request_id: &str,
         answers: Option<Vec<openh3_api_types::AskQuestionAnswer>>,
     ) -> Result<(), AgentError> {
+        let backend = self.backend.clone();
+        let conv_id = self.conversation_id.clone();
+        let command = Self::ask_answer_command(request_id, answers);
+        tokio::spawn(async move {
+            let _ = dispatch_confirmation_answer(backend.as_ref(), &conv_id, command).await;
+        });
+        Ok(())
+    }
+
+    /// Deliver an answer before acknowledging it to an HTTP caller. Transport
+    /// failures leave the confirmation visible and retryable.
+    pub async fn answer_ask_and_wait(
+        &self,
+        request_id: &str,
+        answers: Option<Vec<openh3_api_types::AskQuestionAnswer>>,
+    ) -> Result<(), AgentError> {
+        dispatch_confirmation_answer(
+            self.backend.as_ref(),
+            &self.conversation_id,
+            Self::ask_answer_command(request_id, answers),
+        )
+        .await
+    }
+
+    fn ask_answer_command(request_id: &str, answers: Option<Vec<openh3_api_types::AskQuestionAnswer>>) -> Command {
         // api-types is the conversation layer's currency; convert to the
         // session command's own type at this boundary.
         let answers = answers.map(|list| {
@@ -791,32 +816,10 @@ impl SessionAgentTask {
                 })
                 .collect::<Vec<_>>()
         });
-        let backend = self.backend.clone();
-        let request_id = request_id.to_string();
-        let conv_id = self.conversation_id.clone();
-        // Same fire-and-forget shape as confirm(): the REST reply has already
-        // returned by the time the dispatch runs, so a failure here MUST be
-        // surfaced in the log or a wedged ask is undiagnosable in production.
-        tokio::spawn(async move {
-            let command = openh3_session::Command::AnswerAsk {
-                request_id: request_id.clone(),
-                answers,
-            };
-            match backend.dispatch(command).await {
-                Ok(_) => tracing::info!(
-                    conv_id = %conv_id,
-                    request_id = %request_id,
-                    "ask answer delivered to backend (dedicated channel)"
-                ),
-                Err(e) => tracing::error!(
-                    conv_id = %conv_id,
-                    request_id = %request_id,
-                    error = %e,
-                    "ask answer FAILED after REST reply already returned success — claude stays blocked on can_use_tool"
-                ),
-            }
-        });
-        Ok(())
+        Command::AnswerAsk {
+            request_id: request_id.to_owned(),
+            answers,
+        }
     }
 
     /// `always_allow` (legacy flag) forces AllowAlways regardless.
@@ -827,6 +830,32 @@ impl SessionAgentTask {
         data: serde_json::Value,
         always_allow: bool,
     ) -> Result<(), AgentError> {
+        let backend = self.backend.clone();
+        let conv_id = self.conversation_id.clone();
+        let command = Self::permission_answer_command(call_id, data, always_allow);
+        tokio::spawn(async move {
+            let _ = dispatch_confirmation_answer(backend.as_ref(), &conv_id, command).await;
+        });
+        Ok(())
+    }
+
+    /// Await backend delivery so callers remove a pending card only on success.
+    pub async fn confirm_and_wait(
+        &self,
+        _msg_id: &str,
+        call_id: &str,
+        data: serde_json::Value,
+        always_allow: bool,
+    ) -> Result<(), AgentError> {
+        dispatch_confirmation_answer(
+            self.backend.as_ref(),
+            &self.conversation_id,
+            Self::permission_answer_command(call_id, data, always_allow),
+        )
+        .await
+    }
+
+    fn permission_answer_command(call_id: &str, data: serde_json::Value, always_allow: bool) -> Command {
         use openh3_session::PermissionDecision;
         let picked = confirm_option_id(&data);
         let (decision, selected) = if always_allow {
@@ -841,39 +870,12 @@ impl SessionAgentTask {
                 Some(label) => (PermissionDecision::Approved, Some(label.to_owned())),
             }
         };
-        let backend = self.backend.clone();
-        let request_id = call_id.to_string();
-        let conv_id = self.conversation_id.clone();
-        // dispatch is async; confirm() is sync in IAgentTask's sibling API, so
-        // fire-and-forget on the runtime (the answer rides the stdin FIFO). The
-        // REST confirm has already returned success by the time this runs, so a
-        // dispatch failure here is INVISIBLE to the caller — it MUST be surfaced
-        // in the log or a wedged permission (claude blocked forever on
-        // can_use_tool) is undiagnosable in production.
-        tokio::spawn(async move {
-            match backend
-                .dispatch(Command::AnswerPermission {
-                    request_id: request_id.clone(),
-                    decision,
-                    selected,
-                    answers: Vec::new(),
-                })
-                .await
-            {
-                Ok(_) => tracing::info!(
-                    conv_id = %conv_id,
-                    request_id = %request_id,
-                    "permission answer delivered to backend"
-                ),
-                Err(e) => tracing::error!(
-                    conv_id = %conv_id,
-                    request_id = %request_id,
-                    error = %e,
-                    "permission answer FAILED after REST confirm already returned success — claude stays blocked on can_use_tool"
-                ),
-            }
-        });
-        Ok(())
+        Command::AnswerPermission {
+            request_id: call_id.to_owned(),
+            decision,
+            selected,
+            answers: Vec::new(),
+        }
     }
 
     /// Resolve the catalog to serve: the backend's LIVE `capabilities()` when it has
@@ -917,7 +919,7 @@ impl SessionAgentTask {
         (models, current_model, modes, current_mode)
     }
 
-    /// Current mode: the optimistic override (last `set_config_option("mode")`) wins
+    /// Current mode: the last agent-confirmed runtime value wins
     /// over the capabilities snapshot, which lags an in-band switch.
     pub async fn mode(&self) -> Result<openh3_api_types::AgentModeResponse, AgentError> {
         let caps = self.backend.capabilities();
@@ -1139,6 +1141,10 @@ impl SessionAgentTask {
                 value: value.to_string(),
             },
         };
+        // Subscribe before dispatch so an immediate status/rejection cannot race
+        // the HTTP acknowledgement. The pump independently consumes the same
+        // broadcast events for persistence and connected clients.
+        let mode_events = (option_id == "mode").then(|| self.backend.events());
         self.backend
             .dispatch(cmd)
             .await
@@ -1151,15 +1157,9 @@ impl SessionAgentTask {
         // through `CommandReceipt`, would touch ~58 construction sites for one bit).
         let deferred = option_id == "mode"
             && self.backend.capabilities().mode_switch_effect == openh3_session::ModeSwitchEffect::NextTurn;
-        // Cache the requested value as an optimistic override for mode/model, then
-        // re-read the config-options snapshot so the response satisfies the frontend's
-        // `hasObservedValue` contract (confirmation == Observed AND the option's
-        // current_value == requested). This is required because claude's own
-        // `capabilities()` does NOT reflect an in-band switch synchronously (set_model
-        // has no confirmation wire; set_permission_mode confirms only via a later
-        // async system/status), so without the override the option would never read
-        // back as observed and the frontend would reject the switch as `command_ack`.
-        // Mirrors the clean-slate runtime's optimistic override + observed re-read.
+        // Mode has an authoritative confirmation event, so a transport receipt
+        // must not manufacture Observed by reading back its own requested value.
+        // Model/effort keep their existing optimistic semantics (no mode echo).
         // effort/thought_level is now a surfaced picker option too (id `reasoning_effort`,
         // category `thought_level`), so it also caches an override + falls through to the
         // observed re-read — the frontend's `hasObservedValue` requires Observed AND the
@@ -1173,7 +1173,14 @@ impl SessionAgentTask {
             // the event pump adopts the new one when the agent confirms it.
             "mode" => {
                 if !deferred {
-                    self.runtime.set_mode_override(value.to_string());
+                    let confirmed = self.backend.capabilities().current_mode.as_deref() == Some(value)
+                        || match mode_events {
+                            Some(events) => wait_for_mode_confirmation(events, value).await?,
+                            None => false,
+                        };
+                    if confirmed {
+                        self.runtime.set_mode_override(value.to_string());
+                    }
                 }
             }
             "model" => self.runtime.set_model_override(value.to_string()),
@@ -3050,7 +3057,6 @@ fn spawn_event_pump(
                 // turns (forward + persist), so no pump-side broadcast bypass.
                 let _ = runtime.tx.send(AgentStreamEvent::WorkflowProgress(data));
             }
-            runtime.set_live_background_tasks(workflow_cards.len());
 
             // Track in-flight workflow/subagent refs so a non-blocking Workflow's
             // intermediate `result` frame does not prematurely terminate the turn.
@@ -3152,7 +3158,6 @@ fn spawn_event_pump(
                             ) {
                                 let _ = runtime.tx.send(AgentStreamEvent::WorkflowProgress(data));
                             }
-                            runtime.set_live_background_tasks(workflow_cards.len());
                             // Same per-turn closure the real terminal arm performs:
                             // close every tool call left open as Canceled BEFORE the
                             // Finish (the relay stops forwarding the turn at Finish).
@@ -3168,6 +3173,7 @@ fn spawn_event_pump(
                                     parent_call_id: None,
                                 }));
                             }
+                            runtime.set_live_background_tasks(0);
                             tool_output.clear();
                             tool_name.clear();
                             saw_visible_output = false;
@@ -3260,7 +3266,6 @@ fn spawn_event_pump(
                     ) {
                         let _ = runtime.tx.send(AgentStreamEvent::WorkflowProgress(data));
                     }
-                    runtime.set_live_background_tasks(workflow_cards.len());
                     // Calls deliberately left running past this turn end (see below);
                     // re-registered after the drain so their late frames still resolve.
                     let mut kept_open: Vec<(String, String)> = Vec::new();
@@ -3345,6 +3350,19 @@ fn spawn_event_pump(
                 } => runtime.set_session_id(bid.clone()),
                 _ => {}
             }
+            // Detached exec calls have no workflow card, but still own live
+            // processes after Finish. Count both sources for idle protection,
+            // and recompute after ToolResult/terminal drains so it is released.
+            runtime.set_live_background_tasks(
+                workflow_cards.len()
+                    + open_tools
+                        .keys()
+                        .filter(|call_id| {
+                            is_detached_exec_call(tool_args.get(*call_id))
+                                && !workflow_cards.values().any(|card| card.call_id() == call_id.as_str())
+                        })
+                        .count(),
+            );
             // Persist the Tier-2 side-effects the legacy ACP path wrote via
             // AcpSessionSyncService (which this direct-CLI path bypasses). Best-effort:
             // a repo error is warn-logged, never fatal to the stream.
@@ -3462,7 +3480,7 @@ fn spawn_event_pump(
         ) {
             let _ = runtime.tx.send(AgentStreamEvent::WorkflowProgress(data));
         }
-        runtime.set_live_background_tasks(workflow_cards.len());
+        runtime.set_live_background_tasks(0);
     });
 }
 
@@ -3730,9 +3748,58 @@ async fn persist_context_usage(
     }
 }
 
-/// Extract the picked option id from the confirm `data` payload. The frontend sends
-/// either a bare string (the option_id) or an object `{option_id|optionId|value}`.
-/// Mirrors the ACP path's `confirm_option_id`.
+/// Wait only for an actual mode observation or rejection, bounded separately
+/// from turn execution. An ACK with no matching status remains CommandAck.
+async fn wait_for_mode_confirmation(
+    mut events: BoxStream<'static, SessionEnvelope>,
+    requested: &str,
+) -> Result<bool, AgentError> {
+    use futures_util::StreamExt as _;
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while let Some(envelope) = events.next().await {
+            match envelope.event {
+                SessionEvent::ConfigChanged { mode: Some(mode), .. } if mode == requested => return Ok(true),
+                SessionEvent::AdapterSpecific { tag, payload } if tag == "mode_switch_rejected" => {
+                    if let Some(error) = payload.get("error").and_then(serde_json::Value::as_str) {
+                        return Err(AgentError::bad_gateway(error));
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(false)
+    })
+    .await
+    .unwrap_or(Ok(false))
+}
+
+/// Shared delivery boundary for awaited API answers and legacy queued callers.
+async fn dispatch_confirmation_answer(
+    backend: &dyn SessionBackend,
+    conversation_id: &str,
+    command: Command,
+) -> Result<(), AgentError> {
+    let request_id = match &command {
+        Command::AnswerPermission { request_id, .. } | Command::AnswerAsk { request_id, .. } => request_id.clone(),
+        _ => unreachable!("confirmation dispatcher only accepts answers"),
+    };
+    match backend.dispatch(command).await {
+        Ok(receipt) if receipt.accepted => {
+            tracing::info!(conversation_id, %request_id, "confirmation answer delivered to backend");
+            Ok(())
+        }
+        result => {
+            let error = match result {
+                Err(error) => error.to_string(),
+                Ok(_) => "backend did not accept confirmation answer".to_owned(),
+            };
+            tracing::error!(conversation_id, %request_id, %error, "confirmation answer delivery failed");
+            Err(AgentError::bad_gateway(error))
+        }
+    }
+}
+
+/// Extract a picked option from either the bare id or the legacy object shape.
 fn confirm_option_id(data: &serde_json::Value) -> Option<String> {
     match data {
         serde_json::Value::String(v) => Some(v.clone()),
@@ -4571,6 +4638,20 @@ fn translate_event(event: SessionEvent, conversation_id: &str, terminal_result_s
                 supersedes_key,
             })]
         }
+        SessionEvent::AdapterSpecific { tag, payload } if tag == "mode_switch_rejected" => payload
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .map(|message| {
+                tracing::warn!(conversation_id, "agent rejected permission mode switch");
+                vec![AgentStreamEvent::Tips(TipsEventData {
+                    content: message.to_owned(),
+                    tip_type: TipType::Warning,
+                    code: None,
+                    params: None,
+                    supersedes_key: None,
+                })]
+            })
+            .unwrap_or_default(),
         // Agent-generated session title (claude generate_session_title, spec
         // 2026-08-04). Reuse the ACP session_info_update event shape so the
         // StreamRelay's name_source-guarded consumer handles both paths
@@ -7171,6 +7252,105 @@ mod pump_tests {
         );
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn detached_exec_protects_idle_session_until_tool_result() {
+        struct DetachedBackend {
+            started: Arc<tokio::sync::Notify>,
+            completion: Arc<tokio::sync::Notify>,
+        }
+        #[async_trait::async_trait]
+        impl SessionBackend for DetachedBackend {
+            async fn dispatch(&self, _command: Command) -> Result<CommandReceipt, BackendError> {
+                Ok(CommandReceipt {
+                    accepted: true,
+                    admission: Admission::NoTurn,
+                    turn_gen: 1,
+                })
+            }
+            fn events(&self) -> BoxStream<'static, SessionEnvelope> {
+                use futures_util::StreamExt as _;
+                let started = self.started.clone();
+                let completion = self.completion.clone();
+                let prefix = vec![
+                    env(SessionEvent::ToolCall {
+                        tool_use_id: "detached-idle".into(),
+                        name: "commandExecution".into(),
+                        subagent: openh3_session::SubagentKind::Inline,
+                        input: serde_json::json!({ "type": "commandExecution", "source": "unifiedExecStartup" }),
+                        parent_tool_use_id: None,
+                    }),
+                    env(SessionEvent::TurnResult {
+                        is_error: false,
+                        api_error_status: None,
+                        result_text: String::new(),
+                        epoch: 0,
+                        outcome: openh3_session::TurnOutcome::EndTurn,
+                    }),
+                ];
+                futures_util::stream::once(async move { started.notified().await })
+                    .flat_map(move |_| futures_util::stream::iter(prefix.clone()))
+                    .chain(futures_util::stream::once(async move {
+                        completion.notified().await;
+                        env(SessionEvent::ToolResult {
+                            tool_use_id: "detached-idle".into(),
+                            is_error: false,
+                            content: Vec::new(),
+                            parent_tool_use_id: None,
+                        })
+                    }))
+                    .chain(futures_util::stream::pending())
+                    .boxed()
+            }
+            fn capabilities(&self) -> Capabilities {
+                Capabilities::default()
+            }
+        }
+        let completion = Arc::new(tokio::sync::Notify::new());
+        let started = Arc::new(tokio::sync::Notify::new());
+        let task = SessionAgentTask::new(
+            AgentType::Acp,
+            "conv-idle".into(),
+            "user-1".into(),
+            "/w".into(),
+            Arc::new(DetachedBackend {
+                started: started.clone(),
+                completion: completion.clone(),
+            }),
+            None,
+        );
+        let mut events = task.subscribe();
+        started.notify_one();
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while !matches!(events.recv().await.unwrap(), AgentStreamEvent::Finish(_)) {}
+        })
+        .await
+        .expect("launch turn completes while exec is still running");
+        assert_eq!(task.status(), Some(ConversationStatus::Finished));
+        assert_eq!(
+            task.live_background_tasks(),
+            1,
+            "detached exec must protect the finished session from idle cleanup"
+        );
+        completion.notify_one();
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if let AgentStreamEvent::ToolCall(data) = events.recv().await.unwrap()
+                    && data.call_id == "detached-idle"
+                    && data.status == ToolCallStatus::Completed
+                {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("late completion settles detached exec");
+        assert_eq!(
+            task.live_background_tasks(),
+            0,
+            "completed exec must stop protecting idle cleanup"
+        );
+    }
+
     /// The detached exec's terminal lands MINUTES after the turn ended. The
     /// per-turn name map must keep the entry for calls left open, or the late
     /// frame goes out nameless and the card re-renders with a blank title.
@@ -9476,12 +9656,9 @@ mod pump_tests {
         }
     }
 
-    // set_config_option("mode") must return Observed with the requested value even
-    // though capabilities().current_mode never moves — the optimistic override drives
-    // the observed re-read. (Regression guard for the "switching mode → command_ack"
-    // error the origin frontend rejects.)
+    // A transport ACK alone must not claim the requested mode is in force.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn set_config_option_mode_returns_observed_via_override() {
+    async fn set_config_option_mode_requires_observed_confirmation() {
         let backend: Arc<dyn SessionBackend> = Arc::new(StaticCapsBackend);
         let task = SessionAgentTask::new(
             AgentType::Acp,
@@ -9493,16 +9670,109 @@ mod pump_tests {
         );
         let resp = task.set_config_option("mode", "plan").await.unwrap();
         assert!(
-            matches!(resp.confirmation, openh3_api_types::ConfigOptionConfirmation::Observed),
-            "mode switch must be Observed, got {:?}",
+            matches!(
+                resp.confirmation,
+                openh3_api_types::ConfigOptionConfirmation::CommandAck
+            ),
+            "a write without an agent confirmation is only CommandAck, got {:?}",
             resp.confirmation
         );
         let opts = resp.config_options.expect("config_options present");
         let mode_opt = opts.iter().find(|o| o.id == "mode").expect("mode option");
         assert_eq!(
             mode_opt.current_value.as_deref(),
-            Some("plan"),
-            "current_value reflects the switch"
+            Some("default"),
+            "current_value must retain the last confirmed mode"
+        );
+    }
+
+    struct ModeControlBackend {
+        tx: broadcast::Sender<SessionEnvelope>,
+        reject: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl SessionBackend for ModeControlBackend {
+        async fn dispatch(&self, command: Command) -> Result<CommandReceipt, BackendError> {
+            let Command::SetMode { mode } = command else {
+                panic!("expected mode switch")
+            };
+            let event = if self.reject {
+                SessionEvent::AdapterSpecific {
+                    tag: "mode_switch_rejected".into(),
+                    payload: serde_json::json!({ "error": "Cannot set permission mode to plan" }),
+                }
+            } else {
+                SessionEvent::ConfigChanged {
+                    mode: Some(mode),
+                    model: None,
+                }
+            };
+            let _ = self.tx.send(env(event));
+            Ok(CommandReceipt {
+                accepted: true,
+                admission: Admission::NoTurn,
+                turn_gen: 0,
+            })
+        }
+        fn events(&self) -> BoxStream<'static, SessionEnvelope> {
+            use futures_util::StreamExt as _;
+            futures_util::stream::unfold(self.tx.subscribe(), |mut rx| async move {
+                loop {
+                    match rx.recv().await {
+                        Ok(event) => return Some((event, rx)),
+                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Closed) => return None,
+                    }
+                }
+            })
+            .boxed()
+        }
+        fn capabilities(&self) -> Capabilities {
+            StaticCapsBackend.capabilities()
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn mode_switch_uses_agent_confirmation_and_propagates_rejection() {
+        for reject in [false, true] {
+            let (tx, _) = broadcast::channel(16);
+            let task = SessionAgentTask::new(
+                AgentType::Acp,
+                "conv-1".into(),
+                "user-1".into(),
+                "/w".into(),
+                Arc::new(ModeControlBackend { tx, reject }),
+                None,
+            );
+            let result = task.set_config_option("mode", "plan").await;
+            if reject {
+                let error = result.expect_err("agent rejection must reach the caller");
+                assert!(error.to_string().contains("Cannot set permission mode"), "{error}");
+                assert_eq!(task.mode().await.unwrap().mode, "default");
+            } else {
+                assert!(matches!(
+                    result.unwrap().confirmation,
+                    openh3_api_types::ConfigOptionConfirmation::Observed
+                ));
+                assert_eq!(task.mode().await.unwrap().mode, "plan");
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn late_mode_rejection_is_visible() {
+        let events = drain_script(vec![env(SessionEvent::AdapterSpecific {
+            tag: "mode_switch_rejected".into(),
+            payload: serde_json::json!({ "error": "Cannot set permission mode to plan" }),
+        })])
+        .await;
+        assert!(
+            events.iter().any(|event| matches!(
+                event, AgentStreamEvent::Tips(data) if data.content.contains("Cannot set permission mode")
+                    && matches!(data.tip_type, TipType::Warning)
+            )),
+            "a late rejection must not disappear: {events:?}"
         );
     }
 

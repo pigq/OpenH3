@@ -6,8 +6,9 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-const { getClientBusinessSettingMock, mcpServiceMock } = vi.hoisted(() => ({
+const { getClientBusinessSettingMock, mcpServiceMock, waitForBackendMigrationsMock } = vi.hoisted(() => ({
   getClientBusinessSettingMock: vi.fn(),
+  waitForBackendMigrationsMock: vi.fn(),
   mcpServiceMock: {
     listServers: { invoke: vi.fn() },
   },
@@ -26,6 +27,11 @@ import { ensureBackendMcpCatalog } from '@/renderer/hooks/mcp/catalog';
 describe('ensureBackendMcpCatalog', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      value: { waitForBackendMigrations: waitForBackendMigrationsMock },
+    });
+    waitForBackendMigrationsMock.mockResolvedValue(true);
     getClientBusinessSettingMock.mockResolvedValue([]);
     mcpServiceMock.listServers.invoke.mockResolvedValue([
       {
@@ -39,6 +45,24 @@ describe('ensureBackendMcpCatalog', () => {
         builtin: false,
       },
     ]);
+  });
+
+  it('waits for desktop MCP bootstrap migrations before reading the catalog', async () => {
+    await ensureBackendMcpCatalog();
+
+    expect(waitForBackendMigrationsMock).toHaveBeenCalledTimes(1);
+    expect(waitForBackendMigrationsMock.mock.invocationCallOrder[0]).toBeLessThan(
+      mcpServiceMock.listServers.invoke.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('does not read an incomplete catalog while the desktop backend is starting', async () => {
+    waitForBackendMigrationsMock.mockResolvedValueOnce(false);
+
+    await expect(ensureBackendMcpCatalog()).rejects.toThrow('BACKEND_MIGRATIONS_NOT_READY');
+
+    expect(getClientBusinessSettingMock).not.toHaveBeenCalled();
+    expect(mcpServiceMock.listServers.invoke).not.toHaveBeenCalled();
   });
 
   it('reads MCP catalog from backend settings without falling back to configService', async () => {
@@ -60,6 +84,7 @@ describe('ensureBackendMcpCatalog', () => {
     expect(result.userServers).toHaveLength(1);
     expect(result.builtinServers).toHaveLength(1);
     expect(result.allServers).toHaveLength(2);
+    expect(waitForBackendMigrationsMock).toHaveBeenCalledTimes(1);
   });
 
   it('does not re-import legacy user MCP rows from backend client settings at runtime', async () => {

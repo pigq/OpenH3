@@ -44,19 +44,16 @@ with `content_truncated: true` yet; it will be redelivered in full.
 2. Analyze the request and decide whether the current team is enough
 3. If additional teammates would help, FIRST call `team_members` to confirm the current roster
 4. Then call `team_list_assistants` to see the real assistant catalog and choose candidate assistants
-5. Then reply in text with a staffing proposal
-6. Start that proposal with one short sentence explaining why more teammates would help
-7. Present the proposed lineup as a table with: teammate name, responsibility, and recommended assistant.${presetFormattingStepRule}
-8. Ask whether the user wants to create those teammates as proposed or change any names, responsibilities, or assistant choices
-9. In that same approval question, tell the user they can also come back later during the project and ask you to replace or adjust any teammate if the lineup is not working well
-10. End your turn after the proposal. Do NOT call team_spawn_agent in that same turn
-   - Exception: If the message contains a [SYSTEM NOTE] indicating the user has already confirmed the lineup, skip the proposal step and proceed directly to spawning all listed teammates
-11. Wait for explicit confirmation before using team_spawn_agent, unless the user explicitly told you to create specific teammates immediately or a [SYSTEM NOTE] in the message indicates prior confirmation
-12. After the lineup is confirmed, create teammates with team_spawn_agent using `assistant_id` from team_list_assistants; do not pass a model
-13. Break the work into tasks with team_task_create — assigning a task to a teammate (via `owner`) automatically notifies and wakes them with the task details, so you do NOT need a separate team_send_message just to hand off work or wake them
-14. Use team_send_message only for follow-up conversation, clarifications, or context beyond the task's subject/description
-15. When teammates report back, review results and decide next steps
-16. Synthesize results and respond to the user
+5. If the user has NOT already authorized delegation, reply with a staffing proposal that starts with one short sentence explaining why more teammates would help
+6. For an unapproved proposal, present the proposed lineup as a table with: teammate name, responsibility, and recommended assistant.${presetFormattingStepRule}
+7. For an unapproved proposal, ask whether the user wants to create those teammates as proposed or change any names, responsibilities, or assistant choices; mention they can adjust the lineup later
+8. End your turn after an unapproved proposal. Do NOT call team_spawn_agent in that same turn
+9. If the user explicitly authorizes you to delegate this task (for example, asks for subagents, teammates, or parallel work), select the minimum useful lineup and proceed without another approval question; do not ask for confirmation again. A [SYSTEM NOTE] indicating prior confirmation has the same effect.
+10. Create teammates with team_spawn_agent using `assistant_id` from team_list_assistants; do not pass a model
+11. Break the work into tasks with team_task_create — assigning a task to a teammate (via `owner`) automatically notifies and wakes them with the task details, so you do NOT need a separate team_send_message just to hand off work or wake them
+12. Use team_send_message only for follow-up conversation, clarifications, or context beyond the task's subject/description
+13. When teammates report back, review results and decide next steps
+14. Synthesize results and respond to the user
 
 ## Assistant Selection Guidelines
 - Use `team_list_assistants` to choose assistants by their declared purpose, description, and skills
@@ -99,14 +96,14 @@ When the user explicitly asks to dismiss/fire/shut down teammates:
 - Do NOT call team_spawn_agent immediately just because the task sounds broad, hard, or multi-step
 - When you think new teammates are needed, first explain why in one short sentence, then recommend the teammate lineup
 - ${presetFormattingImportantRule}
-- Ask whether the user wants to create the proposed teammates as-is or change any names, responsibilities, or assistant choices
+- Ask whether the user wants to create a proposed lineup as-is or change it only when the user has not already authorized delegation
 - In that approval question, also remind the user that they can later ask you to replace, remove, or retune any teammate if the lineup is not working for them
-- End your turn after the proposal and wait for the user's reply
-- Wait for explicit confirmation before using team_spawn_agent (exception: if a [SYSTEM NOTE] in the message indicates the user already confirmed, spawn immediately)
-- If the user asks to change a proposed teammate's role, name, or assistant choice, revise the proposal in text and wait for confirmation again
+- End your turn after an unapproved proposal and wait for the user's reply
+- If the user explicitly authorizes delegation, spawn the minimum useful lineup immediately. Otherwise, wait for confirmation of a proposed lineup before using team_spawn_agent. A [SYSTEM NOTE] indicating prior confirmation also authorizes immediate spawning.
+- If the user requests changes to a proposed teammate's role, name, or assistant choice, apply those explicit changes without asking the same question again; clarify only missing requirements that prevent choosing an assistant
 - If the user later says they are unhappy with an existing teammate, adjust the lineup by renaming, replacing, or shutting down teammates as needed based on their request
-- If the user explicitly says to create a specific teammate immediately, you may use team_spawn_agent without an extra confirmation turn
-- When the user says "add", "create", "spawn", or "hire" a teammate but the lineup is not finalized yet, respond with the proposal first instead of spawning immediately
+- When the user explicitly asks for subagents, teammates, delegation, or parallel work, you may use team_spawn_agent without an extra confirmation turn
+- An explicit request to add, create, spawn, or hire teammates authorizes choosing suitable assistants for that request; ask only when a required preference is missing
 - When the user says "dismiss", "fire", "shut down", "remove", or "下线/解雇/开除" a teammate → use team_shutdown_agent
 - When the user says "rename", "change name", "改名" → use team_rename_agent
 - When a teammate completes a task, review the result and decide next steps
@@ -377,6 +374,24 @@ mod tests {
         // delegation steps quietly override the permission granted above.
         assert!(prompt.contains("skip the rest of this workflow"));
         assert!(!prompt.contains("${"));
+    }
+
+    #[test]
+    fn lead_prompt_treats_explicit_delegation_as_authorization() {
+        let leader = prompt_agent("lead-1", "Lead", TeamPromptRole::Lead);
+        let prompt = build_lead_prompt(&LeadPromptParams {
+            agent: &leader,
+            team_name: "Alpha",
+            teammates: &[],
+            available_agent_types: &[],
+            available_assistants: &[],
+            renamed_agents: &HashMap::new(),
+            team_workspace: None,
+            tool_transport: TeamToolTransport::Mcp,
+        });
+
+        assert!(prompt.contains("explicitly authorizes you to delegate this task"));
+        assert!(prompt.contains("do not ask for confirmation again"));
     }
 
     #[test]

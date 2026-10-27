@@ -270,7 +270,7 @@ describe('ComfyUI skill provisioning', () => {
     await provisionComfySkill(request, bundleRoot);
     const repositoryBundle = path.resolve('resources/skills/comfyui-local');
     await expect(provisionComfySkill(request, repositoryBundle)).resolves.toBe('updated');
-    expect(preferences[COMFY_LOCAL_SKILL_PREFERENCE]).toMatchObject({ version: '1.7.0' });
+    expect(preferences[COMFY_LOCAL_SKILL_PREFERENCE]).toMatchObject({ version: '1.7.1' });
     expect(await fs.readFile(path.join(userRoot, 'references/fasth3-omni.md'), 'utf8')).toBe(
       await fs.readFile(path.join(repositoryBundle, 'references/fasth3-omni.md'), 'utf8')
     );
