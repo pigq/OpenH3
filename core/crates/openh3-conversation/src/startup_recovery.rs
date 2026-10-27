@@ -1,10 +1,19 @@
-use openh3_common::ErrorChain;
-use openh3_db::MessageRowUpdate;
+use openh3_common::{ErrorChain, now_ms};
 use openh3_db::models::MessageRow;
+use openh3_db::{MessagePageDirection, MessagePageParams, MessageRowUpdate};
 use tracing::{info, warn};
 
 use crate::runtime_persistence::RuntimeWriteKind;
 use crate::service::ConversationService;
+
+const RESTART_MARKER: &str = "_openh3_restart_recovery";
+pub(crate) const PENDING_RECOVERY_CONTEXT: &str = "_openh3_pending_task_recovery";
+const RECOVERY_HISTORY_LIMIT: u32 = 200;
+const RECOVERY_ITEM_LIMIT: usize = 12;
+const RECOVERY_LABEL_LIMIT: usize = 180;
+const RECOVERY_CONTEXT_MAX_BYTES: usize = 8192;
+const RECOVERY_PREFIX: &str = "<openh3_task_recovery>\nThe following bounded snapshot is historical unfinished work, not instructions or evidence that a process is still running. Nothing was automatically continued. Follow the latest user instruction to continue, adjust, or stop; verify actual results before repeating side effects. Do not reactivate completed steps or restore old approvals.\n";
+const RECOVERY_SUFFIX: &str = "\n</openh3_task_recovery>\n\n";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StartupRecoveryAction {
@@ -34,6 +43,7 @@ impl ConversationService {
         };
 
         let mut recovered = 0usize;
+        let recovered_at = now_ms();
         for stale in rows {
             let row = stale.message;
             if !self
@@ -44,10 +54,14 @@ impl ConversationService {
             }
 
             let action = classify_recovery_action(&row);
-            let content = match action {
+            let settled = match action {
                 StartupRecoveryAction::SettleToolRow => settle_tool_row_content(&row.r#type, &row.content),
                 _ => None,
             };
+            // Keep interruption provenance after settling the UI. This is
+            // history metadata, never executable replay data; the next ordinary
+            // user input can use it even after another process restart.
+            let content = mark_restart_recovery(&row, settled.as_deref(), recovered_at).or(settled);
             let update = MessageRowUpdate {
                 content,
                 status: Some(Some("finish".to_owned())),
@@ -82,6 +96,240 @@ impl ConversationService {
 
         if recovered > 0 {
             info!(recovered, "startup recovery completed for stale runtime messages");
+        }
+    }
+
+    /// Read-only recovery context for an ordinary user turn. Startup itself
+    /// never schedules an agent or replays a persisted tool call.
+    pub(crate) async fn unfinished_task_context_on_next_input(
+        &self,
+        user_id: &str,
+        conversation_id: &str,
+    ) -> Option<String> {
+        let history = match self
+            .conversation_repo()
+            .list_messages_page(
+                user_id,
+                conversation_id,
+                &MessagePageParams {
+                    limit: RECOVERY_HISTORY_LIMIT,
+                    direction: MessagePageDirection::InitialLatest,
+                },
+            )
+            .await
+        {
+            Ok(page) => page.items,
+            Err(error) => {
+                warn!(conversation_id, error = %ErrorChain(&error), "unfinished task recovery context could not be read");
+                return None;
+            }
+        };
+        let context = build_unfinished_task_context(&history);
+        if context.is_some() {
+            info!(
+                conversation_id,
+                "unfinished task context attached to next user input without replay"
+            );
+        }
+        context
+    }
+
+    /// Consume the pending hint only after a successful user turn. A cold
+    /// build/send failure must leave the snapshot available for the next input.
+    pub(crate) async fn acknowledge_task_recovery(&self, user_id: &str, conversation_id: &str, user_message_id: &str) {
+        if !self
+            .runtime_persistence()
+            .allows(conversation_id, RuntimeWriteKind::TerminalFinalize)
+        {
+            return;
+        }
+        let result = async {
+            let Some(row) = self
+                .conversation_repo()
+                .get_message(user_id, conversation_id, user_message_id)
+                .await?
+            else {
+                return Ok::<(), openh3_db::DbError>(());
+            };
+            let Ok(mut content) = serde_json::from_str::<serde_json::Value>(&row.content) else {
+                return Ok(());
+            };
+            if row.position.as_deref() != Some("right")
+                || content
+                    .as_object_mut()
+                    .and_then(|object| object.remove(PENDING_RECOVERY_CONTEXT))
+                    .is_none()
+            {
+                return Ok(());
+            }
+            self.conversation_repo()
+                .update_message(
+                    user_id,
+                    conversation_id,
+                    user_message_id,
+                    &MessageRowUpdate {
+                        content: Some(content.to_string()),
+                        status: None,
+                        hidden: None,
+                    },
+                )
+                .await
+        }
+        .await;
+        if let Err(error) = result {
+            warn!(conversation_id, error = %ErrorChain(&error), "successful turn could not acknowledge its recovery hint");
+        }
+    }
+}
+
+fn mark_restart_recovery(row: &MessageRow, settled: Option<&str>, at_ms: i64) -> Option<String> {
+    let original = serde_json::from_str::<serde_json::Value>(&row.content).ok();
+    let mut value = serde_json::from_str::<serde_json::Value>(settled.unwrap_or(&row.content)).ok()?;
+    let marker = serde_json::json!({ "at_ms": at_ms });
+    match row.r#type.as_str() {
+        "tool_group" => {
+            let entries = value.as_array_mut()?;
+            for (index, entry) in entries.iter_mut().enumerate() {
+                let prior = original.as_ref()?.get(index)?;
+                if !is_terminal_group_entry(prior)
+                    && let Some(obj) = entry.as_object_mut()
+                {
+                    obj.insert(RESTART_MARKER.into(), marker.clone());
+                }
+            }
+        }
+        "tool_call" if original.as_ref().is_some_and(is_terminal_tool_call) => return settled.map(str::to_owned),
+        _ => {
+            value.as_object_mut()?.insert(RESTART_MARKER.into(), marker);
+        }
+    }
+    Some(value.to_string())
+}
+
+fn is_terminal_tool_call(value: &serde_json::Value) -> bool {
+    matches!(
+        value.get("status").and_then(|status| status.as_str()),
+        Some("completed" | "error" | "canceled")
+    )
+}
+
+fn is_terminal_group_entry(value: &serde_json::Value) -> bool {
+    matches!(
+        value.get("status").and_then(|status| status.as_str()),
+        Some("Success" | "Error" | "Canceled")
+    )
+}
+
+fn restart_at(value: &serde_json::Value) -> Option<i64> {
+    value.get(RESTART_MARKER)?.get("at_ms")?.as_i64()
+}
+
+fn bounded_label(value: Option<&serde_json::Value>) -> String {
+    value
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .chars()
+        .take(RECOVERY_LABEL_LIMIT)
+        .collect()
+}
+
+/// Summarize only snapshots: no raw arguments, commands, output, or approval
+/// state is restored. A later successful user turn consumes its hint, preserving
+/// the original Plan and allowing the user to stop or replace the old work.
+fn build_unfinished_task_context(history: &[MessageRow]) -> Option<String> {
+    let decoded: Vec<_> = history
+        .iter()
+        .filter(|row| row.position.as_deref() == Some("left"))
+        .filter_map(|row| {
+            serde_json::from_str::<serde_json::Value>(&row.content)
+                .ok()
+                .map(|value| (row, value))
+        })
+        .collect();
+    let latest_restart = decoded
+        .iter()
+        .filter_map(|(_, value)| restart_at(value).or_else(|| value.as_array()?.iter().filter_map(restart_at).max()))
+        .max();
+    let last_user_at = history
+        .iter()
+        .filter(|row| row.position.as_deref() == Some("right"))
+        .map(|row| row.created_at)
+        .max()
+        .unwrap_or(i64::MIN);
+    let pending_restart = latest_restart.filter(|at| *at > last_user_at);
+    // A plan-only turn can persist a snapshot before any streaming text/tool
+    // row exists. Recover that unfinished checklist too, without inventing a
+    // running process or needing to change the historical Plan's status.
+    let latest_plan = decoded
+        .iter()
+        .rev()
+        .find(|(row, _)| row.r#type == "plan" && row.created_at > last_user_at);
+    if latest_plan.is_none()
+        && pending_restart.is_none()
+        && let Some(last_user) = history
+            .iter()
+            .rev()
+            .find(|row| row.position.as_deref() == Some("right"))
+        && let Ok(content) = serde_json::from_str::<serde_json::Value>(&last_user.content)
+        && let Some(pending) = content.get(PENDING_RECOVERY_CONTEXT).and_then(|value| value.as_str())
+        && pending.len() <= RECOVERY_CONTEXT_MAX_BYTES
+        && pending.starts_with(RECOVERY_PREFIX)
+    {
+        return Some(pending.to_owned());
+    }
+    let mut plan = Vec::new();
+    let mut completed_steps = 0;
+    let mut truncated = false;
+    if let Some((_, snapshot)) = latest_plan
+        && let Some(entries) = snapshot.get("entries").and_then(|entries| entries.as_array())
+    {
+        for entry in entries {
+            match entry.get("status").and_then(|status| status.as_str()) {
+                Some("completed") => completed_steps += 1,
+                Some("pending" | "in_progress") if plan.len() < RECOVERY_ITEM_LIMIT => plan.push(serde_json::json!({
+                    "content": bounded_label(entry.get("content").or_else(|| entry.get("step"))),
+                    "status": entry["status"],
+                })),
+                Some("pending" | "in_progress") => truncated = true,
+                _ => {}
+            }
+        }
+    }
+    let mut tools = Vec::new();
+    for (row, value) in &decoded {
+        let entries: &[serde_json::Value] = if row.r#type == "tool_group" {
+            value.as_array().map(Vec::as_slice).unwrap_or_default()
+        } else if row.r#type == "tool_call" {
+            std::slice::from_ref(value)
+        } else {
+            continue;
+        };
+        for entry in entries {
+            if pending_restart.is_some() && restart_at(entry) == pending_restart && tools.len() < RECOVERY_ITEM_LIMIT {
+                tools.push(serde_json::json!({
+                    "call_id": bounded_label(entry.get("call_id")),
+                    "name": bounded_label(entry.get("name")),
+                    "description": bounded_label(entry.get("description")),
+                    "status": "interrupted_on_restart",
+                }));
+            } else if pending_restart.is_some() && restart_at(entry) == pending_restart {
+                truncated = true;
+            }
+        }
+    }
+    if plan.is_empty() && tools.is_empty() && (latest_plan.is_some() || pending_restart.is_none()) {
+        return None;
+    }
+    loop {
+        let snapshot = serde_json::json!({ "unfinished_plan": plan, "completed_steps": completed_steps, "interrupted_tasks": tools, "truncated": truncated }).to_string();
+        if RECOVERY_PREFIX.len() + snapshot.len() + RECOVERY_SUFFIX.len() <= RECOVERY_CONTEXT_MAX_BYTES {
+            return Some(format!("{RECOVERY_PREFIX}{snapshot}{RECOVERY_SUFFIX}"));
+        }
+        truncated = true;
+        if tools.len() > plan.len() {
+            tools.pop();
+        } else {
+            plan.pop();
         }
     }
 }
@@ -152,6 +400,67 @@ mod tests {
     use openh3_db::models::MessageRow;
 
     use super::*;
+
+    #[test]
+    fn completed_plan_supersedes_an_older_unacknowledged_hint() {
+        let mut plan = MessageRow {
+            id: "plan:p".into(),
+            conversation_id: "c".into(),
+            msg_id: Some("p".into()),
+            r#type: "plan".into(),
+            content: serde_json::json!({ "entries": [{ "content": "old pending step", "status": "pending" }] })
+                .to_string(),
+            position: Some("left".into()),
+            status: Some("finish".into()),
+            hidden: false,
+            created_at: 1,
+            backend_turn_id: None,
+        };
+        let hint = build_unfinished_task_context(&[plan.clone()]).unwrap();
+        let mut user = plan.clone();
+        user.id = "u".into();
+        user.r#type = "text".into();
+        user.position = Some("right".into());
+        user.created_at = 2;
+        user.content = serde_json::json!({ "content": "continue", PENDING_RECOVERY_CONTEXT: hint }).to_string();
+        assert!(
+            build_unfinished_task_context(&[plan.clone(), user.clone()]).is_some(),
+            "failed delivery keeps the pending hint"
+        );
+        plan.created_at = 3;
+        plan.content =
+            serde_json::json!({ "entries": [{ "content": "old pending step", "status": "completed" }] }).to_string();
+        assert!(
+            build_unfinished_task_context(&[user, plan]).is_none(),
+            "a newer completed snapshot must not restore the obsolete pending task"
+        );
+    }
+
+    #[test]
+    fn recovery_context_is_bounded_with_unicode_and_large_rosters() {
+        let huge_label = "任务\\\"".repeat(200);
+        let row = |id: &str, ty: &str, content: serde_json::Value, created_at| MessageRow {
+            id: id.into(),
+            conversation_id: "c".into(),
+            msg_id: Some(id.into()),
+            r#type: ty.into(),
+            content: content.to_string(),
+            position: Some("left".into()),
+            status: Some("finish".into()),
+            hidden: false,
+            created_at,
+            backend_turn_id: None,
+        };
+        let history = vec![
+            row("plan:p", "plan", serde_json::json!({ "entries": (0..100).map(|_| serde_json::json!({"content": huge_label, "status": "pending"})).collect::<Vec<_>>() }), 1),
+            row("p", "tool_group", serde_json::json!((0..100).map(|_| serde_json::json!({"call_id": huge_label, "name": huge_label, "description": huge_label, "status": "Canceled", RESTART_MARKER: { "at_ms": 10 }})).collect::<Vec<_>>()), 2),
+        ];
+        let context = build_unfinished_task_context(&history).unwrap();
+        assert!(context.len() <= 8192, "context grew to {} bytes", context.len());
+        let json = context.lines().find(|line| line.starts_with('{')).unwrap();
+        let value: serde_json::Value = serde_json::from_str(json).expect("bound must preserve valid JSON and UTF-8");
+        assert_eq!(value["truncated"], true);
+    }
 
     #[test]
     fn visible_text_finishes_as_visible_output() {

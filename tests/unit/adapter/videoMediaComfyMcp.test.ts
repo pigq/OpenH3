@@ -123,6 +123,14 @@ describe('generic ComfyUI MCP tools', () => {
     expect(z.object(schema).safeParse({ action: 'authorize', operationId: 'operation-1' }).success).toBe(false);
   });
 
+  it('keeps the explicit legacy plan action compatible with the installation endpoint', async () => {
+    respond({ id: 'operation-legacy', state: 'awaiting-consent', plan });
+    const reply = await invoke('openh3_comfy_install', { action: 'plan', plan });
+    expect(reply.isError).not.toBe(true);
+    expect(requestBody()).toMatchObject({ requestId, plan });
+    expect(JSON.parse(reply.content[0].text).comfyOperationId).toBe('operation-legacy');
+  });
+
   it('encodes the actual probe runtime and sends the bound request ID on read-only tools', async () => {
     respond({ accelerator: 'cuda', probeComplete: true });
     const reply = await invoke('aionui_comfy_environment', {
@@ -202,6 +210,28 @@ describe('generic ComfyUI MCP tools', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:33009/api/comfy/operations');
     expect(requestBody()).toEqual({ plan, requestId });
     expect(JSON.parse(reply.content[0].text)).toEqual({ comfyOperationId: operation.id, operation });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('submits a short identity-only install request for model cards', async () => {
+    const operation = { id: 'operation-qwen', state: 'running', plan };
+    respond(operation, 202);
+    const reply = await invoke('aionui_comfy_install', {
+      action: 'request',
+      family: 'qwen-edit',
+      intent: 'install',
+      profileId: 'qwen-balanced',
+    });
+    expect(requestBody()).toEqual({
+      install: {
+        action: 'request',
+        family: 'qwen-edit',
+        intent: 'install',
+        profileId: 'qwen-balanced',
+      },
+      requestId,
+    });
+    expect(JSON.parse(reply.content[0].text)).toMatchObject({ comfyOperationId: operation.id });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 

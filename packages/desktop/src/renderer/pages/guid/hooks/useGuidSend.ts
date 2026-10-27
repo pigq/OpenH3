@@ -24,7 +24,7 @@ import { ensureBackendMcpCatalog, toSessionMcpServer } from '@/renderer/hooks/mc
 import { emitter } from '@/renderer/utils/emitter';
 import { updateWorkspaceTime } from '@/renderer/utils/workspace/workspaceHistory';
 import { Message } from '@arco-design/web-react';
-import { useCallback, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { type TFunction } from 'i18next';
 import type { NavigateFunction } from 'react-router-dom';
 import { mutate as swrMutate } from 'swr';
@@ -115,6 +115,10 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     localeKey,
   } = deps;
   const sendingRef = useRef(false);
+  const installationRequestId = useMemo(
+    () => (creationIntent ? (creationIntent.requestId ?? crypto.randomUUID()) : undefined),
+    [creationIntent]
+  );
 
   const handleSend = useCallback(async () => {
     const guidDraftScope = getGuidDraftScope();
@@ -190,10 +194,10 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
       }
     }
     const initialInput =
-      creationRequest && input.trim()
+      !creationIntent && creationRequest && input.trim()
         ? creationMessage(
             input,
-            t(creationIntent ? 'guid.comfy.intentSummary' : 'guid.creation.requestSummary', {
+            t('guid.creation.requestSummary', {
               kind: t(`guid.templateFilters.${creationRequest.kind}`),
               source: t(`guid.creation.${creationRequest.source}`),
               model:
@@ -203,13 +207,15 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
               intent: creationRequest.intent && t(`guid.comfy.actions.${creationRequest.intent}`),
               profile: creationRequest.profileId ?? '',
             }) +
-              (!creationIntent && creationRequest.profileId
+              (creationRequest.profileId
                 ? `\n${t('guid.comfy.profileSummary', { profile: creationRequest.profileId })}`
                 : '')
           )
         : input;
-    const creationRequestId = creationRequest ? crypto.randomUUID() : undefined;
+    const creationRequestId = creationRequest ? (installationRequestId ?? crypto.randomUUID()) : undefined;
     const requiresCreationBinding = creationRequest?.source === 'local';
+    const deterministicInstallation =
+      requiresCreationBinding && creationRequest.family && creationRequest.intent !== 'generate';
     const creationSnapshot = creationRequest
       ? { ...creationRequest, requestId: creationRequestId!, templateSnapshot: getGuidTemplateSnapshot() }
       : undefined;
@@ -218,42 +224,48 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
       const matchesRequired = (server: IMcpServer) =>
         server.builtin &&
         (wantsVideoMedia ? isBuiltinVideoMediaName(server.name) : isBuiltinImageGenerationName(server.name));
-      let required: IMcpServer | undefined;
-      try {
-        required = requiresCreationBinding
-          ? (await ensureBackendMcpCatalog()).allServers.find(matchesRequired)
-          : availableMcpServers.find(matchesRequired);
-        // First-load migrations can register builtin tools after Guid mounts.
-        if (!required && !requiresCreationBinding)
-          required = (await ensureBackendMcpCatalog()).allServers.find(matchesRequired);
-      } catch {
-        Message.error(t('guid.creation.toolsCheckFailed', { reason: 'COMFY_MCP_CATALOG_UNAVAILABLE' }));
-        return false;
-      }
-      if (!required) {
-        Message.error(t('guid.creation.toolsCheckFailed', { reason: 'COMFY_MCP_SERVER_NOT_REGISTERED' }));
-        return false;
-      }
       const sessionServers =
         selectedMcpServerIds !== undefined ? selectedSessionMcpServers : selectedSessionMcpServersToSend;
-      // Replace the cached required transport, including legacy-name aliases.
-      // A matching id in Guid's mounted state is not evidence of a current script.
-      const combined = [
-        ...sessionServers.filter(
-          (server) =>
-            server.id !== required.id &&
-            !(wantsVideoMedia ? isBuiltinVideoMediaName(server.name) : isBuiltinImageGenerationName(server.name))
-        ),
-        toSessionMcpServer(required),
-      ];
-      selectedSessionMcpServersToSend = creationSessionServers(
-        combined,
-        creationRequest,
-        creationRequest.source === 'cloud' ? creationModel?.provider : undefined,
-        creationRequestId
-      );
-      if (requiresCreationBinding) {
-        const scoped = selectedSessionMcpServersToSend.find((server) => server.id === required.id)!;
+      let toolsReady = false;
+      let reason = 'COMFY_MCP_SERVER_NOT_REGISTERED';
+      // A migration or restarted transport can briefly leave a stale catalog.
+      // Refresh and probe once more before preserving the draft with a diagnostic.
+      for (let attempt = 0; attempt < 2 && !toolsReady; attempt++) {
+        let required: IMcpServer | undefined;
+        try {
+          required =
+            requiresCreationBinding || attempt > 0
+              ? (await ensureBackendMcpCatalog()).allServers.find(matchesRequired)
+              : availableMcpServers.find(matchesRequired);
+        } catch {
+          reason = 'COMFY_MCP_CATALOG_UNAVAILABLE';
+          continue;
+        }
+        if (!required) {
+          reason = 'COMFY_MCP_SERVER_NOT_REGISTERED';
+          continue;
+        }
+        // Replace stale transports, including legacy-name aliases.
+        const combined = [
+          ...sessionServers.filter(
+            (server) =>
+              server.id !== required.id &&
+              !(wantsVideoMedia ? isBuiltinVideoMediaName(server.name) : isBuiltinImageGenerationName(server.name))
+          ),
+          toSessionMcpServer(required),
+        ];
+        const prepared = creationSessionServers(
+          combined,
+          creationRequest,
+          creationRequest.source === 'cloud' ? creationModel?.provider : undefined,
+          creationRequestId
+        );
+        if (!requiresCreationBinding || deterministicInstallation) {
+          selectedSessionMcpServersToSend = prepared;
+          toolsReady = true;
+          continue;
+        }
+        const scoped = prepared.find((server) => server.id === required.id)!;
         try {
           const check = await ipcBridge.mcpService.testMcpConnection.invoke({
             ...required,
@@ -262,26 +274,34 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
             runtime_scope_id: creationRequestId,
           });
           const tools = new Set(check.tools?.map((tool) => tool.name));
-          const needed = [
-            'openh3_comfy_environment',
-            'openh3_comfy_profiles',
-            ...(creationRequest.intent === 'generate'
-              ? ['openh3_comfy_generate', 'openh3_comfy_job_status', 'openh3_comfy_cancel_job']
-              : ['openh3_comfy_install']),
-          ];
+          const needed =
+            creationRequest.intent === 'generate'
+              ? [
+                  'openh3_comfy_environment',
+                  'openh3_comfy_profiles',
+                  'openh3_comfy_generate',
+                  'openh3_comfy_job_status',
+                  'openh3_comfy_cancel_job',
+                ]
+              : ['openh3_comfy_install'];
           const missing = needed.filter((name) => !tools.has(name));
           if (!check.success || missing.length) {
-            const reason = !check.success
+            reason = !check.success
               ? (check.code ?? 'COMFY_MCP_CONNECTION_FAILED')
               : `COMFY_REQUIRED_TOOLS_MISSING: ${missing.join(', ')}`;
-            Message.error(t('guid.creation.toolsCheckFailed', { reason }));
-            return false;
+            continue;
           }
+          selectedSessionMcpServersToSend = prepared;
+          toolsReady = true;
         } catch (cause) {
-          const reason = isBackendHttpError(cause) && cause.code ? cause.code : 'COMFY_MCP_CONNECTION_FAILED';
-          Message.error(t('guid.creation.toolsCheckFailed', { reason }));
-          return false;
+          reason = isBackendHttpError(cause) && cause.code ? cause.code : 'COMFY_MCP_CONNECTION_FAILED';
         }
+      }
+      // Installation is submitted through the application service, so an absent
+      // Agent transport must not prevent creating its bound request.
+      if (!toolsReady && !deterministicInstallation) {
+        Message.error(t('guid.creation.toolsCheckFailed', { reason }));
+        return false;
       }
     }
 
@@ -463,6 +483,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
   }, [
     creationModel,
     creationIntent,
+    installationRequestId,
     input,
     files,
     dir,

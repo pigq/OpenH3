@@ -106,11 +106,10 @@ function ModelPreview({
   const { t } = useTranslation();
   const [failed, setFailed] = useState(false);
   const [playing, setPlaying] = useState(false);
-  const [requestedVideo, setRequestedVideo] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const assets = previewAssets[family];
-  const isVideo = Boolean(assets?.video) && (!coverUrl || requestedVideo);
-  const sampleLabel = t(assets?.official ? 'guid.comfy.preview.officialSample' : 'guid.comfy.preview.projectDemo');
+  // Catalog covers can update image cards; video cards retain their bundled model sample.
+  const isVideo = Boolean(assets?.video);
   const play = () => {
     const video = videoRef.current;
     if (video) void video.play().catch(() => setPlaying(false));
@@ -121,7 +120,6 @@ function ModelPreview({
     setPlaying(false);
     const video = videoRef.current;
     if (!video) return;
-    if (coverUrl && requestedVideo) void video.play().catch(() => setPlaying(false));
     const observer = new IntersectionObserver((entries) => {
       if (!entries[0]?.isIntersecting) video.pause();
     });
@@ -135,7 +133,7 @@ function ModelPreview({
       observer.disconnect();
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [failed, isVideo, assets?.video, coverUrl, requestedVideo]);
+  }, [failed, isVideo, assets?.video]);
 
   return (
     <div className={styles.familyCover} onMouseEnter={play} onMouseLeave={pause}>
@@ -185,15 +183,10 @@ function ModelPreview({
           type='text'
           shape='circle'
           className={styles.previewPlay}
-          aria-label={
-            coverUrl && !requestedVideo
-              ? `${t('guid.comfy.preview.play')}: ${sampleLabel}`
-              : t(playing ? 'guid.comfy.preview.pause' : 'guid.comfy.preview.play')
-          }
-          title={coverUrl && !requestedVideo ? sampleLabel : undefined}
+          aria-label={t(playing ? 'guid.comfy.preview.pause' : 'guid.comfy.preview.play')}
           aria-pressed={playing}
           icon={playing ? <Pause size='16' /> : <Play size='16' />}
-          onClick={() => (coverUrl && !requestedVideo ? setRequestedVideo(true) : playing ? pause() : play())}
+          onClick={() => (playing ? pause() : play())}
         />
       )}
     </div>

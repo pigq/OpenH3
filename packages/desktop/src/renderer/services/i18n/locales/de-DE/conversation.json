@@ -815,5 +815,34 @@
     "finalizing": "Checking output files",
     "noRecentProgress": "No new progress for over 1 minute; execution may still be active.",
     "cancelHint": "Cancel ends this generation; sampling cannot resume. Stopping chat does not cancel the video task."
+  },
+  "workProgress": {
+    "title": "Arbeitsfortschritt",
+    "panel": "Rechtes Panel",
+    "empty": "Mehrstufige und Hintergrundaufgaben erscheinen hier.",
+    "waitingHint": "Beantworte die offene Anfrage im Chat.",
+    "prepareResume": "Fortsetzung vorbereiten",
+    "resumePrompt": "Setze die unvollständige Arbeit anhand des aktuellen Plans und Kontexts fort. Prüfe vorhandene Vorgänge vorab und übermittle sie nicht erneut.",
+    "statuses": {
+      "pending": "Ausstehend",
+      "running": "Läuft",
+      "completed": "Abgeschlossen",
+      "failed": "Fehlgeschlagen",
+      "interrupted": "Pausiert / Statusprüfung",
+      "waiting": "Wartet auf dich",
+      "cancelled": "Abgebrochen"
+    },
+    "kinds": {
+      "plan": "Plan",
+      "task": "Aufgabe",
+      "subagent": "Unteragent",
+      "background": "Hintergrundbefehl",
+      "workflow": "Workflow",
+      "install": "Modellinstallation / Reparatur",
+      "generation": "Generierung"
+    },
+    "detecting": "Gerät wird erkannt und Installation vorbereitet",
+    "deviceInsufficient": "Die Geräteanforderungen sind nicht erfüllt. Fehlende Anforderungen stehen unten.",
+    "detectionIncomplete": "Die Erkennung ist unvollständig. Das bedeutet nicht, dass das Gerät inkompatibel ist."
   }
 }

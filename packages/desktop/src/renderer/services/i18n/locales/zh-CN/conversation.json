@@ -814,5 +814,34 @@
     "finalizing": "正在确认输出文件",
     "noRecentProgress": "超过 1 分钟未收到新进度，暂时无法判断是否卡住。",
     "cancelHint": "取消会终止本次生成，无法从当前采样步继续；停止聊天不会取消视频任务。"
+  },
+  "workProgress": {
+    "title": "工作进度",
+    "panel": "右侧面板",
+    "empty": "多步骤任务和后台任务会显示在这里。",
+    "waitingHint": "请在聊天中处理待确认事项。",
+    "prepareResume": "准备继续",
+    "resumePrompt": "根据当前计划和上下文继续未完成的工作；先核对已有 operation/job 的状态，不要重复提交。",
+    "statuses": {
+      "pending": "待处理",
+      "running": "进行中",
+      "completed": "已完成",
+      "failed": "失败",
+      "interrupted": "已暂停 / 正在核对状态",
+      "waiting": "等待用户",
+      "cancelled": "已取消"
+    },
+    "kinds": {
+      "plan": "计划",
+      "task": "任务",
+      "subagent": "子 Agent",
+      "background": "后台命令",
+      "workflow": "工作流",
+      "install": "模型安装 / 修复",
+      "generation": "生成任务"
+    },
+    "detecting": "正在检测设备并生成安装计划",
+    "deviceInsufficient": "设备条件不足，请查看下方具体缺项。",
+    "detectionIncomplete": "环境检测尚未完成，这不代表设备不兼容。"
   }
 }

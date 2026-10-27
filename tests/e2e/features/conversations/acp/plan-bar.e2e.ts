@@ -68,7 +68,7 @@ async function openConversationPage(page: Page, conversationId: string): Promise
   await page.waitForLoadState('domcontentloaded');
   // A brand-new conversation renders the empty state, NOT the message scroller,
   // so wait on the send box: it is present in both states and is the anchor the
-  // plan bar sits directly above.
+  // work-progress bridge shares with the right-hand panel.
   await page.waitForSelector('[data-testid="sendbox-input"]', { timeout: 30_000 });
 }
 
@@ -107,8 +107,8 @@ async function endPlanTurn(page: Page, conversationId: string): Promise<void> {
   }, conversationId);
 }
 
-test.describe('conversation plan bar', () => {
-  test('shows live plan progress above the send box and clears it when the turn ends', async ({ page }) => {
+test.describe('conversation work progress', () => {
+  test('shows one right-panel plan and preserves unfinished progress after the turn ends', async ({ page }) => {
     let conversationId: string | null = null;
 
     try {
@@ -116,16 +116,14 @@ test.describe('conversation plan bar', () => {
       await openConversationPage(page, conversationId);
       await waitForController(page, conversationId);
 
-      const bar = page.locator('[data-testid="conversation-plan-bar"]');
+      const bar = page.locator('[data-testid="conversation-work-progress"]');
       await expect(bar).toHaveCount(0);
 
       // 1. The plan appears, expanded, with every entry and a 0/3 progress label.
       await emitPlan(page, conversationId, ENTRIES);
       await expect(bar).toBeVisible({ timeout: 15_000 });
       await expect(bar).toContainText('0/3');
-      for (const entry of ENTRIES) {
-        await expect(bar).toContainText(entry.content);
-      }
+      await Promise.all(ENTRIES.map((entry) => expect(bar).toContainText(entry.content)));
 
       // 2. A plan is a full-replacement snapshot: the update must land in the SAME
       //    bar, not stack a second one. This is the end-to-end guard for the
@@ -141,9 +139,12 @@ test.describe('conversation plan bar', () => {
       // 3. The plan must never render as a message row.
       await expect(page.locator('[data-message-type="plan"]')).toHaveCount(0);
 
-      // 4. The bar is a live view: once the turn ends it disappears entirely.
+      // 4. Completed steps remain visible; unfinished work becomes interrupted.
       await endPlanTurn(page, conversationId);
-      await expect(bar).toHaveCount(0, { timeout: 15_000 });
+      await expect(bar).toBeVisible({ timeout: 15_000 });
+      await expect(bar).toContainText('1/3');
+      await expect(bar.locator('[data-work-task="plan"]')).toHaveAttribute('data-status', 'interrupted');
+      await expect(page.locator('[data-testid="conversation-plan-bar"]')).toHaveCount(0);
     } finally {
       if (conversationId) {
         await httpDelete(page, `/api/conversations/${encodeURIComponent(conversationId)}`).catch(() => {});

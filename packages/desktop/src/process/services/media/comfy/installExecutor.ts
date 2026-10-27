@@ -40,11 +40,19 @@ export type ComfyInstallExecutorOptions = {
     >;
   runtimeCoordinator?: ComfyRuntimeCoordinator;
   download?: typeof downloadH3FromSources;
+  /** Independent component transfers share a bounded pool; each retains its own resume receipt. */
+  downloadConcurrency?: number;
   runCommand?: ComfyInstallCommandRunner;
   freeBytes?: (file: string) => Promise<number | { freeBytes: number; volume: string }>;
   snapshotRoot?: string;
   snapshotFiles?: string[];
   onProfile?: (profile: ComfyProfile) => void;
+  /** Authorized runtime bootstrap, after repair snapshots and before component writes. */
+  prepareRuntime?: (
+    plan: ComfyInstallPlan,
+    signal: AbortSignal,
+    onProgress?: (message: string) => void
+  ) => Promise<void>;
   verifyArtifact?: (
     artifact: { path: string; mimeType: string },
     kind: ComfyProfile['kind'],
@@ -91,20 +99,41 @@ function profileFromPlan(plan: ComfyInstallPlan): ComfyProfile {
     reason: _reason,
     evidence: _evidence,
     workflow: _workflow,
+    workflowSource: _workflowSource,
+    reuseOnlyPaths: _reuseOnlyPaths,
     commands: _commands,
     smokeInput: _smokeInput,
     repair: _repair,
     ...fields
   } = plan;
-  const workflowSha256 = crypto
-    .createHash('sha256')
-    .update(JSON.stringify(plan.workflow, null, 2) + '\n')
-    .digest('hex');
+  const workflowSha256 = crypto.createHash('sha256').update(workflowBytes(plan)).digest('hex');
   return { ...fields, workflowSha256, state: 'downloaded' };
 }
 function recipe(profile: ComfyProfile): string {
   const { validation: _validation, state: _state, ...fields } = profile;
   return stable(fields);
+}
+function workflowBytes(plan: ComfyInstallPlan): string {
+  if (plan.workflowSource) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(plan.workflowSource);
+    } catch {
+      throw new Error('COMFY_WORKFLOW_SOURCE_INVALID');
+    }
+    const source =
+      parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+    const executionGraph = Object.fromEntries(
+      Object.entries(source).map(([id, value]) => {
+        const node =
+          value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+        return [id, { class_type: node.class_type, inputs: node.inputs }];
+      })
+    );
+    if (stable(executionGraph) !== stable(plan.workflow)) throw new Error('COMFY_WORKFLOW_SOURCE_GRAPH_MISMATCH');
+    return plan.workflowSource;
+  }
+  return JSON.stringify(plan.workflow, null, 2) + '\n';
 }
 /** Preserve source files without depending on a package that the repair itself may install. */
 function snapshotNativeSources(plan: ComfyInstallPlan, directory: string, signal: AbortSignal): void {
@@ -267,9 +296,19 @@ function assertPlanWrites(plan: ComfyInstallPlan, scope: ComfyResourceScope): vo
   assertScopedPath(plan.targetRoot, scope);
   assertScopedPath(plan.environment.root, scope);
   assertScopedPath(plan.workflowPath, scope);
-  for (const component of plan.components)
+  for (const component of plan.components) {
+    if (plan.reuseOnlyPaths?.includes(component.path)) {
+      if (!component.sha256 || !component.sizeBytes) throw new Error('COMFY_REUSE_ONLY_INTEGRITY_REQUIRED');
+      const stats = fs.existsSync(component.path) ? fs.statSync(component.path) : undefined;
+      if (!stats?.isFile() || stats.size !== component.sizeBytes)
+        throw new Error('COMFY_REUSE_ONLY_COMPONENT_MISSING_OR_INVALID');
+      continue;
+    }
     for (const suffix of ['', '.part', '.resume.json', '.comfy-source.json'])
       assertScopedPath(component.path + suffix, scope);
+  }
+  if (plan.reuseOnlyPaths?.some((file) => !plan.components.some((component) => component.path === file)))
+    throw new Error('COMFY_REUSE_ONLY_COMPONENT_NOT_DECLARED');
   for (const node of plan.nodes) assertScopedPath(path.join(plan.environment.root, 'custom_nodes', node.id), scope);
 }
 function argumentPath(value: string | undefined, cwd: string, scope: ComfyResourceScope): string {
@@ -372,6 +411,7 @@ function validatePip(args: string[], cwd: string, plan: ComfyInstallPlan, scope:
       '--upgrade',
       '-U',
       '--no-deps',
+      '--no-index',
       '--no-cache-dir',
       '--force-reinstall',
       '--ignore-installed',
@@ -656,6 +696,9 @@ export function assertComfyInstallPlan(plan: ComfyInstallPlan): void {
   const parsed = comfyInstallPlanSchema.safeParse(plan);
   if (!parsed.success) throw new Error('COMFY_PLAN_INVALID', { cause: parsed.error });
   const frozen = parsed.data;
+  const workflow = workflowBytes(frozen);
+  if (frozen.workflowSha256 && crypto.createHash('sha256').update(workflow).digest('hex') !== frozen.workflowSha256)
+    throw new Error('COMFY_WORKFLOW_HASH_MISMATCH');
   if (!path.isAbsolute(frozen.environment.python)) throw new Error('COMFY_PYTHON_ABSOLUTE_PATH_REQUIRED');
   if (!frozen.nodes.every((node) => /^[\w.-]+$/.test(node.id) && node.id !== '.' && node.id !== '..'))
     throw new Error('COMFY_NODE_ID_INVALID');
@@ -888,6 +931,7 @@ export async function executeComfyInstall(
       if (await existingComponent(component, signal)) reusable.add(component.path);
     } catch (error) {
       if (
+        frozen.reuseOnlyPaths?.includes(component.path) ||
         !frozen.repair ||
         !component.sha256 ||
         !component.url ||
@@ -947,6 +991,8 @@ export async function executeComfyInstall(
       reason: _checkReason,
       evidence: _checkEvidence,
       workflow: _checkWorkflow,
+      workflowSource: _checkWorkflowSource,
+      reuseOnlyPaths: _checkReuseOnlyPaths,
       commands: _checkCommands,
       smokeInput: _checkSmokeInput,
       repair: _checkRepair,
@@ -1007,15 +1053,21 @@ export async function executeComfyInstall(
       }
       fs.writeFileSync(path.join(snapshotDirectory, 'files.json'), JSON.stringify(copied, null, 2));
       snapshotNativeSources(frozen, snapshotDirectory, signal);
-      const pip = await command(
-        frozen.environment.python,
-        ['-m', 'pip', 'freeze', '--all'],
-        frozen.environment.root,
-        'snapshot-python'
-      );
-      if (pip.stdoutTruncated || Buffer.byteLength(pip.stdout) > MAX_LOG_BYTES)
-        throw new Error('COMFY_SNAPSHOT_OUTPUT_TOO_LARGE');
-      fs.writeFileSync(path.join(snapshotDirectory, 'pip-freeze.txt'), pip.stdout);
+      if (fs.existsSync(frozen.environment.python)) {
+        const pip = await command(
+          frozen.environment.python,
+          ['-m', 'pip', 'freeze', '--all'],
+          frozen.environment.root,
+          'snapshot-python'
+        );
+        if (pip.stdoutTruncated || Buffer.byteLength(pip.stdout) > MAX_LOG_BYTES)
+          throw new Error('COMFY_SNAPSHOT_OUTPUT_TOO_LARGE');
+        fs.writeFileSync(path.join(snapshotDirectory, 'pip-freeze.txt'), pip.stdout);
+      } else
+        fs.writeFileSync(
+          path.join(snapshotDirectory, 'python-missing.json'),
+          JSON.stringify({ executable: frozen.environment.python, missing: true })
+        );
       const refs: Array<{ path: string; revision: string }> = [];
       const repositories = [
         frozen.environment.root,
@@ -1033,43 +1085,45 @@ export async function executeComfyInstall(
         refs.push({ path: repository, revision: result.stdout.trim() });
       }
       fs.writeFileSync(path.join(snapshotDirectory, 'git-refs.json'), JSON.stringify(refs, null, 2));
-      const cli = await command(
-        frozen.environment.python,
-        [
-          '-c',
-          'import importlib.util,json;print(json.dumps({"available":importlib.util.find_spec("comfy_cli") is not None}))',
-        ],
-        frozen.environment.root,
-        'probe-existing-comfy-cli'
-      );
-      let available: boolean;
-      try {
-        const evidence = JSON.parse(cli.stdout.trim().split(/\r?\n/).at(-1) ?? '') as { available?: boolean };
-        if (typeof evidence.available !== 'boolean') throw new Error('missing evidence');
-        available = evidence.available;
-      } catch (cause) {
-        throw new Error('COMFY_CLI_PROBE_UNCONFIRMED', { cause });
-      }
-      if (available) {
-        const nodeSnapshot = path.join(snapshotDirectory, 'nodes.json');
-        await command(
+      if (fs.existsSync(frozen.environment.python)) {
+        const cli = await command(
           frozen.environment.python,
           [
-            '-m',
-            'comfy_cli',
-            '--workspace',
-            frozen.environment.root,
-            'node',
-            'save-snapshot',
-            '--output',
-            nodeSnapshot,
+            '-c',
+            'import importlib.util,json;print(json.dumps({"available":importlib.util.find_spec("comfy_cli") is not None}))',
           ],
           frozen.environment.root,
-          'snapshot-nodes'
+          'probe-existing-comfy-cli'
         );
-        if (!fs.existsSync(nodeSnapshot) || !fs.statSync(nodeSnapshot).size)
-          throw new Error('COMFY_NODE_SNAPSHOT_MISSING');
-        JSON.parse(fs.readFileSync(nodeSnapshot, 'utf8'));
+        let available: boolean;
+        try {
+          const evidence = JSON.parse(cli.stdout.trim().split(/\r?\n/).at(-1) ?? '') as { available?: boolean };
+          if (typeof evidence.available !== 'boolean') throw new Error('missing evidence');
+          available = evidence.available;
+        } catch (cause) {
+          throw new Error('COMFY_CLI_PROBE_UNCONFIRMED', { cause });
+        }
+        if (available) {
+          const nodeSnapshot = path.join(snapshotDirectory, 'nodes.json');
+          await command(
+            frozen.environment.python,
+            [
+              '-m',
+              'comfy_cli',
+              '--workspace',
+              frozen.environment.root,
+              'node',
+              'save-snapshot',
+              '--output',
+              nodeSnapshot,
+            ],
+            frozen.environment.root,
+            'snapshot-nodes'
+          );
+          if (!fs.existsSync(nodeSnapshot) || !fs.statSync(nodeSnapshot).size)
+            throw new Error('COMFY_NODE_SNAPSHOT_MISSING');
+          JSON.parse(fs.readFileSync(nodeSnapshot, 'utf8'));
+        }
       }
       fs.writeFileSync(path.join(snapshotDirectory, 'snapshot.complete'), new Date().toISOString());
     }
@@ -1097,6 +1151,8 @@ export async function executeComfyInstall(
       if (mapping.receipt) fs.renameSync(receiptPath(component.path), mapping.receipt);
       output(`quarantined:${component.name}:${quarantine}\n`);
     }
+    await options.prepareRuntime?.(frozen, signal, onProgress);
+    checkedAbort(signal);
     for (const step of frozen.commands.filter((step) => step.stage === 'prepare')) {
       validateCommands(frozen, scope);
       const uvVenv = /^uv(?:\.exe)?$/i.test(path.basename(step.executable)) && step.args[0] === 'venv';
@@ -1212,6 +1268,21 @@ export async function executeComfyInstall(
       if (/^git(?:\.exe)?$/i.test(path.basename(step.executable)) && step.args.includes('clone')) {
         const clone = step.args.indexOf('clone');
         const destination = path.resolve(step.cwd, step.args.at(-1)!);
+        const intentPath = path.join(
+          snapshotRoot,
+          'command-receipts',
+          `clone-${crypto
+            .createHash('sha256')
+            .update(`${planHash}:${stable(step)}`)
+            .digest('hex')}.json`
+        );
+        const cloneIntent = {
+          planHash,
+          destination: resolvedFuturePath(destination),
+          source: step.args.at(-2),
+          revision: step.revision,
+          noCheckout: step.args.includes('--no-checkout') || step.args.includes('-n'),
+        };
         if (fs.existsSync(path.join(destination, '.git'))) {
           const read = async (args: string[]): Promise<string> =>
             (
@@ -1224,7 +1295,27 @@ export async function executeComfyInstall(
           const source = step.args.at(-2);
           const remote = await read(['remote', 'get-url', origin]);
           const dirty = await read(['status', '--porcelain', '--untracked-files=no']);
-          if (!/^[a-f\d]{40,64}$/i.test(actual) || actual !== expected || source !== remote || dirty)
+          let stagedClone = false;
+          if (cloneIntent.noCheckout && fs.existsSync(intentPath)) {
+            const saved: unknown = JSON.parse(fs.readFileSync(intentPath, 'utf8'));
+            // Only this operation's recorded --no-checkout clone may continue
+            // with an empty worktree. Never reset/overwrite an existing checkout.
+            stagedClone =
+              stable(saved) === stable(cloneIntent) &&
+              fs.readdirSync(destination).every((name) => name === '.git') &&
+              frozen.commands.some(
+                (candidate) =>
+                  candidate.cwd === destination &&
+                  candidate.args[0] === 'checkout' &&
+                  candidate.args.includes(step.revision)
+              );
+          }
+          if (
+            !/^[a-f\d]{40,64}$/i.test(actual) ||
+            !/^[a-f\d]{40,64}$/i.test(expected) ||
+            source !== remote ||
+            (!stagedClone && (actual !== expected || dirty))
+          )
             throw new Error('COMFY_PREPARE_STATE_MISMATCH');
           output(`reuse-command:${step.label}:git:${actual}\n`);
           onProgress?.(`reuse-command:${step.label}`);
@@ -1232,6 +1323,11 @@ export async function executeComfyInstall(
         }
         if (clone >= 0 && fs.existsSync(destination) && fs.readdirSync(destination).length)
           throw new Error('COMFY_PREPARE_STATE_MISMATCH');
+        if (cloneIntent.noCheckout) {
+          assertScopedPath(intentPath, snapshotScope);
+          fs.mkdirSync(path.dirname(intentPath), { recursive: true });
+          fs.writeFileSync(intentPath, JSON.stringify(cloneIntent));
+        }
       }
       await command(step.executable, step.args, step.cwd, step.label);
       if (venv && fs.existsSync(venv.config) && fs.existsSync(venv.executable)) {
@@ -1255,12 +1351,14 @@ export async function executeComfyInstall(
           throw new Error('COMFY_NODE_DIRECTORY_INVALID');
       }
     }
-    for (const component of frozen.components) {
-      checkedAbort(signal);
+    const downloadController = new AbortController();
+    const downloadSignal = AbortSignal.any([signal, downloadController.signal]);
+    const transferComponent = async (component: ComfyProfile['components'][number]): Promise<void> => {
+      checkedAbort(downloadSignal);
       assertPlanWrites(frozen, scope);
       if (reusable.has(component.path)) {
         onProgress?.(`reuse:${component.name}`);
-        continue;
+        return;
       }
       if (!component.url) throw new Error('COMFY_COMPONENT_SOURCE_REQUIRED');
       fs.mkdirSync(path.dirname(component.path), { recursive: true });
@@ -1274,26 +1372,54 @@ export async function executeComfyInstall(
           sha256: component.sha256,
         },
         {
-          signal,
+          signal: downloadSignal,
           maxAttempts: 1,
           onSource: (host) => onProgress?.(`download:${component.name}:${host}`),
           onProgress: (bytes, total) =>
             onProgress?.(`download:${component.name}:${bytes}/${total ?? component.sizeBytes ?? '?'}`),
         }
       );
-      checkedAbort(signal);
+      checkedAbort(downloadSignal);
       if (result.status === 'dry-run' || !fs.existsSync(component.path))
         throw new Error('COMFY_COMPONENT_DOWNLOAD_INCOMPLETE');
       const file = fileIdentity(component.path);
       if ((component.sizeBytes !== undefined && file.size !== component.sizeBytes) || !file.size)
         throw new Error('COMFY_COMPONENT_DOWNLOAD_SIZE_MISMATCH');
-      if (component.sha256 && (await checksum(component.path, signal)) !== component.sha256.toLowerCase())
+      if (component.sha256 && (await checksum(component.path, downloadSignal)) !== component.sha256.toLowerCase())
         throw new Error('COMFY_COMPONENT_DOWNLOAD_HASH_MISMATCH');
       fs.writeFileSync(
         receiptPath(component.path),
         JSON.stringify({ url: component.url, sourceUrls: component.sourceUrls, version: component.version, file })
       );
-    }
+    };
+    let nextComponent = 0;
+    const requestedConcurrency = options.downloadConcurrency;
+    const concurrency = Math.max(
+      1,
+      Math.min(
+        3,
+        Number.isFinite(requestedConcurrency) ? Math.floor(requestedConcurrency!) : 3,
+        frozen.components.length
+      )
+    );
+    let transferFailure: unknown;
+    const worker = async (): Promise<void> => {
+      while (!downloadSignal.aborted && nextComponent < frozen.components.length) {
+        const component = frozen.components[nextComponent++];
+        try {
+          await transferComponent(component);
+        } catch (error) {
+          transferFailure ??= error;
+          downloadController.abort();
+          return;
+        }
+      }
+    };
+    // Settle every worker before returning or running install commands. A failed
+    // component cancels peers; completed verified receipts remain resumable.
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
+    if (transferFailure) throw transferFailure;
+    checkedAbort(signal);
     for (const step of frozen.commands.filter((step) => step.stage === 'finish')) {
       validateCommands(frozen, scope);
       await command(step.executable, step.args, step.cwd, step.label);
@@ -1302,7 +1428,7 @@ export async function executeComfyInstall(
     assertPlanWrites(frozen, scope);
     fs.mkdirSync(frozen.targetRoot, { recursive: true });
     fs.mkdirSync(path.dirname(frozen.workflowPath), { recursive: true });
-    const workflow = JSON.stringify(frozen.workflow, null, 2) + '\n';
+    const workflow = workflowBytes(frozen);
     const workflowSha256 = crypto.createHash('sha256').update(workflow).digest('hex');
     if (frozen.workflowSha256 && frozen.workflowSha256.toLowerCase() !== workflowSha256)
       throw new Error('COMFY_WORKFLOW_HASH_MISMATCH');
@@ -1320,6 +1446,8 @@ export async function executeComfyInstall(
       reason: _reason,
       evidence: _evidence,
       workflow: _workflow,
+      workflowSource: _workflowSource,
+      reuseOnlyPaths: _reuseOnlyPaths,
       commands: _commands,
       smokeInput: _smokeInput,
       repair: _repair,

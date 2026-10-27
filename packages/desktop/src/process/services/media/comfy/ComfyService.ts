@@ -9,6 +9,7 @@ import {
   comfyProfileSchema,
   comfyFamilyKind,
   validateComfyGenerationInputForFamily,
+  comfyInstallRequestSchema,
   type ComfyDiagnosis,
   type ComfyGenerationInput,
   type ComfyGenerationJob,
@@ -16,8 +17,11 @@ import {
   type ComfyOperation,
   type ComfyProfile,
   type ComfyApprovalDecision,
+  type ComfyInstallIdentityRequest,
+  type ComfyInstallRequest,
+  type ComfyInstallPreparation,
 } from '@/common/chat/document/creation/comfy';
-import { probeComfyEnvironment, type ComfyEnvironmentReport } from './environment';
+import { probeComfyEnvironment, type ComfyEnvironmentReport } from './discovery/environment';
 import type { ComfyWorkflowEngine } from './workflowEngine';
 import { verifyComfySmokeArtifact } from './mediaValidation';
 import {
@@ -65,6 +69,18 @@ export type ComfyServiceOptions = {
   filename: string;
   engine: Engine;
   checkPlan?: (plan: ComfyInstallPlan) => void;
+  /**
+   * Build an immutable plan from a model-card identity after probing this
+   * machine. The callback runs in the media service process so the model
+   * cannot inject paths, commands, or unverified sources into an install.
+   */
+  preparePlan?: (
+    requestId: string,
+    request: ComfyInstallIdentityRequest,
+    profiles: ComfyProfile[]
+  ) => ComfyInstallPlan | Promise<ComfyInstallPlan>;
+  /** Incrementally inspect known roots and instances; discovery never grants verification. */
+  discover?: (profiles: ComfyProfile[]) => Promise<ComfyProfile[]>;
   install: (plan: ComfyInstallPlan, signal: AbortSignal, progress: (detail: string) => void) => Promise<ComfyProfile>;
   probe?: typeof probeComfyEnvironment;
   verifyArtifact?: typeof verifyComfySmokeArtifact;
@@ -87,6 +103,11 @@ function diagnosis(error: unknown): ComfyDiagnosis | undefined {
   if ('diagnosis' in error) return error.diagnosis as ComfyDiagnosis;
   if ('cause' in error) return diagnosis(error.cause);
   return undefined;
+}
+function remoteTerminal(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  if ('remoteTerminal' in error && error.remoteTerminal === true) return true;
+  return 'cause' in error && remoteTerminal(error.cause);
 }
 function diagnosticLogPath(error: unknown): string | undefined {
   if (!error || typeof error !== 'object') return undefined;
@@ -157,6 +178,7 @@ export class ComfyService {
   private catalog = new Map<string, ComfyProfile>();
   private bindings = new Map<string, ComfySelection>();
   private operations = new Map<string, ComfyOperation>();
+  private preparations = new Map<string, ComfyInstallPreparation>();
   private jobs = new Map<string, SavedJob>();
   private probes = new Map<string, string>();
   private operationScopes = new Map<string, ComfySelection>();
@@ -167,6 +189,7 @@ export class ComfyService {
   private cancelledConversations = new Set<string>();
   private validating = false;
   private closing = false;
+  private refreshing?: Promise<ComfyProfile[]>;
   constructor(private options: ComfyServiceOptions) {
     fs.mkdirSync(path.dirname(options.filename), { recursive: true });
     if (!fs.existsSync(options.filename)) return;
@@ -175,6 +198,7 @@ export class ComfyService {
         profiles: unknown[];
         bindings: unknown[];
         operations: ComfyOperation[];
+        preparations?: ComfyInstallPreparation[];
         jobs: SavedJob[];
         probes?: Array<[string, string]>;
         operationScopes?: Array<[string, ComfySelection]>;
@@ -193,6 +217,15 @@ export class ComfyService {
         uuid.parse(value.id);
         comfyInstallPlanSchema.parse(value.plan);
         this.operations.set(value.id, { ...value, state: value.state === 'running' ? 'paused' : value.state });
+      }
+      for (const value of saved.preparations ?? []) {
+        uuid.parse(value.requestId);
+        if (this.bindings.get(value.requestId)?.conversationId !== value.conversationId)
+          throw new Error('COMFY_PREPARATION_SCOPE_MISMATCH');
+        this.preparations.set(value.requestId, {
+          ...value,
+          status: value.status === 'detecting' ? 'interrupted' : value.status,
+        });
       }
       for (const value of saved.jobs) {
         uuid.parse(value.id);
@@ -219,6 +252,7 @@ export class ComfyService {
       this.catalog.clear();
       this.bindings.clear();
       this.operations.clear();
+      this.preparations.clear();
       this.jobs.clear();
       this.probes.clear();
       console.error('[comfy] COMFY_STATE_RECOVERY_FAILED', error);
@@ -236,6 +270,7 @@ export class ComfyService {
             profiles: [...this.catalog.values()],
             bindings: [...this.bindings.values()],
             operations: [...this.operations.values()],
+            preparations: [...this.preparations.values()],
             jobs: [...this.jobs.values()],
             probes: [...this.probes],
             operationScopes: [...this.operationScopes],
@@ -331,6 +366,31 @@ export class ComfyService {
     return profile;
   }
   async refreshProfiles(): Promise<ComfyProfile[]> {
+    if (this.refreshing) return this.refreshing;
+    const pending = this.refreshProfileCatalog();
+    this.refreshing = pending;
+    try {
+      return await pending;
+    } finally {
+      if (this.refreshing === pending) this.refreshing = undefined;
+    }
+  }
+  private async refreshProfileCatalog(): Promise<ComfyProfile[]> {
+    if (this.options.discover && !this.closing) {
+      try {
+        const discovered = await this.options.discover(this.profiles());
+        for (const profile of discovered) {
+          try {
+            this.register(profile);
+          } catch (error) {
+            // One changed or incomplete installation must not hide other environments.
+            console.warn('[comfy] profile discovery rejected', { profileId: profile.id, error: message(error) });
+          }
+        }
+      } catch (error) {
+        console.warn('[comfy] profile discovery failed', { error: message(error) });
+      }
+    }
     for (const profile of this.catalog.values()) {
       if (profile.state !== 'verified') continue;
       try {
@@ -409,20 +469,101 @@ export class ComfyService {
   }
   async request(requestId: string, input: unknown): Promise<ComfyOperation> {
     if (this.closing) throw new Error('COMFY_SERVICE_STOPPING');
-    const plan = comfyInstallPlanSchema.parse(input);
-    const key = JSON.stringify([requestId, plan]);
+    // Existing internal callers pass the plan directly. Keep that contract
+    // while accepting the new identity-only request from the MCP tool.
+    const parsed = comfyInstallRequestSchema.safeParse(input);
+    const installRequest: ComfyInstallRequest = parsed.success
+      ? (parsed.data as ComfyInstallRequest)
+      : ({ action: 'request', plan: comfyInstallPlanSchema.parse(input) } as const);
+    const scope = clone(this.scope(requestId));
+    const identity = 'family' in installRequest ? installRequest : undefined;
+    if (identity) this.assertInstallIdentity(requestId, identity);
+    const inputKey = JSON.stringify(identity ? [identity.family, identity.intent, identity.profileId] : installRequest);
+    const key = identity ? requestId : JSON.stringify([requestId, inputKey]);
     const pending = this.requesting.get(key);
-    if (pending) return clone(await pending);
-    const request = this.requestPlan(requestId, plan);
-    this.requesting.set(key, request);
+    if (pending) {
+      if (pending.inputKey !== inputKey) throw new Error('COMFY_INSTALL_REQUEST_ID_CONFLICT');
+      return clone(await pending.promise);
+    }
+    const request = (async () => {
+      if (identity) {
+        const previous = [...this.operations.values()].find(
+          (operation) => operation.requestId === requestId && operation.installRequest
+        );
+        if (previous) {
+          const saved = previous.installRequest!;
+          if (
+            saved.family !== identity.family ||
+            saved.intent !== identity.intent ||
+            saved.profileId !== identity.profileId
+          )
+            throw new Error('COMFY_INSTALL_REQUEST_ID_CONFLICT');
+          return this.applyRequestApproval(previous);
+        }
+      }
+      if (identity) {
+        this.preparations.set(requestId, {
+          requestId,
+          conversationId: scope.conversationId,
+          family: identity.family,
+          intent: identity.intent,
+          status: 'detecting',
+          updatedAt: new Date().toISOString(),
+        });
+        this.flush();
+      }
+      try {
+        const plan = await this.resolveInstallPlan(requestId, installRequest);
+        if (JSON.stringify(this.scope(requestId)) !== JSON.stringify(scope)) throw new Error('COMFY_SELECTION_CHANGED');
+        return await this.requestPlan(requestId, plan, identity);
+      } catch (error) {
+        const preparation = this.preparations.get(requestId);
+        if (preparation) {
+          this.preparations.set(requestId, {
+            ...preparation,
+            status: 'failed',
+            error: message(error),
+            updatedAt: new Date().toISOString(),
+          });
+          this.flush();
+        }
+        throw error;
+      }
+    })();
+    this.requesting.set(key, { inputKey, promise: request });
     try {
       return clone(await request);
     } finally {
       this.requesting.delete(key);
     }
   }
-  private readonly requesting = new Map<string, Promise<ComfyOperation>>();
-  private async requestPlan(requestId: string, plan: ComfyInstallPlan): Promise<ComfyOperation> {
+  private async resolveInstallPlan(requestId: string, request: ComfyInstallRequest): Promise<ComfyInstallPlan> {
+    if (request.action === 'plan' || 'plan' in request) {
+      if ('requestId' in request && request.requestId && request.requestId !== requestId)
+        throw new Error('COMFY_REQUEST_MISMATCH');
+      return request.plan;
+    }
+    this.assertInstallIdentity(requestId, request);
+    if (!this.options.preparePlan) throw new Error('COMFY_INSTALL_PLANNER_UNAVAILABLE');
+    const plan = comfyInstallPlanSchema.parse(await this.options.preparePlan(requestId, request, this.profiles()));
+    if (plan.family !== request.family) throw new Error('COMFY_FAMILY_MISMATCH');
+    if (request.profileId && plan.id !== request.profileId) throw new Error('COMFY_PROFILE_ID_MISMATCH');
+    return plan;
+  }
+  private assertInstallIdentity(requestId: string, request: ComfyInstallIdentityRequest): void {
+    if (request.requestId && request.requestId !== requestId) throw new Error('COMFY_REQUEST_MISMATCH');
+    const scope = this.scope(requestId);
+    if (scope.source !== 'local' || scope.family !== request.family) throw new Error('COMFY_FAMILY_MISMATCH');
+    if (scope.intent !== request.intent) throw new Error('COMFY_INSTALL_INTENT_MISMATCH');
+    if (request.profileId && scope.profileId && request.profileId !== scope.profileId)
+      throw new Error('COMFY_PROFILE_ID_MISMATCH');
+  }
+  private readonly requesting = new Map<string, { inputKey: string; promise: Promise<ComfyOperation> }>();
+  private async requestPlan(
+    requestId: string,
+    plan: ComfyInstallPlan,
+    installRequest?: ComfyInstallIdentityRequest
+  ): Promise<ComfyOperation> {
     const scope = clone(this.scope(requestId));
     assertFamily(plan);
     this.options.checkPlan?.(plan);
@@ -451,6 +592,8 @@ export class ComfyService {
         workflow: _workflow,
         commands: _commands,
         smokeInput: _smoke,
+        reuseOnlyPaths: _reuseOnlyPaths,
+        workflowSource: _workflowSource,
         repair: _repair,
         ...candidate
       } = plan;
@@ -459,15 +602,18 @@ export class ComfyService {
     }
     const report = await (this.options.probe ?? probeComfyEnvironment)(plan.environment);
     assertDetection(report, plan);
+    if (JSON.stringify(this.scope(requestId)) !== JSON.stringify(scope)) throw new Error('COMFY_SELECTION_CHANGED');
     const operation: ComfyOperation = {
       id: crypto.randomUUID(),
       requestId,
       conversationId: scope.conversationId,
       plan: clone(plan),
+      ...(installRequest ? { installRequest: clone(installRequest) } : {}),
       state: 'awaiting-consent',
       updatedAt: new Date().toISOString(),
     };
     this.operations.set(operation.id, operation);
+    this.preparations.delete(requestId);
     this.probes.set(operation.id, hardware(report));
     this.operationScopes.set(operation.id, clone(scope));
     this.flush();
@@ -515,6 +661,24 @@ export class ComfyService {
     const value = this.savedOperation(id);
     this.assertResourceScope(value.requestId, value.conversationId, scope);
     return value;
+  }
+  activity(conversationId: string): {
+    operations: ComfyOperation[];
+    jobs: ComfyGenerationJob[];
+    preparations: ComfyInstallPreparation[];
+  } {
+    if (!conversationId) throw new Error('COMFY_CONVERSATION_REQUIRED');
+    return {
+      preparations: [...this.preparations.values()]
+        .filter((preparation) => preparation.conversationId === conversationId)
+        .map(clone),
+      operations: [...this.operations.values()]
+        .filter((operation) => operation.conversationId === conversationId)
+        .map(clone),
+      jobs: [...this.jobs.values()]
+        .filter((job) => this.bindings.get(job.requestId)?.conversationId === conversationId)
+        .map((job) => this.job(job.id, { conversationId })),
+    };
   }
   private updateOperation(id: string, update: Partial<ComfyOperation>): void {
     this.operations.set(id, { ...this.savedOperation(id), ...update, updatedAt: new Date().toISOString() });
@@ -678,7 +842,7 @@ export class ComfyService {
       !this.validating &&
       value.status === 'running' &&
       value.promptId &&
-      value.submissionUncertain &&
+      (value.submissionUncertain || value.reconnectAfter !== undefined) &&
       !this.controllers.has(id) &&
       (value.reconnectAfter ?? 0) <= Date.now()
     ) {
@@ -868,7 +1032,7 @@ export class ComfyService {
             return await execute();
           } catch (error) {
             const current = this.jobs.get(id)!;
-            const terminal = Boolean(diagnosis(error));
+            const terminal = Boolean(diagnosis(error)) || remoteTerminal(error);
             this.updateJob(id, {
               submissionPending: terminal ? false : current.submissionPending,
               submissionUncertain:
@@ -929,7 +1093,7 @@ export class ComfyService {
             // Keep the existing prompt active: losing monitoring is not a terminal model outcome.
             this.updateJob(id, {
               status: 'running',
-              submissionUncertain: true,
+              submissionUncertain: !remoteTerminal(error),
               error: `COMFY_MONITORING_INTERRUPTED:${message(error)}`,
               diagnosticLogPath: diagnosticLogPath(error),
               reconnectAfter: Date.now() + 30_000,
@@ -937,14 +1101,15 @@ export class ComfyService {
             return;
           }
           const terminalDiagnosis = diagnosis(error);
+          const terminal = Boolean(terminalDiagnosis) || remoteTerminal(error);
           this.updateJob(id, {
             status: 'failed',
             error: message(error),
             diagnosis: terminalDiagnosis,
             diagnosticLogPath: diagnosticLogPath(error),
-            submissionPending: terminalDiagnosis ? false : currentJob.submissionPending,
+            submissionPending: terminal ? false : currentJob.submissionPending,
             submissionUncertain:
-              !terminalDiagnosis &&
+              !terminal &&
               Boolean(
                 currentJob.submissionUncertain ||
                 currentJob.submissionPending ||
@@ -1034,7 +1199,8 @@ export class ComfyService {
   async close(): Promise<void> {
     this.closing = true;
     for (const controller of this.controllers.values()) controller.abort();
-    await Promise.allSettled(this.requesting.values());
+    await Promise.allSettled([...this.requesting.values()].map((request) => request.promise));
+    if (this.refreshing) await this.refreshing;
     await this.idle();
     await this.options.engine.stopOwned();
   }

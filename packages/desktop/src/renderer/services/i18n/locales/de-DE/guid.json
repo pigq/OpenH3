@@ -84,7 +84,9 @@
         "completed": "Geprüft und bereit",
         "cancelled": "Abgebrochen"
       },
-      "snapshotDirectory": "Wiederherstellungssnapshot"
+      "snapshotDirectory": "Wiederherstellungssnapshot",
+      "submittedContext": "Die App hat die Installation {{id}} übermittelt ({{state}}); die Fortschrittsanzeige aktualisiert sich automatisch. Erläutere den bestehenden Vorgang, ohne eine weitere Installation zu senden oder erneut im Chat um Bestätigung zu bitten.",
+      "preparationFailed": "Die Installationsvorbereitung wurde nicht abgeschlossen: {{reason}}. Die Anfrage bleibt gespeichert; Details stehen im Arbeitsfortschritt."
     },
     "profileSummary": "Ausgewähltes lokales Profil: {{profile}}. Verwende genau dieses Profil.",
     "session": {

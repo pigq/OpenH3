@@ -248,6 +248,145 @@ describe('Comfy installation and profile service', () => {
     }
   );
 
+  it('builds the immutable plan in the media service for an identity-only request', async () => {
+    const preparePlan = vi.fn(async (_id: string, request: { family: string; intent: string }) => {
+      expect(request).toMatchObject({ family: 'z-image', intent: 'install', profileId: 'z-bf16' });
+      return plan();
+    });
+    const { service, install } = setup({
+      preparePlan,
+      resolveApproval: async () => ({ mode: 'automatic', runtimeMode: 'yolo' }),
+    });
+    const operation = await service.request(requestId, {
+      action: 'request',
+      family: 'z-image',
+      intent: 'install',
+      profileId: 'z-bf16',
+    });
+    expect(preparePlan).toHaveBeenCalledOnce();
+    expect(operation.plan.id).toBe('z-bf16');
+    await service.idle();
+    expect(install).toHaveBeenCalledOnce();
+    await service.close();
+  });
+
+  it('coalesces identity requests before planning and reuses the saved operation after restart', async () => {
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const preparePlan = vi.fn(async () => {
+      await waiting;
+      return plan();
+    });
+    const { service, engine, install, probe } = setup({ preparePlan });
+    const identity = { action: 'request', family: 'z-image', intent: 'install', requestId } as const;
+    const first = service.request(requestId, identity);
+    const second = service.request(requestId, identity);
+    await expect(service.request(requestId, { ...identity, profileId: 'other-variant' })).rejects.toThrow(
+      'COMFY_INSTALL_REQUEST_ID_CONFLICT'
+    );
+    expect(preparePlan).toHaveBeenCalledOnce();
+    expect(service.activity('chat').preparations).toMatchObject([{ requestId, status: 'detecting' }]);
+    const interrupted = new ComfyService({ filename: path.join(root, 'state.json'), engine, install, probe });
+    expect(interrupted.activity('chat').preparations).toMatchObject([{ requestId, status: 'interrupted' }]);
+    expect(install).not.toHaveBeenCalled();
+    release();
+    const [a, b] = await Promise.all([first, second]);
+    expect(a.id).toBe(b.id);
+    expect(service.activity('chat').preparations).toEqual([]);
+    expect(probe).toHaveBeenCalledOnce();
+    service.cancelOperation(a.id, { requestId });
+    const restarted = new ComfyService({
+      filename: path.join(root, 'state.json'),
+      engine,
+      install,
+      probe,
+      preparePlan,
+    });
+    const recovered = await restarted.request(requestId, identity);
+    expect(recovered).toMatchObject({ id: a.id, state: 'cancelled' });
+    expect(preparePlan).toHaveBeenCalledOnce();
+    await expect(restarted.request(requestId, { ...identity, profileId: 'different' })).rejects.toThrow(
+      'COMFY_INSTALL_REQUEST_ID_CONFLICT'
+    );
+    expect(install).not.toHaveBeenCalled();
+    await restarted.close();
+    await service.close();
+  });
+
+  it('persists precise detection failures before an installation operation can be constructed', async () => {
+    const preparePlan = vi.fn(async () => {
+      throw new Error('COMFY_DETECTION_INCOMPLETE:gpu-driver');
+    });
+    const { service, engine, install, probe } = setup({ preparePlan });
+    await expect(
+      service.request(requestId, { action: 'request', family: 'z-image', intent: 'install' })
+    ).rejects.toThrow('COMFY_DETECTION_INCOMPLETE:gpu-driver');
+    const restarted = new ComfyService({ filename: path.join(root, 'state.json'), engine, install, probe });
+    expect(restarted.activity('chat').preparations).toMatchObject([
+      {
+        requestId,
+        status: 'failed',
+        error: 'COMFY_DETECTION_INCOMPLETE:gpu-driver',
+      },
+    ]);
+    expect(restarted.activity('chat').operations).toEqual([]);
+    expect(install).not.toHaveBeenCalled();
+    await restarted.close();
+    await service.close();
+  });
+
+  it('does not publish a plan if the selection changes while environment detection is pending', async () => {
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const preparePlan = vi.fn(async () => {
+      await waiting;
+      return plan();
+    });
+    const { service } = setup({ preparePlan });
+    const pending = service.request(requestId, { action: 'request', family: 'z-image', intent: 'install' });
+    service.bind({ requestId, conversationId: 'chat', family: 'qwen-edit', intent: 'install', source: 'local' });
+    release();
+    await expect(pending).rejects.toThrow('COMFY_SELECTION_CHANGED');
+    expect(service.activity('chat').operations).toHaveLength(0);
+    await service.close();
+  });
+
+  it('refreshes discovered profiles once for concurrent readers without granting or erasing verification', async () => {
+    const discovery = vi.fn(async () => [profile]);
+    const { service } = setup({ discover: discovery });
+    const [first, second] = await Promise.all([service.refreshProfiles(), service.refreshProfiles()]);
+    expect(discovery).toHaveBeenCalledOnce();
+    expect(first).toEqual(second);
+    expect(first[0].state).toBe('downloaded');
+    await service.revalidate(profile.id, { prompt: 'smoke' });
+    expect((await service.refreshProfiles())[0].state).toBe('verified');
+    await service.close();
+  });
+
+  it('retains scoped completed operations and jobs for the work progress panel', async () => {
+    const { service } = setup({ resolveApproval: async () => ({ mode: 'automatic' }) });
+    const operation = await service.request(requestId, { action: 'plan', plan: plan() });
+    await service.idle();
+    expect(service.activity('chat').operations).toMatchObject([{ id: operation.id, state: 'completed' }]);
+    expect(service.activity('other')).toEqual({ operations: [], jobs: [], preparations: [] });
+    service.bind({
+      requestId,
+      conversationId: 'chat',
+      profileId: profile.id,
+      family: 'z-image',
+      intent: 'generate',
+      source: 'local',
+    });
+    const job = service.generate(requestId, profile.id, { prompt: 'sphere' });
+    await service.idle();
+    expect(service.activity('chat').jobs).toMatchObject([{ id: job.id, status: 'succeeded' }]);
+    await service.close();
+  });
+
   it('does not accept an automatic-approval claim from the model or the request binding', async () => {
     const { service, install } = setup({ resolveApproval: async () => ({ mode: 'manual' }) });
     service.bind({
@@ -782,6 +921,61 @@ describe('Comfy installation and profile service', () => {
     finish?.();
     await service.idle();
   });
+  it('settles externally interrupted prompts without retaining a device uncertainty fence', async () => {
+    const { service, engine } = setup();
+    service.register(profile);
+    await service.revalidate(profile.id, { prompt: 'smoke' });
+    service.bind({ requestId, conversationId: 'chat', profileId: profile.id, intent: 'generate' });
+    engine.generate.mockImplementationOnce(async (_profile, _input, _signal, _progress, onSubmitted) => {
+      onSubmitted?.('externally-cancelled');
+      throw Object.assign(new Error('COMFY_JOB_CANCELLED'), { remoteTerminal: true });
+    });
+    const job = service.generate(requestId, profile.id, { prompt: 'interrupted' });
+    await service.idle();
+    expect(service.job(job.id, { requestId })).toMatchObject({
+      status: 'failed',
+      submissionUncertain: false,
+      error: 'COMFY_JOB_CANCELLED',
+    });
+    const next = service.generate(requestId, profile.id, { prompt: 'next task' });
+    await service.idle();
+    expect(service.job(next.id, { requestId }).status).toBe('succeeded');
+    await service.close();
+  });
+
+  it('recovers completed output retrieval without treating the GPU execution as unknown', async () => {
+    const { service, engine } = setup();
+    service.register(profile);
+    await service.revalidate(profile.id, { prompt: 'smoke' });
+    service.bind({ requestId, conversationId: 'chat', profileId: profile.id, intent: 'generate' });
+    engine.generate.mockImplementationOnce(async (_profile, _input, _signal, _progress, onSubmitted) => {
+      onSubmitted?.('completed-prompt');
+      throw Object.assign(new Error('COMFY_OUTPUT_RETRIEVAL_FAILED'), { remoteTerminal: true });
+    });
+    const job = service.generate(requestId, profile.id, { prompt: 'recover output' });
+    await service.idle();
+    expect(service.job(job.id, { requestId })).toMatchObject({
+      status: 'running',
+      promptId: 'completed-prompt',
+      submissionUncertain: false,
+    });
+    engine.resume.mockResolvedValueOnce({
+      promptId: 'completed-prompt',
+      artifacts: [{ path: path.join(root, 'out.png'), mimeType: 'image/png' }],
+    });
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 31_000);
+    try {
+      service.job(job.id, { requestId });
+      await service.idle();
+      expect(service.job(job.id, { requestId }).status).toBe('succeeded');
+      expect(engine.resume).toHaveBeenCalledOnce();
+      expect(engine.generate).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+    await service.close();
+  });
+
   it('never labels a prompt being submitted as cancelled before a prompt ID is known', async () => {
     const { service, engine } = setup();
     service.register(profile);

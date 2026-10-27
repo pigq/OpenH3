@@ -14,16 +14,21 @@ import { templateSnapshotFixture } from '../../contentCatalog/galleryFixture';
 
 const bindCreation = vi.fn();
 const bindComfy = vi.fn();
+const requestInstall = vi.fn();
 vi.mock('@/common/chat/document/creation/comfyApi', () => ({
-  comfyApi: { bind: (...args: unknown[]) => bindComfy(...args) },
+  comfyApi: {
+    bind: (...args: unknown[]) => bindComfy(...args),
+    requestInstall: (...args: unknown[]) => requestInstall(...args),
+  },
 }));
 vi.mock('@/common/chat/document/h3JobApi', () => ({
   h3JobApi: { bindCreation: (...args: unknown[]) => bindCreation(...args) },
 }));
 
-const { sendMessageInvokeMock, emitterEmitMock } = vi.hoisted(() => ({
+const { sendMessageInvokeMock, emitterEmitMock, addOrUpdateMessageMock } = vi.hoisted(() => ({
   sendMessageInvokeMock: vi.fn(),
   emitterEmitMock: vi.fn(),
+  addOrUpdateMessageMock: vi.fn(),
 }));
 
 vi.mock('@/common', () => ({
@@ -48,7 +53,8 @@ vi.mock('@/renderer/utils/file/messageFiles', () => ({
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (_key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? _key,
+    t: (_key: string, options?: { defaultValue?: string; reason?: string }) =>
+      options?.reason ? `${_key}: ${options.reason}` : (options?.defaultValue ?? _key),
   }),
 }));
 
@@ -61,7 +67,7 @@ describe('useAcpInitialMessage', () => {
         setAiProcessing: vi.fn(),
         resetState: vi.fn(),
         checkAndUpdateTitle: vi.fn(),
-        addOrUpdateMessage: vi.fn(),
+        addOrUpdateMessage: addOrUpdateMessageMock,
       })
     );
   beforeEach(() => {
@@ -69,6 +75,7 @@ describe('useAcpInitialMessage', () => {
     vi.clearAllMocks();
     bindCreation.mockResolvedValue({ ok: true });
     bindComfy.mockResolvedValue({ ok: true });
+    requestInstall.mockReset().mockResolvedValue({ id: 'install-1', state: 'running' });
   });
 
   it('clears only the original Guid draft after the first message is accepted', async () => {
@@ -183,6 +190,69 @@ describe('useAcpInitialMessage', () => {
       kind: 'image',
     });
     expect(bindCreation).not.toHaveBeenCalled();
+  });
+
+  it('submits a model-card installation before the Agent turn and forwards its existing operation context', async () => {
+    sessionStorage.setItem(
+      'acp_initial_message_conv-1',
+      JSON.stringify({
+        input: 'Install Qwen-Edit with comfyui-local.',
+        creationRequestId: 'request-qwen',
+        creationRequest: { source: 'local', kind: 'image', family: 'qwen-edit', intent: 'install' },
+      })
+    );
+    sendMessageInvokeMock.mockResolvedValueOnce({ turn_id: 'turn-1', runtime: {} });
+    mountInitial();
+    await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledOnce());
+    expect(requestInstall).toHaveBeenCalledExactlyOnceWith('request-qwen', 'conv-1', {
+      action: 'request',
+      family: 'qwen-edit',
+      intent: 'install',
+      profileId: undefined,
+      requestId: 'request-qwen',
+    });
+    expect(requestInstall.mock.invocationCallOrder[0]).toBeLessThan(sendMessageInvokeMock.mock.invocationCallOrder[0]);
+    expect(sendMessageInvokeMock.mock.calls[0][0].input).toBe(
+      'Install Qwen-Edit with comfyui-local.\n\nguid.comfy.operation.submittedContext'
+    );
+  });
+
+  it('keeps the card request for recovery if deterministic submission fails without delegating installation to the Agent', async () => {
+    sessionStorage.setItem(
+      'acp_initial_message_conv-1',
+      JSON.stringify({
+        input: 'Install Qwen-Edit.',
+        creationRequestId: 'request-qwen',
+        creationRequest: { source: 'local', kind: 'image', family: 'qwen-edit', intent: 'install' },
+      })
+    );
+    requestInstall.mockRejectedValueOnce(new Error('COMFY_DETECTION_INCOMPLETE'));
+    mountInitial();
+    await waitFor(() => expect(requestInstall).toHaveBeenCalledOnce());
+    await waitFor(() => expect(sessionStorage.getItem('acp_initial_message_conv-1')).not.toBeNull());
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+  });
+
+  it('shows the exact installation preparation failure without a missing-tools diagnosis or automatic resubmission', async () => {
+    const reason = 'COMFY_DEVICE_INSUFFICIENT: Qwen-Edit needs 16 GB VRAM; detected 8 GB';
+    const stored = JSON.stringify({
+      input: 'Install Qwen-Edit.',
+      guidDraft: 'Install Qwen-Edit.',
+      creationRequestId: 'request-qwen',
+      creationRequest: { source: 'local', kind: 'image', family: 'qwen-edit', intent: 'install' },
+    });
+    sessionStorage.setItem('acp_initial_message_conv-1', stored);
+    requestInstall.mockRejectedValueOnce(new Error(reason));
+    const hook = mountInitial();
+    await waitFor(() => expect(addOrUpdateMessageMock).toHaveBeenCalledOnce());
+    const message = addOrUpdateMessageMock.mock.calls[0][0];
+    expect(message.content.content).toBe(`guid.comfy.operation.preparationFailed: ${reason}`);
+    expect(message.content.content).not.toContain('guid.creation.toolsUnavailable');
+    expect(sessionStorage.getItem('acp_initial_message_conv-1')).toBe(stored);
+    hook.rerender();
+    await act(async () => {});
+    expect(requestInstall).toHaveBeenCalledOnce();
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
   });
 
   it('retains the prompt after failed binding and retries binding before sending on remount', async () => {

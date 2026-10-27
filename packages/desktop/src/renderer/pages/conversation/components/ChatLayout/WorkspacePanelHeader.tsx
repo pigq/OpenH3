@@ -1,6 +1,9 @@
+import { Button } from '@arco-design/web-react';
 import { WORKSPACE_HEADER_HEIGHT } from '@/renderer/pages/conversation/utils/layoutCalc';
 import { ExpandLeft, ExpandRight } from '@icon-park/react';
 import React from 'react';
+import { useTranslation } from 'react-i18next';
+import WorkProgressTabs from '@/renderer/pages/conversation/PlanBar/WorkProgressTabs';
 import WorkspaceOpenButton from './WorkspaceOpenButton';
 
 type WorkspaceHeaderProps = {
@@ -10,15 +13,13 @@ type WorkspaceHeaderProps = {
   onToggle: () => void;
   togglePlacement?: 'left' | 'right';
   workspacePath?: string;
-  /**
-   * Authoritative temp-workspace flag from
-   * `conversation.extra.is_temporary_workspace`. Passed straight through
-   * to `WorkspaceOpenButton`, which hides for temp workspaces.
-   */
   isTemporaryWorkspace?: boolean;
+  progressAvailable?: boolean;
+  workspaceAvailable?: boolean;
+  progressActive?: boolean;
+  onProgressChange?: (active: boolean) => void;
 };
 
-// Compact header bar for the workspace side panel with optional collapse toggle
 const WorkspacePanelHeader: React.FC<WorkspaceHeaderProps> = ({
   children,
   showToggle = false,
@@ -27,34 +28,44 @@ const WorkspacePanelHeader: React.FC<WorkspaceHeaderProps> = ({
   togglePlacement = 'right',
   workspacePath,
   isTemporaryWorkspace = false,
-}) => (
-  <div
-    className='workspace-panel-header flex items-center justify-start px-12px py-4px gap-12px border-b border-[var(--bg-3)]'
-    style={{ height: WORKSPACE_HEADER_HEIGHT, minHeight: WORKSPACE_HEADER_HEIGHT }}
-  >
-    {showToggle && togglePlacement === 'left' && (
-      <button
-        type='button'
-        className='workspace-header__toggle me-4px'
-        aria-label='Toggle workspace'
-        onClick={onToggle}
-      >
-        {collapsed ? <ExpandRight size={16} /> : <ExpandLeft size={16} />}
-      </button>
-    )}
-    <div className='flex-1 truncate'>{children}</div>
-
-    {/* Open workspace button - shown when workspace path is provided */}
-    {workspacePath && !collapsed && (
-      <WorkspaceOpenButton workspacePath={workspacePath} isTemporary={isTemporaryWorkspace} />
-    )}
-
-    {showToggle && togglePlacement === 'right' && (
-      <button type='button' className='workspace-header__toggle' aria-label='Toggle workspace' onClick={onToggle}>
-        {collapsed ? <ExpandRight size={16} /> : <ExpandLeft size={16} />}
-      </button>
-    )}
-  </div>
-);
-
+  progressAvailable = false,
+  workspaceAvailable = true,
+  progressActive = false,
+  onProgressChange,
+}) => {
+  const { t } = useTranslation();
+  const toggle = (
+    <Button
+      type='text'
+      size='mini'
+      className='workspace-header__toggle'
+      aria-label={collapsed ? t('common.expandMore') : t('common.collapse')}
+      onClick={onToggle}
+      icon={collapsed ? <ExpandRight size={16} /> : <ExpandLeft size={16} />}
+    />
+  );
+  return (
+    <div
+      className='workspace-panel-header flex items-center justify-start px-12px py-4px gap-8px border-b border-[var(--bg-3)]'
+      style={{ height: WORKSPACE_HEADER_HEIGHT, minHeight: WORKSPACE_HEADER_HEIGHT }}
+    >
+      {showToggle && togglePlacement === 'left' && toggle}
+      <div className='flex-1 min-w-0'>
+        {progressAvailable && onProgressChange ? (
+          <WorkProgressTabs
+            workspaceAvailable={workspaceAvailable}
+            progressActive={progressActive}
+            onChange={onProgressChange}
+          />
+        ) : (
+          children
+        )}
+      </div>
+      {workspacePath && !collapsed && !progressActive && (
+        <WorkspaceOpenButton workspacePath={workspacePath} isTemporary={isTemporaryWorkspace} />
+      )}
+      {showToggle && togglePlacement === 'right' && toggle}
+    </div>
+  );
+};
 export default WorkspacePanelHeader;

@@ -830,5 +830,34 @@
     "finalizing": "Checking output files",
     "noRecentProgress": "No new progress for over 1 minute; execution may still be active.",
     "cancelHint": "Cancel ends this generation; sampling cannot resume. Stopping chat does not cancel the video task."
+  },
+  "workProgress": {
+    "title": "Ход работы",
+    "panel": "Правая панель",
+    "empty": "Здесь отображаются многоэтапные и фоновые задачи.",
+    "waitingHint": "Ответьте на ожидающий запрос в чате.",
+    "prepareResume": "Подготовить продолжение",
+    "resumePrompt": "Продолжите незавершённую работу по текущему плану и контексту. Сначала проверьте существующие операции, не отправляя их повторно.",
+    "statuses": {
+      "pending": "Ожидает",
+      "running": "Выполняется",
+      "completed": "Завершено",
+      "failed": "Ошибка",
+      "interrupted": "Приостановлено / проверка",
+      "waiting": "Ожидает ответа",
+      "cancelled": "Отменено"
+    },
+    "kinds": {
+      "plan": "План",
+      "task": "Задача",
+      "subagent": "Субагент",
+      "background": "Фоновая команда",
+      "workflow": "Рабочий процесс",
+      "install": "Установка / восстановление модели",
+      "generation": "Генерация"
+    },
+    "detecting": "Определение устройства и подготовка установки",
+    "deviceInsufficient": "Устройство не соответствует требованиям. Недостающие условия указаны ниже.",
+    "detectionIncomplete": "Проверка не завершена. Это не означает несовместимость устройства."
   }
 }

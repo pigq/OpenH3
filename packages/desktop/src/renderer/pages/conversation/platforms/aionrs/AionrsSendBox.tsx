@@ -5,8 +5,9 @@
  */
 
 import { ipcBridge } from '@/common';
+import { parseError } from '@/common/utils';
 import { h3JobApi } from '@/common/chat/document/h3JobApi';
-import { comfyApi } from '@/common/chat/document/creation/comfyApi';
+import { prepareCreationEntry } from '../../runtime/Creation/prepareCreationEntry';
 import {
   clearGuidDraftIfMatches,
   getGuidDraftScope,
@@ -63,7 +64,7 @@ import type { AgentModeOption } from '@/renderer/utils/model/agentTypes';
 import { Button, Message, Tag } from '@arco-design/web-react';
 import { Brain, Lightning, MagicHat, Shield } from '@icon-park/react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import useSWR from 'swr';
+import useSWR, { mutate as mutateActivity } from 'swr';
 import { useTranslation } from 'react-i18next';
 import { classifyConversationBusyError } from '../conversationBusyError';
 import { useAionrsMessage } from './useAionrsMessage';
@@ -404,16 +405,18 @@ const AionrsSendBox: React.FC<{
       sessionStorage.removeItem(storageKey);
 
       let bindingPending = false;
+      let installationPending = false;
       let finishBinding: (() => void) | undefined;
       try {
         const {
-          input,
+          input: initialInput,
           files: initialFiles,
           guidDraft,
           guidDraftScope: storedScope,
           creationRequestId,
           creationRequest,
         } = JSON.parse(storedMessage);
+        let input = typeof initialInput === 'string' ? initialInput : '';
         const guidDraftScope = getGuidDraftScope();
         if (!isGuidDraftScopeCurrent(storedScope)) return;
         // Guid-page initial files are source-tagged ChatFileRefs (`local` for
@@ -424,20 +427,22 @@ const AionrsSendBox: React.FC<{
           : [];
         if (typeof creationRequestId === 'string' && creationRequest) {
           bindingPending = true;
+          installationPending =
+            creationRequest.source !== 'cloud' &&
+            Boolean(creationRequest.family) &&
+            (creationRequest.intent === 'install' ||
+              creationRequest.intent === 'repair' ||
+              creationRequest.intent === 'install-other');
           finishBinding = beginComfySelectionChange(conversation_id);
-          const bound = await comfyApi.bind(
-            creationRequestId,
-            conversation_id,
-            creationRequest.profileId,
-            creationRequest.family,
-            creationRequest.intent,
-            {
-              source: creationRequest.source ?? 'local',
-              kind: creationRequest.kind ?? 'image',
-              templateSnapshot: creationRequest.templateSnapshot,
-            }
-          );
-          if (!bound.ok) throw new Error(t('guid.creation.toolsUnavailable'));
+          const operation = await prepareCreationEntry(creationRequestId, conversation_id, creationRequest);
+          if (operation) {
+            input += `\n\n${t('guid.comfy.operation.submittedContext', {
+              id: operation.id,
+              state: t(`guid.comfy.operation.states.${operation.state}`),
+            })}`;
+            void mutateActivity(['comfy.activity', conversation_id]).catch((): void => undefined);
+            emitter.emit('chat.history.refresh');
+          }
           bindingPending = false;
         } else if (typeof creationRequestId === 'string') {
           bindingPending = true;
@@ -452,7 +457,12 @@ const AionrsSendBox: React.FC<{
         console.error('[AionrsSendBox] Failed to send initial message:', error);
         if (bindingPending) {
           sessionStorage.setItem(storageKey, storedMessage);
-          Message.error(t('guid.creation.toolsUnavailable'));
+          Message.error(
+            installationPending
+              ? t('guid.comfy.operation.preparationFailed', { reason: parseError(error) || t('common.unknownError') })
+              : t('guid.creation.toolsUnavailable')
+          );
+          void mutateActivity(['comfy.activity', conversation_id]).catch((): void => undefined);
         }
         sessionStorage.removeItem(processedKey);
       } finally {

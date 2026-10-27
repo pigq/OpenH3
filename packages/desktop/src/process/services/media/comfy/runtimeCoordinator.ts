@@ -54,7 +54,7 @@ export class ComfyRuntimeCoordinator {
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly sleep: (milliseconds: number) => Promise<void>;
   private readonly now: () => number;
-  private readonly active = new AsyncLocalStorage<{ resource: string; taskId?: string }>();
+  private readonly active = new AsyncLocalStorage<{ resource: string; taskId?: string; held: boolean }>();
 
   constructor(options: ComfyRuntimeCoordinatorOptions = {}) {
     this.directory = options.directory ?? path.join(os.tmpdir(), 'openh3-comfy-runtime-locks');
@@ -74,8 +74,8 @@ export class ComfyRuntimeCoordinator {
     // Services hold the device lease across OOM cleanup and retry; engine calls
     // inside that lease must not attempt to acquire it a second time.
     const lease = this.active.getStore();
-    if (lease) {
-      if (!this.overlaps(lease.resource, resource)) throw new Error('COMFY_NESTED_DEVICE_LEASE_MISMATCH');
+    if (lease?.held) {
+      if (!this.covers(lease.resource, resource)) throw new Error('COMFY_NESTED_DEVICE_LEASE_MISMATCH');
       return task();
     }
     const key = digest(resource);
@@ -83,7 +83,7 @@ export class ComfyRuntimeCoordinator {
     const release = await this.acquireResource(resource, signal);
     const statePath = path.join(this.directory, `${key}.json`);
     let state = this.readState(statePath);
-    const leaseState = { resource, taskId: options.taskId };
+    const leaseState = { resource, taskId: options.taskId, held: true };
     let ran = false;
     try {
       const previous = this.relatedStates(resource);
@@ -134,6 +134,9 @@ export class ComfyRuntimeCoordinator {
         throw error;
       }
     } finally {
+      // Async descendants inherit this object even after AsyncLocalStorage.run
+      // returns. A released lease must never authorize later lock-free work.
+      leaseState.held = false;
       release();
       if (ran && !state.uncertain) this.armIdle(key, resource, signature, cleanup);
     }
@@ -142,7 +145,7 @@ export class ComfyRuntimeCoordinator {
   /** Record the server's accepted id while still holding its original submission lease. */
   adoptTaskId(expected: string, accepted: string): void {
     const lease = this.active.getStore();
-    if (!lease || lease.taskId !== expected) return;
+    if (!lease?.held || lease.taskId !== expected) return;
     lease.taskId = accepted;
     const filename = path.join(this.directory, `${digest(lease.resource)}.json`);
     const state = this.readState(filename);
@@ -152,8 +155,8 @@ export class ComfyRuntimeCoordinator {
   /** Only call after the existing remote prompt has been confirmed terminal. */
   async confirmSettled(resource: string, taskId: string): Promise<void> {
     const active = this.active.getStore();
-    if (active) {
-      if (!this.overlaps(active.resource, resource)) throw new Error('COMFY_NESTED_DEVICE_LEASE_MISMATCH');
+    if (active?.held) {
+      if (!this.covers(active.resource, resource)) throw new Error('COMFY_NESTED_DEVICE_LEASE_MISMATCH');
       this.markSettled(resource, taskId);
       return;
     }
@@ -181,6 +184,25 @@ export class ComfyRuntimeCoordinator {
         return left.some((device) => right.includes(device));
       } catch {
         return true;
+      }
+    }
+    return false;
+  }
+
+  private covers(held: string, requested: string): boolean {
+    if (held === 'machine' || held === requested) return true;
+    if (held.startsWith('gpu:') && requested.startsWith('gpu:')) {
+      try {
+        const devices = JSON.parse(held.slice(4)) as unknown;
+        const needed = JSON.parse(requested.slice(4)) as unknown;
+        return (
+          Array.isArray(devices) &&
+          Array.isArray(needed) &&
+          needed.length > 0 &&
+          needed.every((device) => typeof device === 'string' && devices.includes(device))
+        );
+      } catch {
+        return false;
       }
     }
     return false;

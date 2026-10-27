@@ -50,7 +50,7 @@ export type LocalCreationInventory = {
 export type CreationRequest = Pick<
   CreationModel,
   'id' | 'name' | 'kind' | 'source' | 'state' | 'profileId' | 'family' | 'intent'
-> & { templateSnapshot?: TemplateSnapshot };
+> & { requestId?: string; templateSnapshot?: TemplateSnapshot };
 
 /** Attach explicit user choices to the first turn without exposing credentials. */
 export function creationMessage(input: string, summary: string): string {
@@ -62,7 +62,7 @@ export function creationSessionServers(
   servers: ISessionMcpServer[],
   request: CreationRequest,
   provider?: TProviderWithModel,
-  requestId?: string
+  requestId = request.requestId
 ): ISessionMcpServer[] {
   return servers.map((server) => {
     if (

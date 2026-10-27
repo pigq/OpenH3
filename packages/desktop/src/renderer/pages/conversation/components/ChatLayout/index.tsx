@@ -11,6 +11,8 @@ import { useLayoutConstraints } from '@/renderer/pages/conversation/hooks/useLay
 import { useTitleRename } from '@/renderer/pages/conversation/hooks/useTitleRename';
 import { useWorkspaceCollapse } from '@/renderer/pages/conversation/hooks/useWorkspaceCollapse';
 import { PreviewPanel, usePreviewContext } from '@/renderer/pages/conversation/Preview';
+import ConversationWorkProgress from '@/renderer/pages/conversation/PlanBar/ConversationWorkProgress';
+import { useWorkProgress } from '@/renderer/pages/conversation/PlanBar/workProgress';
 import { dispatchWorkspaceToggleEvent } from '@/renderer/utils/workspace/workspaceEvents';
 import classNames from 'classnames';
 import {
@@ -22,6 +24,7 @@ import {
 } from '@/renderer/pages/conversation/utils/layoutCalc';
 import { Layout as ArcoLayout } from '@arco-design/web-react';
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import './chat-layout.css';
 
@@ -69,6 +72,19 @@ const ChatLayout: React.FC<{
   const layout = useLayoutContext();
   const isDesktop = !layout?.isMobile;
   const isMobile = Boolean(layout?.isMobile);
+  const { t } = useTranslation();
+  const work = useWorkProgress(conversation_id);
+  const workIdentity = work.tasks.map((task) => task.id).join('\n');
+  const progressAvailable = Boolean(conversation_id);
+  // Project conversations use the Layout host on both desktop and mobile.
+  const rightPanelEnabled = !props.previewHosted && (workspaceEnabled || progressAvailable);
+  const [progressActive, setProgressActive] = useState(!workspaceEnabled);
+
+  useEffect(() => {
+    if (!workspaceEnabled && progressAvailable) {
+      setProgressActive(true);
+    }
+  }, [progressAvailable, workspaceEnabled]);
 
   // Preview panel state
   const { isOpen: isPreviewOpenRaw, isMaximized } = usePreviewContext();
@@ -94,12 +110,24 @@ const ChatLayout: React.FC<{
 
   // --- Hook A: workspace collapse ---
   const { rightSiderCollapsed, setRightSiderCollapsed } = useWorkspaceCollapse({
-    workspaceEnabled,
+    workspaceEnabled: rightPanelEnabled,
     isMobile,
     conversation_id,
     preferenceKey: workspacePreferenceKey ?? conversation_id,
     isTemporaryWorkspace,
   });
+
+  useEffect(() => {
+    if (!rightPanelEnabled || !workIdentity) return;
+    setProgressActive(true);
+    let preference: string | null = null;
+    try {
+      preference = localStorage.getItem(`workspace-preference-${workspacePreferenceKey ?? conversation_id}`);
+    } catch {
+      // Storage may be unavailable in a restricted browser context.
+    }
+    if (!isMobile && preference !== 'collapsed') setRightSiderCollapsed(false);
+  }, [conversation_id, workIdentity, rightPanelEnabled, workspacePreferenceKey, isMobile, setRightSiderCollapsed]);
 
   // --- Hook B: container width ---
   const { containerRef, containerWidth } = useContainerWidth();
@@ -134,7 +162,7 @@ const ChatLayout: React.FC<{
     containerWidth,
     workspaceWidthPx: workspaceWidthPxPref,
     chatSplitRatio: 60, // placeholder; only dynamicChatMinRatio/dynamicChatMaxRatio are used here
-    workspaceEnabled,
+    workspaceEnabled: rightPanelEnabled,
     isDesktop,
     isPreviewOpen,
     rightSiderCollapsed,
@@ -157,7 +185,7 @@ const ChatLayout: React.FC<{
     containerWidth,
     workspaceWidthPx: workspaceWidthPxPref,
     chatSplitRatio,
-    workspaceEnabled,
+    workspaceEnabled: rightPanelEnabled,
     isDesktop,
     isPreviewOpen,
     rightSiderCollapsed,
@@ -167,7 +195,7 @@ const ChatLayout: React.FC<{
   // --- Hook E: layout constraints ---
   useLayoutConstraints({
     containerWidth,
-    workspaceEnabled,
+    workspaceEnabled: rightPanelEnabled,
     isDesktop,
     isPreviewOpen,
     rightSiderCollapsed,
@@ -325,7 +353,7 @@ const ChatLayout: React.FC<{
             )}
           </div>
         </div>
-        {workspaceEnabled && !layout?.isMobile && (
+        {rightPanelEnabled && !layout?.isMobile && (
           <div
             className={classNames('!bg-1 relative chat-layout-right-sider layout-sider')}
             style={{
@@ -347,26 +375,44 @@ const ChatLayout: React.FC<{
               togglePlacement={layout?.isMobile ? 'left' : 'right'}
               workspacePath={workspacePath}
               isTemporaryWorkspace={isTemporaryWorkspace}
+              progressAvailable={progressAvailable}
+              workspaceAvailable={workspaceEnabled}
+              progressActive={progressActive}
+              onProgressChange={setProgressActive}
             >
-              {props.siderTitle}
+              {progressActive ? t('conversation.workProgress.title') : props.siderTitle}
             </WorkspacePanelHeader>
             <ArcoLayout.Content style={{ height: `calc(100% - ${WORKSPACE_HEADER_HEIGHT}px)` }}>
-              {props.sider}
+              {progressActive && conversation_id ? (
+                <ConversationWorkProgress conversationId={conversation_id} />
+              ) : (
+                props.sider
+              )}
             </ArcoLayout.Content>
           </div>
         )}
 
         {/* Mobile workspace overlay: backdrop + fixed panel + floating collapse handle */}
-        {workspaceEnabled && layout?.isMobile && (
+        {rightPanelEnabled && layout?.isMobile && (
           <MobileWorkspaceOverlay
             rightSiderCollapsed={rightSiderCollapsed}
             setRightSiderCollapsed={setRightSiderCollapsed}
             workspaceWidthPx={workspaceWidthPx}
             mobileWorkspaceHandleRight={mobileWorkspaceHandleRight}
-            siderTitle={props.siderTitle}
-            sider={props.sider}
+            sider={
+              progressActive && conversation_id ? (
+                <ConversationWorkProgress conversationId={conversation_id} />
+              ) : (
+                props.sider
+              )
+            }
             workspacePath={workspacePath}
             isTemporaryWorkspace={isTemporaryWorkspace}
+            progressAvailable={progressAvailable}
+            workspaceAvailable={workspaceEnabled}
+            progressActive={progressActive}
+            onProgressChange={setProgressActive}
+            siderTitle={progressActive ? t('conversation.workProgress.title') : props.siderTitle}
           />
         )}
       </div>

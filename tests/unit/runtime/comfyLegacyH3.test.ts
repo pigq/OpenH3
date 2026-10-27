@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { importLegacyH3 } from '@/process/services/media/comfy/legacyH3';
+import { importLegacyH3 } from '@/process/services/media/comfy/discovery/legacyH3';
 import embedded from '@/process/services/runtime/h3EmbeddedWorkflows.json';
 import { matlowaiCompleteOfflineBundle } from '@/process/services/runtime/h3OfflineBundle';
 import type { H3PortableInstallStatus } from '@/process/services/runtime/H3PortableInstaller';

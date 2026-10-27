@@ -4,6 +4,16 @@ This file records OpenH3-specific changes. The project is currently in Alpha.
 
 ## Unreleased
 
+## 3.0.2
+
+- Model cards submit a short installation request to the application-owned planner; installation uses the active permission policy and a single saved operation instead of repeated chat confirmations.
+- Discover complete local ComfyUI installations from known roots and running instances, retain verified profiles, and report missing evidence separately from incompatible hardware.
+- Show conversation plans, delegated work, background commands, installation and generation in the shared Work progress / Workspace panel.
+- Preserve interrupted task context for the next user message without replaying old actions. Resume existing ComfyUI operations and jobs without duplicate submission.
+- Tighten GPU coordination across processes, observe memory cleanup outcomes and preserve the single OOM retry allowance across restarts.
+
+## Earlier source updates
+
 - Removed inherited product PRDs and empty specification placeholders from public documentation; separated user guides from contributor debugging and architecture notes.
 - Removed the comment-only npm configuration and documented the active dependency patch.
 

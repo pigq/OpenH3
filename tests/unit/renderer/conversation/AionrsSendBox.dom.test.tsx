@@ -10,8 +10,12 @@ import { resetGuidDraft, useGuidDraft } from '@/renderer/pages/guid/hooks/useGui
 import { beginComfySelectionChange } from '@/renderer/pages/conversation/runtime/Creation/useComfySelectionPending';
 import { templateSnapshotFixture } from '../../contentCatalog/galleryFixture';
 const bindComfy = vi.fn().mockResolvedValue({ ok: true });
+const requestInstall = vi.fn();
 vi.mock('@/common/chat/document/creation/comfyApi', () => ({
-  comfyApi: { bind: (...args: unknown[]) => bindComfy(...args) },
+  comfyApi: {
+    bind: (...args: unknown[]) => bindComfy(...args),
+    requestInstall: (...args: unknown[]) => requestInstall(...args),
+  },
 }));
 
 const {
@@ -32,7 +36,8 @@ const {
 } = vi.hoisted(() => ({
   ensureConversationRuntimeMock: vi.fn().mockResolvedValue({ recovered: false, config_options: [], runtime: null }),
   sendMessageInvokeMock: vi.fn().mockResolvedValue(undefined),
-  translateMock: (key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key,
+  translateMock: (key: string, options?: { defaultValue?: string; reason?: string }) =>
+    options?.reason ? `${key}: ${options.reason}` : (options?.defaultValue ?? key),
   useTeamPermissionMock: vi.fn(),
   setSendBoxHandlerMock: vi.fn(),
   markSendFailedMock: vi.fn(),
@@ -317,6 +322,7 @@ describe('AionrsSendBox', () => {
     draftContentRef.current = '';
     runtimeViewIsProcessingRef.current = false;
     sessionStorage.clear();
+    requestInstall.mockReset().mockResolvedValue({ id: 'install-1', state: 'running' });
   });
 
   it('keeps the Guid draft until the initial aionrs message is accepted', async () => {
@@ -405,6 +411,54 @@ describe('AionrsSendBox', () => {
       templateSnapshot: templateSnapshotFixture,
     });
     expect(bindComfy.mock.invocationCallOrder[0]).toBeLessThan(sendMessageInvokeMock.mock.invocationCallOrder[0]);
+  });
+
+  it('submits the bound model-card installation directly before the first Core turn', async () => {
+    sessionStorage.setItem(
+      'aionrs_initial_message_conv-1',
+      JSON.stringify({
+        input: 'Install Qwen-Edit with comfyui-local.',
+        creationRequestId: 'request-qwen',
+        creationRequest: { source: 'local', kind: 'image', family: 'qwen-edit', intent: 'install' },
+      })
+    );
+    sendMessageInvokeMock.mockResolvedValueOnce({ turn_id: 'turn-1', msg_id: 'msg-1', runtime: {} });
+    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledOnce());
+    expect(requestInstall).toHaveBeenCalledExactlyOnceWith('request-qwen', 'conv-1', {
+      action: 'request',
+      family: 'qwen-edit',
+      intent: 'install',
+      profileId: undefined,
+      requestId: 'request-qwen',
+    });
+    expect(requestInstall.mock.invocationCallOrder[0]).toBeLessThan(sendMessageInvokeMock.mock.invocationCallOrder[0]);
+    expect(sendMessageInvokeMock.mock.calls[0][0].input).toBe(
+      'Install Qwen-Edit with comfyui-local.\n\nguid.comfy.operation.submittedContext'
+    );
+  });
+
+  it('preserves the exact preparation failure and request instead of reporting unavailable tools or resubmitting', async () => {
+    const reason = 'COMFY_DEVICE_INSUFFICIENT: Qwen-Edit needs 16 GB VRAM; detected 8 GB';
+    const stored = JSON.stringify({
+      input: 'Install Qwen-Edit.',
+      guidDraft: 'Install Qwen-Edit.',
+      creationRequestId: 'request-qwen',
+      creationRequest: { source: 'local', kind: 'image', family: 'qwen-edit', intent: 'install' },
+    });
+    sessionStorage.setItem('aionrs_initial_message_conv-1', stored);
+    requestInstall.mockRejectedValueOnce(new Error(reason));
+    const view = render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    await waitFor(() =>
+      expect(Message.error).toHaveBeenCalledWith(`guid.comfy.operation.preparationFailed: ${reason}`)
+    );
+    expect(Message.error).not.toHaveBeenCalledWith('guid.creation.toolsUnavailable');
+    expect(sessionStorage.getItem('aionrs_initial_message_conv-1')).toBe(stored);
+    expect(sessionStorage.getItem('aionrs_initial_processed_conv-1')).toBeNull();
+    view.rerender(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    await act(async () => {});
+    expect(requestInstall).toHaveBeenCalledOnce();
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
   });
 
   it('preserves the Guid draft after a rejected initial aionrs send', async () => {

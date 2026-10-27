@@ -1,6 +1,6 @@
 # Source catalog and mirror policy
 
-This file is a decision aid, not a list of unverified download links. The candidate's upstream repository, immutable revision, filename, license, byte count, and SHA-256 remain the identity record.
+This reference describes source decisions owned by the backend planner and downloader, plus evidence for diagnosis or an explicitly requested legacy-plan review. It is not a chat prerequisite for ordinary installation or generation: the agent uses the existing operation or the identity-only request in SKILL.md, without collecting URLs or repeating probes. The candidate's upstream repository, immutable revision, filename, license, byte count, and SHA-256 remain the identity record.
 
 ## Preferred lookup order
 
@@ -8,7 +8,7 @@ This file is a decision aid, not a list of unverified download links. The candid
 2. **A reputable domestic mirror** — for example `hf-mirror.com` or another Hugging Face mirror that preserves the repository and revision path. Treat the mirror as transport only; compare the downloaded bytes and source metadata with upstream. The host must appear in the built-in trusted-host list or be explicitly approved by the product before probing.
 3. **Upstream host** — use the pinned Hugging Face, Git, Python index, or Comfy-Org URL when it is reachable and the first two sources do not provide equivalent evidence.
 
-The LLM must pass the exact candidate URLs to `openh3_comfy_environment.sources` before selecting one. A host page, search result, repository name, or same-size file is not sufficient evidence. Do not send credentials or signed query strings in a report; use a short-lived URL only for the actual approved download and keep the receipt local.
+The backend planner probes the exact immutable candidate URLs before selecting a source and records the per-source results. `openh3_comfy_environment.sources` can expose the same read-only evidence for a specific diagnosis when needed; the chat agent does not call it before every installation. A host page, search result, repository name, or same-size file is not sufficient evidence. Do not send credentials or signed query strings in a report; use a short-lived URL only for the actual approved download and keep the receipt local.
 
 ## Host-specific rules
 
@@ -24,7 +24,7 @@ The LLM must pass the exact candidate URLs to `openh3_comfy_environment.sources`
 - `moss-image-sft`: upstream `Comfy-Org/MOSS-Image`, revision `24147db865fcdc207270f844777587223fed8d6e`, with the SFT BF16/INT8 diffusion files and shared Qwen3.5/VAE files matched against ModelScope and `hf-mirror.com`. Keep this family separate from Base; the SFT template and graph use the same native loader but distinct diffusion filenames and source revision.
 - `krea2`: upstream `Comfy-Org/Krea-2`, revision `1171f4dc7e325bf3734586942e737872506c73e1`. Turbo diffusion/encoder/VAE sets have matching ModelScope and domestic-mirror size/SHA-256 metadata. Raw checkpoints, optional styles and MXFP8 are not substitutes for the bundled Turbo sets.
 
-For each selected component, pass its ordered eligible `transports` URLs to the environment network probe and install plan. Reuse the common resumable transfer, source receipt and digest validation. A file digest mismatch must stop, not silently fall through to another source. The upstream identity stays in `url`, and transports populate `sourceUrls`; never replace the identity with a mirror URL.
+For each selected component, the backend planner passes its ordered eligible `transports` URLs to its network probe and install plan. The downloader reuses the common resumable transfer, source receipt and digest validation. A file digest mismatch must stop, not silently fall through to another source. The upstream identity stays in `url`, and transports populate `sourceUrls`; never replace the identity with a mirror URL.
 
 ## When no mirror is usable
 

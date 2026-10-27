@@ -8,6 +8,7 @@ import type { ComfyInstallPlan, ComfyProfile } from '@/common/chat/document/crea
 import type { ComfyGenerationResult } from '@/process/services/media/comfy/workflowEngine';
 import { downloadH3FromSources } from '@/process/services/runtime/h3Downloader';
 import { ComfyRuntimeCoordinator } from '@/process/services/media/comfy/runtimeCoordinator';
+import embeddedH3Workflows from '@/process/services/runtime/h3EmbeddedWorkflows.json';
 import {
   assertComfyInstallPlan,
   executeComfyInstall,
@@ -156,6 +157,77 @@ function fixture() {
 }
 
 describe('generic ComfyUI install executor', () => {
+  it('downloads independent components through a bounded pool before installing runtime packages', async () => {
+    plan.components = Array.from({ length: 4 }, (_, index) => ({
+      ...plan.components[0],
+      name: `weights-${index}`,
+      path: path.join(root, 'models', `weights-${index}.safetensors`),
+    }));
+    plan.downloadBytes = content.length * 4;
+    const { options, events } = fixture();
+    let active = 0;
+    let peak = 0;
+    let release!: () => void;
+    const initialBatch = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const download: typeof downloadH3FromSources = async (manifest) => {
+      active++;
+      peak = Math.max(peak, active);
+      if (active === 3) release();
+      await initialBatch;
+      expect(events).not.toContain('finish');
+      fs.mkdirSync(path.dirname(manifest.destination), { recursive: true });
+      fs.writeFileSync(manifest.destination, content);
+      active--;
+      return { status: 'verified', destination: manifest.destination, resumedBytes: 0, bytes: content.length };
+    };
+    await expect(
+      executeComfyInstall(plan, new AbortController().signal, undefined, { ...options, download })
+    ).resolves.toMatchObject({ state: 'verified' });
+    expect(peak).toBe(3);
+    expect(active).toBe(0);
+    expect(events).toContain('finish');
+  });
+
+  it('cancels and settles peer transfers after a failed component without starting finish commands', async () => {
+    plan.components = Array.from({ length: 3 }, (_, index) => ({
+      ...plan.components[0],
+      name: `weights-${index}`,
+      path: path.join(root, 'models', `weights-${index}.safetensors`),
+    }));
+    plan.downloadBytes = content.length * 3;
+    const { options, engine, events } = fixture();
+    let started = 0;
+    let settled = 0;
+    let release!: () => void;
+    const batch = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const download: typeof downloadH3FromSources = async (manifest, transferOptions) => {
+      started++;
+      if (started === 3) release();
+      try {
+        await batch;
+        if (manifest.destination === plan.components[0].path) throw new Error('COMFY_COMPONENT_DOWNLOAD_HASH_MISMATCH');
+        await new Promise<never>((_resolve, reject) => {
+          if (transferOptions.signal?.aborted) reject(new Error('aborted'));
+          else transferOptions.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        });
+        throw new Error('unreachable');
+      } finally {
+        settled++;
+      }
+    };
+    await expect(
+      executeComfyInstall(plan, new AbortController().signal, undefined, { ...options, download })
+    ).rejects.toThrow('COMFY_COMPONENT_DOWNLOAD_HASH_MISMATCH');
+    expect(started).toBe(3);
+    expect(settled).toBe(3);
+    expect(events).not.toContain('finish');
+    expect(engine.validate).not.toHaveBeenCalled();
+  });
+
   it('clears memory before retrying a terminal smoke OOM once with the original recipe', async () => {
     const { options, engine } = fixture();
     const oom = Object.assign(new Error('COMFY_OOM'), {
@@ -427,6 +499,69 @@ describe('generic ComfyUI install executor', () => {
       executeComfyInstall(plan, new AbortController().signal, undefined, { ...options, runCommand })
     ).rejects.toThrow('COMFY_PREPARE_STATE_MISMATCH');
     expect(runCommand.mock.calls.some(([, args]) => args.includes('clone'))).toBe(false);
+  });
+
+  it('resumes its recorded no-checkout clone after cancellation before the pinned checkout', async () => {
+    const { options, engine } = fixture();
+    const source = path.join(root, 'source');
+    fs.mkdirSync(source);
+    const git = (args: string[], cwd = source): string =>
+      execFileSync('git', args, { cwd, windowsHide: true, encoding: 'utf8' });
+    git(['init']);
+    git(['config', 'user.name', 'Comfy Test']);
+    git(['config', 'user.email', 'comfy@test.local']);
+    fs.writeFileSync(path.join(source, 'main.py'), 'pinned content');
+    git(['add', 'main.py']);
+    git(['-c', 'commit.gpgsign=false', 'commit', '-m', 'pin']);
+    const pin = git(['rev-parse', 'HEAD']).trim();
+    fs.writeFileSync(path.join(source, 'main.py'), 'new upstream content');
+    git(['add', 'main.py']);
+    git(['-c', 'commit.gpgsign=false', 'commit', '-m', 'later']);
+    plan.commands = [
+      {
+        executable: 'git',
+        args: ['clone', '--no-checkout', 'https://github.com/example/repo.git', plan.environment.root],
+        cwd: root,
+        revision: pin,
+        label: 'clone',
+        stage: 'prepare',
+      },
+      {
+        executable: 'git',
+        args: ['checkout', '--detach', pin],
+        cwd: plan.environment.root,
+        revision: pin,
+        label: 'checkout',
+        stage: 'prepare',
+      },
+    ];
+    let cancelAfterClone = true;
+    let controller = new AbortController();
+    const runCommand = vi.fn<ComfyInstallCommandRunner>(async (file, args, commandOptions) => {
+      const result = await runComfyInstallCommand(
+        file,
+        args.map((arg) => (arg === 'https://github.com/example/repo.git' ? source : arg)),
+        commandOptions
+      );
+      if (args.includes('clone')) {
+        git(['remote', 'set-url', 'origin', 'https://github.com/example/repo.git'], plan.environment.root);
+        if (cancelAfterClone) {
+          cancelAfterClone = false;
+          controller.abort();
+        }
+      }
+      return result;
+    });
+    await expect(executeComfyInstall(plan, controller.signal, undefined, { ...options, runCommand })).rejects.toThrow(
+      'COMFY_INSTALL_CANCELLED'
+    );
+    expect(fs.readdirSync(plan.environment.root)).toEqual(['.git']);
+    controller = new AbortController();
+    runCommand.mockClear();
+    await executeComfyInstall(plan, controller.signal, undefined, { ...options, runCommand });
+    expect(runCommand.mock.calls.some(([, args]) => args.includes('clone'))).toBe(false);
+    expect(fs.readFileSync(path.join(plan.environment.root, 'main.py'), 'utf8')).toBe('pinned content');
+    expect(engine.generate).toHaveBeenCalledOnce();
   });
 
   it('repairs a git/pip runtime without optional comfy-cli after a native node source snapshot', async () => {
@@ -931,6 +1066,23 @@ describe('generic ComfyUI install executor', () => {
     expect(() => assertComfyInstallPlan(plan)).not.toThrow();
   });
 
+  it('allows offline pinned wheel installation only within the selected resource roots', () => {
+    const wheel = path.join(root, 'wheels', 'torch-2.9.1-py3-none-any.whl');
+    plan.commands = [
+      {
+        executable: plan.environment.python,
+        args: ['-m', 'pip', 'install', '--no-index', '--no-deps', wheel],
+        cwd: root,
+        label: 'Install verified wheels',
+        revision: '2.9.1',
+        stage: 'finish',
+      },
+    ];
+    expect(() => assertComfyInstallPlan(plan)).not.toThrow();
+    plan.commands[0].args[5] = path.join(os.tmpdir(), 'unowned-wheel.whl');
+    expect(() => assertComfyInstallPlan(plan)).toThrow('COMFY_WRITE_PATH_OUTSIDE_ROOT');
+  });
+
   it('checks command write destinations, not just cwd', () => {
     plan.commands[0].args[4] = path.join(os.tmpdir(), 'outside-clone');
     expect(() => assertComfyInstallPlan(plan)).toThrow('COMFY_WRITE_PATH_OUTSIDE_ROOT');
@@ -1065,6 +1217,117 @@ describe('generic ComfyUI install executor', () => {
     await expect(
       executeComfyInstall(plan, new AbortController().signal, undefined, { ...options, verifyArtifact: undefined })
     ).resolves.toMatchObject({ state: 'verified' });
+  });
+
+  it('preserves the exact embedded H3 source bytes written by portable preparation through smoke verification', async () => {
+    const source = Buffer.from(
+      embeddedH3Workflows['workflows/lowvram/01_reference_4step_sla_lowvram.api.json'],
+      'base64'
+    ).toString('utf8');
+    plan.workflow = JSON.parse(source) as ComfyInstallPlan['workflow'];
+    plan.workflowSource = source;
+    plan.workflowSha256 = crypto.createHash('sha256').update(source).digest('hex');
+    plan.commands = [];
+    plan.family = 'h3';
+    plan.kind = 'video';
+    plan.capabilities = ['text-to-video', 'native-audio'];
+    const { options, engine } = fixture();
+    engine.generate.mockImplementationOnce(async (_profile, _input, _signal, _progress, submitted, submitting) => {
+      submitting?.();
+      submitted?.('h3-source-smoke');
+      const artifact = path.join(root, 'h3-source-smoke.mp4');
+      fs.writeFileSync(artifact, 'fixture video');
+      return { promptId: 'h3-source-smoke', artifacts: [{ path: artifact, mimeType: 'video/mp4' }] };
+    });
+    const result = await executeComfyInstall(plan, new AbortController().signal, undefined, {
+      ...options,
+      prepareRuntime: async () => {
+        fs.writeFileSync(plan.workflowPath, source);
+      },
+    });
+    expect(result.state).toBe('verified');
+    expect(result.workflowSha256).toBe('f622f57e30056f45355079203e7d3fc6ea4db60451686293d1eda47c9f471487');
+    expect(fs.readFileSync(plan.workflowPath, 'utf8')).toBe(source);
+    expect(engine.generate).toHaveBeenCalledOnce();
+  });
+
+  it('reuses external checksum-pinned models read-only without granting their parent directory write access', async () => {
+    const external = fs.mkdtempSync(path.join(os.tmpdir(), 'comfy-external-model-'));
+    try {
+      plan.components[0].path = path.join(external, 'weights.safetensors');
+      plan.reuseOnlyPaths = [plan.components[0].path];
+      fs.writeFileSync(plan.components[0].path, content);
+      const { options, download } = fixture();
+      await executeComfyInstall(plan, new AbortController().signal, undefined, options);
+      expect(download).not.toHaveBeenCalled();
+      expect(fs.readdirSync(external)).toEqual(['weights.safetensors']);
+      plan.smokeInput.prompt = 'new request after external edit';
+      fs.writeFileSync(plan.components[0].path, 'x'.repeat(content.length));
+      await expect(executeComfyInstall(plan, new AbortController().signal, undefined, options)).rejects.toThrow(
+        'COMFY_EXISTING_COMPONENT_INVALID'
+      );
+      expect(fs.readdirSync(external)).toEqual(['weights.safetensors']);
+    } finally {
+      fs.rmSync(external, { recursive: true, force: true });
+    }
+  });
+
+  it('records a missing Python snapshot and allows authorized preparation to recreate it', async () => {
+    plan.repair = true;
+    fs.unlinkSync(plan.environment.python);
+    plan.commands = [];
+    const { options, runCommand, engine } = fixture();
+    await executeComfyInstall(plan, new AbortController().signal, undefined, {
+      ...options,
+      prepareRuntime: async () => {
+        const directory = fs.readdirSync(options.snapshotRoot).find((name) => name.startsWith('fixture-'))!;
+        expect(
+          JSON.parse(fs.readFileSync(path.join(options.snapshotRoot, directory, 'python-missing.json'), 'utf8'))
+        ).toEqual({ executable: plan.environment.python, missing: true });
+        expect(fs.existsSync(path.join(options.snapshotRoot, directory, 'snapshot.complete'))).toBe(true);
+        fs.writeFileSync(plan.environment.python, 'recreated runtime');
+      },
+    });
+    expect(runCommand).not.toHaveBeenCalled();
+    expect(engine.generate).toHaveBeenCalledOnce();
+  });
+
+  it('bootstraps a pinned portable runtime only after repair snapshots and before prepare commands', async () => {
+    plan.repair = true;
+    const { options } = fixture();
+    const order: string[] = [];
+    const runCommand = vi.fn<ComfyInstallCommandRunner>(async (_file, args) => {
+      if (args.includes('freeze')) {
+        order.push('snapshot-python');
+        return { stdout: 'torch==2.9.1', stderr: '', exitCode: 0 };
+      }
+      if (args.includes('-c')) return { stdout: '{"available":false}', stderr: '', exitCode: 0 };
+      if (args.includes('clone')) order.push('prepare-command');
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+    const prepareRuntime = vi.fn(async () => {
+      const directory = fs.readdirSync(options.snapshotRoot).find((name) => name.startsWith('fixture-'))!;
+      expect(fs.existsSync(path.join(options.snapshotRoot, directory, 'snapshot.complete'))).toBe(true);
+      order.push('portable-bootstrap');
+    });
+    await executeComfyInstall(plan, new AbortController().signal, undefined, {
+      ...options,
+      runCommand,
+      prepareRuntime,
+    });
+    expect(prepareRuntime).toHaveBeenCalledOnce();
+    expect(order).toEqual(['snapshot-python', 'portable-bootstrap', 'prepare-command']);
+  });
+
+  it('does not invoke portable bootstrap when the required repair snapshot cannot be completed', async () => {
+    plan.repair = true;
+    const { options } = fixture();
+    const prepareRuntime = vi.fn();
+    const runCommand = vi.fn<ComfyInstallCommandRunner>(async () => ({ stdout: '', stderr: '', exitCode: 1 }));
+    await expect(
+      executeComfyInstall(plan, new AbortController().signal, undefined, { ...options, runCommand, prepareRuntime })
+    ).rejects.toThrow('COMFY_COMMAND_FAILED:snapshot-python');
+    expect(prepareRuntime).not.toHaveBeenCalled();
   });
 
   it.each(['AIONUI_FFPROBE_PATH', 'AIONUI_FFMPEG_PATH'])(

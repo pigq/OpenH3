@@ -2,6 +2,7 @@ import { registerProductTool } from './toolAliases';
 import { h3AgentSnapshot, h3GenerationSpecSchema, type H3Job } from '@/common/chat/document/h3Job';
 import {
   comfyGenerationInputSchema,
+  comfyFamilySchema,
   comfyInstallPlanSchema,
   comfyProfileSchema,
   type ComfyGenerationJob,
@@ -29,7 +30,10 @@ function formatServiceError(prefix: string, error: unknown): string {
   return `${prefix}: ${error instanceof Error ? error.message : String(error)}`;
 }
 async function call(path: string, init?: RequestInit): Promise<unknown> {
-  const response = await fetch(`http://127.0.0.1:${port()}${path}`, { ...init, signal: AbortSignal.timeout(45_000) });
+  const response = await fetch(`http://127.0.0.1:${port()}${path}`, {
+    ...init,
+    signal: AbortSignal.timeout(path === '/api/comfy/operations' ? 300_000 : 45_000),
+  });
   const data = await response.json();
   if (!response.ok) {
     if (path === '/api/h3/status' && response.status === 503 && data?.install) return data;
@@ -78,7 +82,7 @@ async function main() {
     { name: BUILTIN_VIDEO_MEDIA_NAME, version: '1.0.0' },
     {
       instructions:
-        'Use the comfyui-local skill for local H3, FastH3-Omni, Qwen-Edit, Z-Image, FLUX 3 Image Klein, MOSS-Image-Base, MOSS-Image-SFT, and Krea 2 environment selection, installation, repair, and generation. Respect the current registered profile and session selection. openh3_comfy_install request submits a complete pinned plan. The app reads the active session approval policy: full-auto starts directly; otherwise the UI confirms once and starts it. Do not ask for extra confirmation or self-authorize. A running operation needs no start or resubmission. Generate only with a verified registered profile through openh3_comfy_generate; generation needs no installation plan. For FastH3-Omni read references/fasth3-omni.md and pass ordered image/video/audio references from the chat attachment paths. For flux-3-image-klein, moss-image-base, moss-image-sft and krea2 read the matching heading in references/z-image.md and imageModels.baselines in references/workflows.json. Expand FLUX requests into full scene captions before generation. Keep MOSS Base and SFT separate and Krea Turbo separate from Raw; incomplete probes or gated sources do not prove hardware incompatibility. The client displays operations and job outputs and monitors them independently. End your turn after submission; do not repeatedly poll or resubmit. Historical H3 tools remain available for existing jobs.',
+        'Use comfyui-local for local H3, FastH3-Omni, Qwen-Edit, Z-Image, FLUX 3 Image Klein, MOSS-Image-Base, MOSS-Image-SFT and Krea 2. Model-card installation metadata is submitted by the application: when an operationId is present, explain or inspect that operation without submitting another. For an unsubmitted installation request, call openh3_comfy_install with action=request, family, intent and optional profileId. The media service owns probing, pinned component selection, domestic-first downloads, installation and smoke verification; do not rebuild a plan or require environment tools before this call. Full-auto starts directly; other modes confirm once in the UI. Do not request extra chat confirmation or self-authorize. Generate with the selected verified profile; the service performs preflight. Pass ordered image/video/audio references from attachment paths for FastH3-Omni. Expand FLUX requests into full scene captions. Keep family and variant identities distinct. Incomplete probes, unavailable tools and gated sources are different failures. The client monitors background operations and outputs. End the turn after submission; do not repeatedly poll or resubmit. Legacy plans and H3 tools remain for existing clients and jobs.',
     }
   );
   const spec = {
@@ -151,19 +155,32 @@ async function main() {
   registerProductTool(
     server,
     'openh3_comfy_install',
-    'Prepare or manage a full pinned local ComfyUI installation/repair plan. request returns comfyOperationId and a reviewable operation. The app applies the observed session approval policy: full automatic approval authorizes and starts a valid plan directly; other modes need one UI confirmation. The LLM cannot grant itself approval and must not ask for another confirmation when the operation is already running. start is for recovery of a previously authorized operation. start/status/cancel require the same operationId and current request context. No original generation spec is required. The UI follows progress; end your turn after request/start.',
+    'Prepare or manage a local ComfyUI installation/repair operation. For new model-card requests use action=request with family, intent (install, repair, or install-other), and optional profileId. The media service automatically probes this machine, selects one compatible pinned component set, prefers verified domestic sources, creates the plan, verifies downloads and runs a representative smoke test. Do not provide a hand-written plan or ask for a separate confirmation. The response distinguishes COMFY_TOOL_NOT_READY, COMFY_DETECTION_INCOMPLETE and COMFY_DEVICE_CONDITIONS_INSUFFICIENT. A complete plan on action=request or action=plan remains accepted for older clients. Full automatic approval starts directly; other modes require one UI confirmation. start is only for recovery of a previously authorized operation; status/cancel require the same operationId and request context. End your turn after request/start.',
     {
-      action: z.enum(['request', 'start', 'status', 'cancel']),
+      action: z.enum(['request', 'plan', 'start', 'status', 'cancel']),
       plan: comfyInstallPlanSchema.optional(),
+      family: comfyFamilySchema.optional(),
+      intent: z.enum(['install', 'repair', 'install-other']).optional(),
+      profileId: z.string().min(1).optional(),
       operationId: z.string().min(1).optional(),
     },
-    async ({ action, plan, operationId }) => {
+    async ({ action, plan, family, intent, profileId, operationId }) => {
       try {
         const requestId = creationRequestId();
         let operation: ComfyOperation;
-        if (action === 'request') {
-          if (!plan) throw new Error('COMFY_INSTALL_PLAN_REQUIRED');
-          operation = (await call('/api/comfy/operations', jsonRequest({ plan, requestId }))) as ComfyOperation;
+        if (action === 'request' || action === 'plan') {
+          if (action === 'plan' && !plan) throw new Error('COMFY_INSTALL_PLAN_REQUIRED');
+          const install = plan
+            ? { action: 'request' as const, plan }
+            : family && intent
+              ? { action: 'request' as const, family, intent, ...(profileId ? { profileId } : {}) }
+              : (() => {
+                  throw new Error('COMFY_INSTALL_REQUEST_REQUIRED: provide family and intent');
+                })();
+          operation = (await call(
+            '/api/comfy/operations',
+            jsonRequest(plan ? { plan, requestId } : { install, requestId })
+          )) as ComfyOperation;
         } else {
           if (!operationId) throw new Error('COMFY_OPERATION_REQUIRED');
           const endpoint = `/api/comfy/operations/${encodeURIComponent(operationId)}`;

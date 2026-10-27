@@ -513,7 +513,12 @@ describe('GuidPage', () => {
     const card = screen.getByRole('region', { name });
     fireEvent.click(within(card).getByRole('button', { name: 'guid.comfy.actions.install' }));
     expect(guidInputMock.setInput).toHaveBeenCalledExactlyOnceWith('guid.comfy.prompts.install');
-    expect(capturedGuidSendDeps.at(-1)?.creationIntent).toEqual({ family, intent: 'install', profileId: undefined });
+    expect(capturedGuidSendDeps.at(-1)?.creationIntent).toEqual({
+      family,
+      intent: 'install',
+      profileId: undefined,
+      requestId: expect.any(String),
+    });
     expect(capturedGuidInputCardProps.at(-1)?.focusRequestKey).toBeTruthy();
     expect(sendMock.sendMessageHandler).not.toHaveBeenCalled();
   });
@@ -531,6 +536,7 @@ describe('GuidPage', () => {
       family: 'qwen-edit',
       intent: 'install',
       profileId: undefined,
+      requestId: expect.any(String),
     });
     expect(capturedGuidInputCardProps.at(-1)?.focusRequestKey).toBeTruthy();
     expect(screen.getAllByRole('article')).toHaveLength(52);

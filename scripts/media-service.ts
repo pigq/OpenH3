@@ -13,7 +13,10 @@ import {
   executeComfyInstall,
 } from '../packages/desktop/src/process/services/media/comfy/installExecutor';
 import { handleComfyRoute } from '../packages/desktop/src/process/services/media/comfy/routes';
-import { importLegacyH3 } from '../packages/desktop/src/process/services/media/comfy/legacyH3';
+import { defaultComfyInstallPlanner } from '../packages/desktop/src/process/services/media/comfy/planning/installPlanner';
+import { H3_PORTABLE_INSTALL_EVIDENCE } from '../packages/desktop/src/process/services/media/comfy/planning/legacyInstallPlan';
+import { createComfyProfileDiscovery } from '../packages/desktop/src/process/services/media/comfy/discovery';
+import { importLegacyH3 } from '../packages/desktop/src/process/services/media/comfy/discovery/legacyH3';
 import type { CreationInstallConsent } from '../packages/desktop/src/common/chat/document/creation/operation';
 import { inspectH3DownloadSpace } from '../packages/desktop/src/process/services/runtime/h3DownloadPlan';
 import { probeSetupHardware } from '../packages/desktop/src/process/services/runtime/h3SetupHardware';
@@ -205,9 +208,22 @@ let approvalBackendPort = Number(process.env.OPENH3_MEDIA_BACKEND_PORT);
 const comfyService = new ComfyService({
   filename: comfyManifest,
   engine: comfyEngine,
+  preparePlan: defaultComfyInstallPlanner(dataDir, {
+    resourcesRoot: process.env.OPENH3_RESOURCES_ROOT,
+    roots: () => [h3Runtime.installStatus().bundleRoot, h3Runtime.installStatus().runtimeRoot, dataDir],
+    h3BundleRoot: () => h3Runtime.installStatus().bundleRoot,
+  }),
+  discover: createComfyProfileDiscovery({
+    cacheFile: path.join(dataDir, 'comfy-discovery.json'),
+    workflowDirectory: path.join(dataDir, 'comfy-discovered-workflows'),
+    resourcesRoot: process.env.OPENH3_RESOURCES_ROOT,
+    roots: () => [h3Runtime.installStatus().bundleRoot, h3Runtime.installStatus().runtimeRoot, dataDir],
+    legacyProfiles: () => importLegacyH3(h3Runtime.installStatus(), h3Client.getBaseUrl()),
+    endpoints: () => [h3Client.getBaseUrl()],
+  }),
   checkPlan: assertComfyInstallPlan,
   resolveApproval: createComfyApprovalResolver({ backendPort: () => approvalBackendPort }),
-  install: (plan, signal, progress) => {
+  install: async (plan, signal, progress) => {
     const legacyRoot = path.join(h3Runtime.installStatus().runtimeRoot, 'ComfyUI');
     if (
       (path.resolve(plan.environment.root).toLowerCase() === path.resolve(legacyRoot).toLowerCase() ||
@@ -219,6 +235,45 @@ const comfyService = new ComfyService({
       engine: comfyEngine,
       snapshotRoot: path.join(dataDir, 'comfy-snapshots'),
       snapshotFiles: [comfyManifest],
+      prepareRuntime: async (plan, signal, onProgress) => {
+        const progress = onProgress ?? (() => undefined);
+        const legacyRoot = path.join(h3Runtime.installStatus().runtimeRoot, 'ComfyUI');
+        if (plan.evidence.includes(H3_PORTABLE_INSTALL_EVIDENCE)) {
+          if (
+            plan.family !== 'h3' ||
+            path.resolve(plan.environment.root).toLowerCase() !== path.resolve(legacyRoot).toLowerCase()
+          )
+            throw new Error('COMFY_H3_PORTABLE_PLAN_SCOPE_MISMATCH');
+          if (signal.aborted) throw new Error('COMFY_INSTALL_CANCELLED');
+          // This callback runs only after the operation's normal permission check.
+          // Reuse the pinned portable installer for archive extraction; no Agent
+          // tool discovery, secondary consent, shell or guessed runtime is needed.
+          if (h3Runtime.installReadiness() !== 'ready' || plan.repair) {
+            const pause = () => {
+              void h3Setup.pause().catch(() => undefined);
+            };
+            h3Setup.start(h3Runtime.installStatus().bundleRoot, true);
+            signal.addEventListener('abort', pause, { once: true });
+            const timer = setInterval(() => {
+              const state = h3Setup.status();
+              progress(`h3:${state.phase}${state.filename ? `:${state.filename}` : ''}`);
+              if (signal.aborted) pause();
+            }, 750);
+            timer.unref();
+            try {
+              if (signal.aborted) pause();
+              await h3Setup.wait();
+              if (signal.aborted) throw new Error('COMFY_INSTALL_CANCELLED');
+              const state = h3Setup.status();
+              if (state.phase !== 'installed')
+                throw new Error(state.error ?? `COMFY_H3_INSTALL_${state.phase.toUpperCase()}`);
+            } finally {
+              clearInterval(timer);
+              signal.removeEventListener('abort', pause);
+            }
+          }
+        }
+      },
       onProfile: (profile) => comfyService.recordProgressProfile(profile),
     });
   },
@@ -228,6 +283,9 @@ for (const profile of importLegacyH3(h3Runtime.installStatus(), h3Client.getBase
   if (!comfyService.profiles().some((existing) => existing.id === profile.id)) comfyService.register(profile);
 }
 comfyService.recoverJobs();
+void comfyService.refreshProfiles().catch((error: unknown) => {
+  console.warn('[comfy] startup discovery failed', error instanceof Error ? error.message : String(error));
+});
 function pumpH3Jobs(): void {
   if (h3Dispatching || h3Runner.blocked()) return;
   if (comfyService.runtimeBusy(path.join(h3Runtime.installStatus().runtimeRoot, 'ComfyUI'), h3Client.getBaseUrl()))

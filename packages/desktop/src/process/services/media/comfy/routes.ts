@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import { timingSafeEqual as cryptoTimingSafeEqual } from 'node:crypto';
 import type http from 'node:http';
 import { z } from 'zod';
-import { probeComfyEnvironment } from './environment';
-import { comfyProfileSchema } from '@/common/chat/document/creation/comfy';
+import { probeComfyEnvironment } from './discovery/environment';
+import { comfyInstallRequestSchema, comfyProfileSchema } from '@/common/chat/document/creation/comfy';
 import type { ComfyService } from './ComfyService';
 
 type Ports = {
@@ -42,6 +42,11 @@ export async function handleComfyRoute(
   if (request.method === 'POST' && url.pathname === '/api/comfy/bind') {
     service.bind(await body(request));
     json(response, 200, { ok: true });
+    return true;
+  }
+  if (request.method === 'GET' && url.pathname === '/api/comfy/activity') {
+    const conversationId = z.string().min(1).parse(url.searchParams.get('conversationId'));
+    json(response, 200, service.activity(conversationId));
     return true;
   }
   if (request.method === 'GET' && url.pathname === '/api/comfy/environment') {
@@ -97,8 +102,16 @@ export async function handleComfyRoute(
     }
   }
   if (request.method === 'POST' && url.pathname === '/api/comfy/operations') {
-    const payload = z.object({ requestId: z.string().uuid(), plan: z.unknown() }).parse(await body(request));
-    json(response, 201, await service.request(payload.requestId, payload.plan));
+    const payload = z
+      .object({ requestId: z.string().uuid(), plan: z.unknown().optional(), install: z.unknown().optional() })
+      .refine((value) => value.plan !== undefined || value.install !== undefined, {
+        message: 'COMFY_INSTALL_REQUEST_REQUIRED',
+      })
+      .parse(await body(request));
+    const installRequest = comfyInstallRequestSchema.parse(
+      payload.install ?? { action: 'request', plan: payload.plan }
+    );
+    json(response, 201, await service.request(payload.requestId, installRequest));
     return true;
   }
   const operation = /^\/api\/comfy\/operations\/([a-f\d-]{36})(?:\/(authorize|start|cancel))?$/i.exec(url.pathname);

@@ -814,5 +814,34 @@
     "finalizing": "Checking output files",
     "noRecentProgress": "No new progress for over 1 minute; execution may still be active.",
     "cancelHint": "Cancel ends this generation; sampling cannot resume. Stopping chat does not cancel the video task."
+  },
+  "workProgress": {
+    "title": "作業の進捗",
+    "panel": "右パネル",
+    "empty": "複数ステップの作業やバックグラウンドタスクを表示します。",
+    "waitingHint": "会話内で確認事項に回答してください。",
+    "prepareResume": "続行の準備",
+    "resumePrompt": "現在の計画と文脈に基づいて未完了の作業を続けてください。既存の operation/job の状態を確認し、重複送信しないでください。",
+    "statuses": {
+      "pending": "待機中",
+      "running": "実行中",
+      "completed": "完了",
+      "failed": "失敗",
+      "interrupted": "一時停止 / 状態確認中",
+      "waiting": "回答待ち",
+      "cancelled": "キャンセル済み"
+    },
+    "kinds": {
+      "plan": "計画",
+      "task": "タスク",
+      "subagent": "サブエージェント",
+      "background": "バックグラウンドコマンド",
+      "workflow": "ワークフロー",
+      "install": "モデルのインストール / 修復",
+      "generation": "生成タスク"
+    },
+    "detecting": "デバイス検出とインストール準備中",
+    "deviceInsufficient": "デバイス要件を満たしていません。下の不足項目を確認してください。",
+    "detectionIncomplete": "検出が未完了です。デバイスの非互換を意味するものではありません。"
   }
 }

@@ -66,7 +66,9 @@
         "completed": "Vérifié et prêt",
         "cancelled": "Annulé"
       },
-      "snapshotDirectory": "Instantané de récupération"
+      "snapshotDirectory": "Instantané de récupération",
+      "submittedContext": "L’application a soumis l’installation {{id}} ({{state}}) ; le panneau de progression se met à jour automatiquement. Expliquez l’état de cette opération sans soumettre une autre installation ni redemander confirmation dans le chat.",
+      "preparationFailed": "La préparation de l’installation n’a pas abouti : {{reason}}. La demande est conservée ; consultez la progression pour les détails."
     },
     "profileSummary": "Profil local sélectionné : {{profile}}. Utilise précisément ce profil.",
     "session": {

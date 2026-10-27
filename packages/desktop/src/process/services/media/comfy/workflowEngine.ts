@@ -19,7 +19,12 @@ import { diagnoseComfyError } from '@/process/services/runtime/h3ComfyError';
 import { MATLOWAI_CUSTOM_NODE_ARCHIVES } from '@/process/services/runtime/h3OfflineBundle';
 import { H3ReferencePreflight } from '@/process/services/runtime/H3ReferencePreflight';
 import { withComfyReferenceVideo } from './referenceVideo';
-import { readPythonRuntime, readComfyHardwareIdentity, runComfyCommand, type ComfyPythonRuntime } from './environment';
+import {
+  readPythonRuntime,
+  readComfyHardwareIdentity,
+  runComfyCommand,
+  type ComfyPythonRuntime,
+} from './discovery/environment';
 import {
   comfyRuntimeResourceKey,
   sharedComfyRuntimeCoordinator,
@@ -1274,13 +1279,16 @@ export class ComfyWorkflowEngine {
     };
     signal.addEventListener('abort', abort, { once: true });
     if (signal.aborted) abort();
+    let remoteTerminal = false;
     try {
       const history = await this.wait(frozen, promptId, signal);
+      remoteTerminal = true;
       this.throwAborted(signal);
       const artifacts = await this.download(frozen, promptId, history, signal);
       onProgress?.(100);
       return { promptId, artifacts };
     } catch (error) {
+      if (remoteTerminal && error instanceof Error) Object.assign(error, { remoteTerminal: true });
       if (cancellation) {
         try {
           await cancellation;
@@ -1311,7 +1319,7 @@ export class ComfyWorkflowEngine {
         if (++failures >= 3 || attempt === attempts - 1) throw new Error('COMFY_HISTORY_UNAVAILABLE', { cause });
       }
       if (entry?.status?.messages?.some((message) => Array.isArray(message) && message[0] === 'execution_interrupted'))
-        throw new Error('COMFY_JOB_CANCELLED');
+        throw Object.assign(new Error('COMFY_JOB_CANCELLED'), { remoteTerminal: true });
       if (entry?.status?.status_str === 'error') throw this.diagnosed(diagnoseComfyError(entry), entry, 'execution');
       if (entry?.status?.completed) return entry;
       if (this.now() - started >= (this.options.maxWaitMs ?? 2 * 60 * 60 * 1000))
@@ -1393,13 +1401,16 @@ export class ComfyWorkflowEngine {
     };
     signal.addEventListener('abort', abort, { once: true });
     if (signal.aborted) abort();
+    let remoteTerminal = false;
     try {
       onProgress?.(0);
       const completed = await this.wait(frozen, promptId, signal);
+      remoteTerminal = true;
       const artifacts = await this.download(frozen, promptId, completed, signal);
       onProgress?.(100);
       return { promptId, artifacts };
     } catch (error) {
+      if (remoteTerminal && error instanceof Error) Object.assign(error, { remoteTerminal: true });
       if (cancellation) {
         try {
           await cancellation;
@@ -1504,72 +1515,94 @@ export class ComfyWorkflowEngine {
   /** Request cache eviction only on an idle, identified runtime and observe device memory recovery. */
   async clearMemory(profile: ComfyProfile, reason: ComfyCleanupReason, signal: AbortSignal): Promise<void> {
     const frozen = structuredClone(profile);
-    this.throwAborted(signal);
-    assertEnvironment(frozen);
-    const before = await this.json(frozen, '/system_stats', {}, signal);
-    await this.assertIdentity(frozen, before);
-    const identityBefore = await (this.options.runtimeInspector ?? inspectService)(frozen, before);
-    const assertIdle = async (): Promise<void> => {
-      const queue = await this.json(frozen, '/queue', {}, signal);
-      if (!Array.isArray(queue.queue_running) || !Array.isArray(queue.queue_pending))
-        throw new Error('COMFY_QUEUE_INVALID_RESPONSE');
-      if (queue.queue_running.length || queue.queue_pending.length) throw new Error('COMFY_MEMORY_CLEAR_QUEUE_BUSY');
-    };
-    const memory = (stats: Record<string, unknown>): number[] =>
-      Array.isArray(stats.devices)
-        ? stats.devices.map((value) => {
-            const device = record(value);
-            return typeof device.vram_free === 'number' && Number.isFinite(device.vram_free) ? device.vram_free : NaN;
-          })
-        : [];
-    const baseline = memory(before);
-    await assertIdle();
-    if (!baseline.length || baseline.some((value) => !Number.isFinite(value)))
-      throw this.diagnosed(new Error('COMFY_MEMORY_CLEAR_TELEMETRY_UNAVAILABLE'), { reason, before }, 'memory');
-    await this.json(
-      frozen,
-      '/free',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ unload_models: true, free_memory: true }),
-      },
-      signal
-    );
+    let baseline: number[] = [];
     const observations: number[][] = [];
-    let emptySamples = 0;
-    for (let attempt = 0; attempt < Math.min(this.options.maxPollAttempts ?? 10, 10); attempt++) {
-      await this.pause(this.options.pollIntervalMs ?? 500, signal);
+    let confirmed = false;
+    let failure: unknown;
+    try {
+      this.throwAborted(signal);
+      assertEnvironment(frozen);
+      const before = await this.json(frozen, '/system_stats', {}, signal);
+      await this.assertIdentity(frozen, before);
+      const identityBefore = await (this.options.runtimeInspector ?? inspectService)(frozen, before);
+      const assertIdle = async (): Promise<void> => {
+        const queue = await this.json(frozen, '/queue', {}, signal);
+        if (!Array.isArray(queue.queue_running) || !Array.isArray(queue.queue_pending))
+          throw new Error('COMFY_QUEUE_INVALID_RESPONSE');
+        if (queue.queue_running.length || queue.queue_pending.length) throw new Error('COMFY_MEMORY_CLEAR_QUEUE_BUSY');
+      };
+      const memory = (stats: Record<string, unknown>): number[] =>
+        Array.isArray(stats.devices)
+          ? stats.devices.map((value) => {
+              const device = record(value);
+              return typeof device.vram_free === 'number' && Number.isFinite(device.vram_free) ? device.vram_free : NaN;
+            })
+          : [];
+      baseline = memory(before);
       await assertIdle();
-      const after = await this.json(frozen, '/system_stats', {}, signal);
-      await this.assertIdentity(frozen, after);
-      const identityAfter = await (this.options.runtimeInspector ?? inspectService)(frozen, after);
-      if (identityBefore?.pid !== undefined && identityAfter?.pid !== identityBefore.pid)
-        throw new Error('COMFY_MEMORY_CLEAR_RUNTIME_CHANGED');
-      const observed = memory(after);
-      observations.push(observed);
-      const devices = Array.isArray(after.devices) ? after.devices.map(record) : [];
-      const emptyAllocator = devices.length > 0 && devices.every((device) => device.torch_vram_total === 0);
-      emptySamples = emptyAllocator ? emptySamples + 1 : 0;
-      if (
-        observed.length === baseline.length &&
-        observed.every((value) => Number.isFinite(value)) &&
-        observed.every((value, index) => value >= baseline[index]) &&
-        (observed.some((value, index) => value > baseline[index]) || emptySamples >= 2)
-      ) {
+      if (!baseline.length || baseline.some((value) => !Number.isFinite(value)))
+        throw new Error('COMFY_MEMORY_CLEAR_TELEMETRY_UNAVAILABLE');
+      await this.json(
+        frozen,
+        '/free',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ unload_models: true, free_memory: true }),
+        },
+        signal
+      );
+      let emptySamples = 0;
+      for (let attempt = 0; attempt < Math.min(this.options.maxPollAttempts ?? 10, 10); attempt++) {
+        await this.pause(this.options.pollIntervalMs ?? 500, signal);
+        await assertIdle();
+        const after = await this.json(frozen, '/system_stats', {}, signal);
+        await this.assertIdentity(frozen, after);
+        const identityAfter = await (this.options.runtimeInspector ?? inspectService)(frozen, after);
+        if (identityBefore?.pid !== undefined && identityAfter?.pid !== identityBefore.pid)
+          throw new Error('COMFY_MEMORY_CLEAR_RUNTIME_CHANGED');
+        const observed = memory(after);
+        observations.push(observed);
+        const devices = Array.isArray(after.devices) ? after.devices.map(record) : [];
+        const emptyAllocator = devices.length > 0 && devices.every((device) => device.torch_vram_total === 0);
+        emptySamples = emptyAllocator ? emptySamples + 1 : 0;
+        if (
+          observed.length === baseline.length &&
+          observed.every((value) => Number.isFinite(value)) &&
+          observed.every((value, index) => value >= baseline[index]) &&
+          (observed.some((value, index) => value > baseline[index]) || emptySamples >= 2)
+        ) {
+          confirmed = true;
+          return;
+        }
+      }
+      throw new Error('COMFY_MEMORY_CLEAR_UNCONFIRMED');
+    } catch (error) {
+      failure = error;
+      throw error;
+    } finally {
+      // One bounded record per cleanup, including identity/queue/telemetry
+      // failures. Only safe error codes and memory/component metadata are logged.
+      try {
         const file = this.diagnosticFile('memory');
+        const error = failure instanceof Error ? /^COMFY_[A-Z0-9_]+/.exec(failure.message)?.[0] : undefined;
         this.writeDiagnostic(
           file,
-          stable({ reason, components: frozen.components, before: baseline, observations, confirmed: true })
+          stable({
+            at: new Date(this.now()).toISOString(),
+            reason,
+            components: frozen.components,
+            before: baseline,
+            observations,
+            confirmed,
+            error: failure ? (error ?? 'COMFY_MEMORY_CLEAR_FAILED') : undefined,
+          })
         );
-        return;
+        if (failure instanceof Error) Object.assign(failure, { diagnosticLogPath: file });
+      } catch {
+        /* Diagnostics must not change a confirmed cleanup or mask its failure. */
       }
     }
-    throw this.diagnosed(
-      new Error('COMFY_MEMORY_CLEAR_UNCONFIRMED'),
-      { reason, components: frozen.components, before: baseline, observations, confirmed: false },
-      'memory'
-    );
   }
 
   /** Delete only this queued prompt and interrupt only if it is the sole matching active prompt. */

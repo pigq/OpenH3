@@ -35,9 +35,9 @@ vi.mock('@renderer/pages/conversation/platforms/aionrs/AionrsSendBox', () => ({
   default: () => null,
 }));
 
-// This test is about ConversationContext wiring only; the plan bar pulls in the
-// message list + runtime view, neither of which this file's narrow mocks provide.
-vi.mock('@renderer/pages/conversation/PlanBar/ConversationPlanBar', () => ({
+// This test is about ConversationContext wiring only; the progress bridge pulls
+// in message list + runtime state, covered by the unified work progress tests.
+vi.mock('@renderer/pages/conversation/PlanBar/WorkProgressBridge', () => ({
   __esModule: true,
   default: () => null,
 }));

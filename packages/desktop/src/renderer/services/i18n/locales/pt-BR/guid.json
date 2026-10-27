@@ -66,7 +66,9 @@
         "completed": "Verificado e pronto",
         "cancelled": "Cancelado"
       },
-      "snapshotDirectory": "Snapshot de recuperação"
+      "snapshotDirectory": "Snapshot de recuperação",
+      "submittedContext": "O aplicativo enviou a instalação {{id}} ({{state}}); o painel de progresso é atualizado automaticamente. Explique o estado da operação existente sem enviar outra instalação nem pedir confirmação no chat.",
+      "preparationFailed": "A preparação da instalação não foi concluída: {{reason}}. A solicitação foi mantida; confira os detalhes no progresso do trabalho."
     },
     "profileSummary": "Perfil local selecionado: {{profile}}. Use exatamente este perfil.",
     "session": {
