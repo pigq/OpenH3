@@ -31,20 +31,11 @@ description: 'OpenClaw usage expert: Helps you install, deploy, configure, and u
 - **官方文档**：访问 [docs.openclaw.ai](https://docs.openclaw.ai) 获取最新的官方文档
 - **本技能的作用**：提供基础知识和常见操作指南，但遇到新功能或变更时，应查阅最新资料
 
-## 🔍 首先：环境诊断（每次响应前必做）
+## 🔍 按需环境诊断
 
-**在回答任何 OpenClaw 问题之前，先执行环境诊断，确认工具可以被找到：**
+安装、执行或排障首次需要本机信息时，使用当前可用工具检查命令路径和版本；后续复用已确认结果，只补查变化或失败项。概念问答不强制运行诊断。专用工具缺失时，可以使用已获准的通用文件、HTTP 和命令执行工具完成等价步骤，不因工具名称不同而停止。
 
-```bash
-# 1. 检查 OpenH3 工作进程中实际可用的 PATH
-node -e "console.log('PATH entries:', process.env.PATH.split(require('path').delimiter).length); console.log('First 3:', process.env.PATH.split(require('path').delimiter).slice(0,3))"
-
-# 2. 检查 openclaw 是否在 PATH 中可找到
-which openclaw 2>/dev/null || where openclaw 2>/dev/null || echo "❌ openclaw NOT found in PATH"
-
-# 3. 如果找不到，检查 npm 全局包安装位置
-npm root -g && npm bin -g
-```
+通过当前 shell 的命令发现功能定位 `openclaw`（如 PowerShell 的 `Get-Command` 或 POSIX 的 `command -v`）。找不到时再检查实际安装位置和 npm 的当前帮助，不把 Node/npm 本身当作已安装 CLI 的调用前提。执行 CLI 操作前核对当前版本的帮助，不把历史文档中的命令当作当前能力证明。
 
 **诊断结果解读：**
 
@@ -52,7 +43,7 @@ npm root -g && npm bin -g
 - ❌ `openclaw NOT found in PATH` → 环境问题，按以下步骤排查：
   1. 先确认 `openclaw` 已安装：`npm list -g openclaw`
   2. 若已安装但找不到，说明 PATH 不包含 npm 全局 bin 目录，这通常是 OpenH3 启动方式（非终端）导致的
-  3. 临时解决：在命令中使用绝对路径，例如 `$(npm bin -g)/openclaw doctor`
+  3. 使用实际发现的绝对路径继续，不猜测安装目录或反复重装；确实未安装且用户请求包含安装时，再执行适配平台的安装步骤。
 
 ## 快速判断用户状态
 
@@ -205,10 +196,10 @@ openclaw config set <key> <value>     # 设置配置
    - 想使用 → `references/usage.md` 和 `references/configuration.md`
    - 需要卸载 → `references/uninstallation.md`
 
-3. **提供解决方案**：
-   - 先运行 `openclaw doctor` 进行诊断
-   - 根据诊断结果提供具体步骤
-   - 涉及敏感信息时，引导用户自己处理
+3. **执行解决方案**：
+   - 排障时先做相关诊断，复用已确认结果；纯说明或已明确的执行步骤无需重复整套检测
+   - 用户已要求安装或配置时，在实际运行时权限内完成步骤并验证，不只给出命令等待再次确认
+   - 用户已授权且凭证已通过受支持的安全途径提供时，可直接完成对应配置；不回显密钥，不将其放入命令行参数或临时明文文件。优先使用已核对的安全输入或凭证存储接口；缺少凭证、安全写入途径或必须交互登录时才请用户完成该项
 
 4. **验证和后续**：
    - 每步操作后验证结果

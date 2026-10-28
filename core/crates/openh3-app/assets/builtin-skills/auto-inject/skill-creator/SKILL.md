@@ -46,6 +46,10 @@ Match the level of specificity to the task's fragility and variability:
 
 Think of Claude as exploring a path: a narrow bridge with cliffs needs specific guardrails (low freedom), while an open field allows many routes (high freedom).
 
+### Prefer Capabilities Over Mandatory Tool Names
+
+Specify the required outcome and evidence, then the preferred tool. If that tool is genuinely unavailable, allow equivalent permitted file, command, HTTP, or browser tools when they can satisfy the same contract. Check live schemas and existing task state; do not invent tools or start duplicate work. Keep true product-only, authentication, integrity, and permission boundaries explicit rather than treating every tool name as mandatory. Reuse the user's request and existing runtime grants; do not add repeated chat confirmations or hand back steps the agent can complete. Ask only for missing decisions, access, or capabilities that actually block the task.
+
 ### Anatomy of a Skill
 
 Every skill consists of a required SKILL.md file and optional bundled resources:

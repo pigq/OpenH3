@@ -1,6 +1,6 @@
 # Source catalog and mirror policy
 
-This reference describes source decisions owned by the backend planner and downloader, plus evidence for diagnosis or an explicitly requested legacy-plan review. It is not a chat prerequisite for ordinary installation or generation: the agent uses the existing operation or the identity-only request in SKILL.md, without collecting URLs or repeating probes. The candidate's upstream repository, immutable revision, filename, license, byte count, and SHA-256 remain the identity record.
+This reference describes source decisions normally owned by the backend planner and downloader. It is not a chat prerequisite for the managed route: use the existing operation or SKILL.md's identity-only request without repeating probes. In SKILL.md's general-tool fallback, use the same policy with available permitted HTTPS tools and retain the evidence in the installation journal. The candidate's upstream repository, immutable revision, filename, license, byte count, and SHA-256 remain the identity record.
 
 ## Preferred lookup order
 

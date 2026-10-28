@@ -646,7 +646,7 @@ officecli add "$FILE" "/slide[$SLIDE]" --type table \
 
 ## Numbers convention (pitch-specific)
 
-A terse convention table — **not a finance tutorial**. If you don't already know what these mean, pause the deck and ask the user for the values; don't guess.
+A terse convention table — **not a finance tutorial**. Resolve unfamiliar standard metric definitions through authoritative documentation and use the supplied company material for actual values. Ask only for missing company metrics or business assumptions that cannot be established from that material. Do not ask the user to explain a standard term the agent can look up, and do not invent numbers.
 
 | Metric | Shape | Floor / convention |
 |---|---|---|

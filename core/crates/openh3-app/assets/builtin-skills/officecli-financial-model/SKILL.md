@@ -417,7 +417,7 @@ Every `Assumptions` driver row gets the same `INDEX/MATCH`. Base / Upside / Down
 
 ## Financial function patterns
 
-Terse reference — not a finance textbook. If you don't know what these do, pause and ask the user.
+Terse reference — not a finance textbook. Resolve unfamiliar standard functions through the installed tool's help or authoritative documentation, then verify the formula on representative inputs. Ask the user only for missing company data or business assumptions that cannot be derived from the supplied material; do not turn a tool-knowledge gap into a mandatory user question or invent financial inputs.
 
 | Function | Prefer over | Why |
 |---|---|---|

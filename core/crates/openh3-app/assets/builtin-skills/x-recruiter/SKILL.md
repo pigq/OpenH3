@@ -13,7 +13,7 @@ description: 用于在 X (x.com) 发布招聘帖子。包含文案规范、图�
 
 ### 1. 信息收集
 
-向用户确认：
+先复用用户已提供的信息，仅补问缺失或冲突且影响结果的内容；用户已明确的信息不重复确认：
 
 - **岗位名称**
 - **核心职责 & 要求**
@@ -21,13 +21,13 @@ description: 用于在 X (x.com) 发布招聘帖子。包含文案规范、图�
 
 ### 2. 生成视觉素材
 
-使用 `scripts/generate_images.js` 生成图片。
+`scripts/generate_images.js` 只生成 `image_instructions.txt` 提示，不生成图片。按这些提示使用当前已授权的生图、绘图或文档渲染工具制作素材；缺少某个专用工具时检查等价可用工具，不重复调用未知接口。
 
 - **操作**：
   ```bash
   node scripts/generate_images.js
   ```
-- **产出**：`cover.png`, `jd_details.png`
+- **脚本产出**：`image_instructions.txt`。完整素材步骤需另行产出 `cover.png`、`jd_details.png`，检查文件存在、可解码且内容正确后再使用。没有可用制作工具时，保留已完成文案并说明具体缺项，不宣称图片已生成。
 
 ### 3. 生成文案
 
@@ -38,7 +38,7 @@ description: 用于在 X (x.com) 发布招聘帖子。包含文案规范、图�
 
 ### 4. 自动化发布
 
-使用 `scripts/publish_x.py` 启动浏览器进行发布。
+只有用户明确要求发布时才运行 `scripts/publish_x.py`：脚本会自动点击 Post，不提供审核暂停模式。仅要求草稿、预览或保留审核时，先交付文案和素材，不运行该脚本。发布前检查脚本/依赖是否可运行；脚本不可用时可以使用已获准的浏览器工具完成同一已授权流程，不把工具故障等同于需要再次授权发布。
 
 **前置要求**：
 
@@ -56,11 +56,11 @@ python3 scripts/publish_x.py "post_content.txt" "cover.png" "jd_details.png"
 1. 观察浏览器窗口：脚本已打开 X 首页或发帖页。
 2. 若出现登录页，请完成登录。
 3. 登录完成后，脚本会自动填充文案与图片。
-4. 请在浏览器中检查内容，确认无误后点击“Post”。
+4. 脚本自动点击 Post；核对真实发布结果并提供帖子链接。进程退出或点击成功不代表发布成功，状态不明时先检查已有帖子，不重复提交。已明确授权发布时不另加聊天确认，登录交互仍由用户完成。
 
 ## 资源文件
 
 - **assets/rules.md**: 文案规则与限制。
 - **assets/design_philosophy.md**: 视觉风格指南。
-- **scripts/generate_images.js**: 图片生成脚本。
+- **scripts/generate_images.js**: 图片提示文件生成脚本。
 - **scripts/publish_x.py**: 发布自动化脚本。

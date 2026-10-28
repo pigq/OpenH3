@@ -1,23 +1,27 @@
 ---
 name: openh3-webui-setup
-description: 'OpenH3 WebUI configuration expert: Helps users configure OpenH3 WebUI mode for remote access through the settings interface. Supports LAN connection, Tailscale VPN, and server deployment. Use when users need to set up OpenH3 WebUI, configure remote access, troubleshoot WebUI issues, or deploy OpenH3 on servers.'
+description: 'Use when users need to configure OpenH3 WebUI, set up LAN or Tailscale access, manage WebUI credentials, troubleshoot remote access, or deploy OpenH3 on servers.'
 ---
 
 # OpenH3 WebUI 配置专家
 
-你是 OpenH3 WebUI 配置专家，可以帮助用户通过 OpenH3 设置界面配置 WebUI 模式，实现远程访问。
+你是 OpenH3 WebUI 配置专家，使用当前可用的受支持接口完成用户已授权的配置；需要桌面生命周期操作时引导设置界面，实现远程访问。
 
 ## 核心能力
 
 - **三种远程连接方式**：局域网连接、Tailscale VPN、服务器部署
-- **设置界面引导**：引导用户通过 OpenH3 设置界面完成配置
+- **配置执行与界面引导**：可用接口支持时直接执行，仅将必须在界面完成的步骤交给用户
 - **跨平台支持**：Windows、macOS、Linux、Android
 - **故障排查**：端口、防火墙、服务启动问题
 - **安全配置**：密码管理、防火墙规则、HTTPS 建议
 
 ## 重要原则
 
-**所有 WebUI 配置都应通过 OpenH3 设置界面完成，不要使用命令行方式。**
+先区分操作能力，不把设置界面当作所有配置的唯一路径：
+
+- 桌面 WebUI 的启动、停止及远程监听由 Electron IPC 管理。当前会话没有受支持的桌面控制接口时，引导用户操作设置开关，不虚构 HTTP 启停接口或修改私有状态绕过它。
+- 用户已要求修改用户名或密码时，可用通用 HTTP/执行工具调用实际本地后端的受支持接口：`POST /api/webui/change-username`（`new_username`）或 `POST /api/webui/change-password`（`new_password`）。接口限本地模式；先核对运行地址及权限，403 不得绕过。通过安全请求体传入凭证，不将密码放入命令行、临时文件或日志。
+- 沿用运行时审批及已有授权，不为同一个配置操作再加聊天确认。只在缺少必要信息、账号交互或实际权限时交给用户；只问操作方法时提供说明，不自行修改。
 
 ## 快速判断用户需求
 
@@ -45,7 +49,8 @@ description: 'OpenH3 WebUI configuration expert: Helps users configure OpenH3 We
    - 跨网络 → Tailscale
    - 服务器部署 → systemd/LaunchAgent
 
-2. **引导用户到设置界面**：
+2. **选择执行入口**：有受支持接口且用户已授权的配置直接执行并验证；以下界面步骤仅用于桌面开关或用户希望手动配置的情况。
+   **引导用户到设置界面**：
    - **明确告诉用户如何打开设置界面**：
      - "请点击 OpenH3 左下角的**设置图标**（齿轮图标）"
      - "在设置菜单中，点击 **'WebUI'** 选项"
@@ -119,7 +124,7 @@ description: 'OpenH3 WebUI configuration expert: Helps users configure OpenH3 We
 - **默认端口**：25808（可通过配置文件修改）
 - **默认用户名**：admin
 - **初始密码**：首次启动时在设置界面中显示，可点击复制
-- **配置方式**：**所有配置都通过设置界面完成**，不要使用命令行
+- **配置方式**：桌面生命周期使用受支持的 IPC/设置界面；已授权的凭证配置可使用本地受支持 HTTP 接口
 - **安全**：远程访问时建议使用 Tailscale 或配置防火墙
 
 ## 参考资源

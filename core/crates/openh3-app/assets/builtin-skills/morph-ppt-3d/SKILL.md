@@ -43,7 +43,7 @@ Verify with `officecli --version` (open a new terminal if PATH hasn't picked up)
 
 ## 3D Model Compatibility Gate (before generation)
 
-1. Only `.glb` is supported. If user provides `.fbx` / `.obj` / `.blend` / `.usdz` / `.gltf`, ask them to convert to `.glb` first (e.g. via Blender export).
+1. The deck requires `.glb`. If the user supplies another format, first check available authorized conversion tools (for example an installed Blender importer/exporter), their actual format support, and required textures. When conversion is supported, create a separate `.glb`, preserve the original, and verify geometry/materials before insertion. Do not require the user to perform a conversion the agent can complete. Ask for a compatible file or a specific fidelity decision only when no permitted conversion route works; do not silently discard animation, materials, or geometry.
 2. If user has no model, follow the **Model Discovery Flow** below.
 3. All files (`.glb`, `.pptx`, build script) must be in the same working directory.
 

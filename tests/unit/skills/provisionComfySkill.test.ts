@@ -269,7 +269,7 @@ describe('ComfyUI skill provisioning', () => {
     const previousStamp = preferences[COMFY_LOCAL_SKILL_PREFERENCE];
     const repositoryBundle = path.resolve('resources/skills/comfyui-local');
     await expect(provisionComfySkill(request, repositoryBundle)).resolves.toBe('updated');
-    expect(preferences[COMFY_LOCAL_SKILL_PREFERENCE]).toMatchObject({ version: '1.8.0' });
+    expect(preferences[COMFY_LOCAL_SKILL_PREFERENCE]).toMatchObject({ version: '1.8.1' });
     expect(preferences[COMFY_LOCAL_SKILL_PREFERENCE]).not.toEqual(previousStamp);
     expect(await fs.readFile(path.join(userRoot, 'SKILL.md'), 'utf8')).toBe(
       await fs.readFile(path.join(repositoryBundle, 'SKILL.md'), 'utf8')

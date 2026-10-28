@@ -2,13 +2,15 @@
 
 Use this short ledger while planning or repairing an installation. It keeps the LLM from treating a reachable page, downloaded file, or successful import as proof of a usable profile.
 
+The managed backend normally keeps this ledger. In SKILL.md's general-tool fallback, the agent records equivalent evidence in its installation journal using available permitted tools. Missing metadata is a reason for bounded research, not an automatic stop; unresolved required evidence blocks the affected transfer or validation stage. The complete-plan payload and command allowlist below describe the managed executor, not a ban on fallback tools.
+
 ## Record each artifact
 
 For every model, encoder, VAE, LoRA, node repository, Python package, and workflow record:
 
 - artifact class and role in the API graph;
 - authoritative repository, immutable revision/path, license, expected bytes, and SHA-256;
-- candidate transports and their batch number in `openh3_comfy_environment.sources` (no more than 12 URLs per call);
+- candidate transports and their batch number in `openh3_comfy_environment.sources` (no more than 12 URLs per call), or equivalent fallback HTTPS probe records;
 - per-source reachability, redirect, Range/content-length result, and mirror identity/digest evidence;
 - local path, resume receipt, and post-download size/hash result;
 - loader/node schema compatibility and the profile/workflow fingerprint.
@@ -19,7 +21,7 @@ Keep model-host, Git-host, package-index, and workflow-host results separate. A 
 
 Use the states `planned`, `downloaded`, `loadable`, and `verified`:
 
-1. `planned` means the component set, workflow graph, sources, and required space are reviewable. Execution is authorized by the observed full-automatic session policy or one explicit UI confirmation in other modes.
+1. `planned` means the component set, workflow graph, sources, and required space are reviewable. The managed route uses the observed full-automatic policy or one installation-card confirmation. Fallback uses the actual runtime's approval channel and existing grants, without an extra chat confirmation.
 2. `downloaded` means the approved bytes are present and their receipt, size, and SHA-256 match.
 3. `loadable` means the selected ComfyUI runtime exposes the required node classes, loaders, dtypes, and paths.
 4. `verified` means a representative task-specific smoke input completes and the output passes the media checks.

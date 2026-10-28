@@ -25,74 +25,26 @@ Parse and apply character cards and world info files for immersive story rolepla
 
 ## ⚠️ Core Constraints (Must Follow)
 
-1. **🚫 ABSOLUTELY FORBIDDEN**: Guessing PNG/WebP image content, must use parser tool to extract data
-2. **✅ MUST EXECUTE**: Prioritize copying preset tool (`skills/story-roleplay/scripts/`), create only if not found
-3. **⚠️ LAST RESORT**: When creating scripts, use complete code at end of file, version must be `1.0.0` (do not use `^`)
+1. Extract and validate actual embedded JSON from PNG/WebP metadata; never invent character data from visible artwork.
+2. Prefer the parser in the currently loaded Skill directory. If it or its dependencies cannot handle the input, use an available metadata parser or a small scoped helper. Do not require exhaustive filesystem searches before trying an equivalent tool.
+3. Keep helpers and any pinned dependencies in a separate working subdirectory; preserve the user's original image, existing `package.json`, and other project files. Use actual runtime permissions and existing grants without a separate confirmation for the same authorized parse.
 
 ---
 
 ## Common: Parser Tool Usage Workflow
 
-### Quick Path (Try First)
+### Preferred parser and equivalent tools
 
-**Step 1: Copy Preset Tool**
+Locate `scripts/parse-character-card.js` relative to this loaded SKILL.md, not a guessed project root. The bundled parser supports PNG metadata; it explicitly rejects WebP. Check the input format before selecting it. JSON inputs can be read and validated directly without Node/npm.
 
-Try in the following order until successful:
-
-- **Method 1 (Highest Priority)**: Relative path (if workspace is under project root):
-
-  ```bash
-  cp skills/story-roleplay/scripts/parse-character-card.js . && cp skills/story-roleplay/scripts/package.json .
-  ```
-
-- **Method 2**: Search upward for project root (up to 5 levels):
-
-  ```bash
-  for dir in . .. ../.. ../../.. ../../../.. ../../../../..; do
-    if [ -f "$dir/skills/story-roleplay/scripts/parse-character-card.js" ]; then
-      cp "$dir/skills/story-roleplay/scripts/parse-character-card.js" .
-      cp "$dir/skills/story-roleplay/scripts/package.json" .
-      break
-    fi
-  done
-  ```
-
-- **Method 3**: Global search (exclude temp directories):
-
-  ```bash
-  SCRIPT_PATH=$(find ~ -name "parse-character-card.js" -path "*/skills/story-roleplay/scripts/*" ! -path "*/temp*" ! -path "*/*-temp*" ! -path "*/.webpack/*" 2>/dev/null | head -1)
-  if [ -n "$SCRIPT_PATH" ]; then
-    SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
-    cp "$SCRIPT_DIR/parse-character-card.js" .
-    cp "$SCRIPT_DIR/package.json" .
-  fi
-  ```
-
-- **Verify**: Confirm files copied
-
-  ```bash
-  ls parse-character-card.js package.json
-  ```
-
-  - If files don't exist, continue to next method or use fallback option
-
-**Step 2: Install Dependencies**
-
-```bash
-npm install
-```
-
-- Wait for completion, check if `node_modules` was created
-- If fails: Check network/permission/Node.js environment
-
-**Step 3: Execute Parser**
+For PNG, invoke the available bundled parser using its absolute path and a new output path:
 
 ```bash
 # Character card
-node parse-character-card.js <image-path> <output-json-path>
+node "<skill-dir>/scripts/parse-character-card.js" "<image-path>" "<output-json-path>"
 
 # World info
-node parse-character-card.js <image-path> <output-json-path> --world-info
+node "<skill-dir>/scripts/parse-character-card.js" "<image-path>" "<output-json-path>" --world-info
 ```
 
 **Important**:
@@ -104,12 +56,14 @@ node parse-character-card.js <image-path> <output-json-path> --world-info
 **Examples**:
 
 ```bash
-node parse-character-card.js character.png character.json
-node parse-character-card.js "薇娜丽丝.png" character.json
-node parse-character-card.js world-info.png world-info.json --world-info
+node "<skill-dir>/scripts/parse-character-card.js" character.png character.json
+node "<skill-dir>/scripts/parse-character-card.js" "薇娜丽丝.png" character.json
+node "<skill-dir>/scripts/parse-character-card.js" world-info.png world-info.json --world-info
 ```
 
-**Step 4: Verify Results**
+If the script, Node, or a dependency is unavailable, first check existing metadata libraries/tools rather than installing the whole preset environment. A permitted small helper may read PNG text chunks or WebP metadata and decode the embedded JSON. Install only a necessary pinned dependency into a dedicated helper directory if no existing tool can do the job. Do not search the entire user directory or copy a preset `package.json` over the user's project.
+
+**Verify Results**
 
 - Check output: Should see "Successfully extracted data to: <path>"
 - Verify JSON file exists and format is correct
@@ -117,18 +71,18 @@ node parse-character-card.js world-info.png world-info.json --world-info
   - Check error message (script will output specific error)
   - Common errors:
     - "PNG metadata does not contain any text chunks" → Image may not be a valid SillyTavern character card
-    - "Required dependencies not found" → Need to run `npm install` first
+    - "Required dependencies not found" → Use an available equivalent parser or isolate the necessary pinned dependencies
     - "Image file not found" → Check if image path is correct
   - **ABSOLUTELY CANNOT guess or fabricate information**, must report error clearly
 
-### Fallback Option (Last Resort)
+### Fallback helper
 
-If all above methods fail (possibly due to system permission issues), creating script files is allowed:
+When the preferred parser is unavailable, an equivalent metadata tool or helper is allowed immediately after the targeted capability check. The example below supports PNG only; do not use it to claim WebP support:
 
-1. **Create `package.json`** (see "Fallback Code" section at end of file)
-2. **Create `parse-character-card.js`** (see "Fallback Code" section at end of file)
+1. **Create `package.json`** (see "Example PNG helper" below)
+2. **Create `parse-character-card.js`** (see "Example PNG helper" below)
 
-**Prerequisite**: Must have tried all finding methods and all failed.
+Use the example files only in a dedicated helper directory. A rejected permission still applies to every route; an unavailable parser is not a rejected permission.
 
 ---
 
@@ -155,9 +109,9 @@ If all above methods fail (possibly due to system permission issues), creating s
 
 **Processing**:
 
-- **Recommended**: Convert WebP to PNG first, then use PNG parser tool
-- Or try using PNG parser tool (if WebP contains similar metadata structure)
-- If conversion or parsing not possible, prompt user to provide JSON format or re-export from SillyTavern
+- Use an available parser that actually reads WebP EXIF/XMP metadata and extracts the embedded card JSON. The bundled PNG parser cannot do this.
+- Ordinary image conversion may discard card metadata; do not treat a PNG rendering of the artwork as a recovered card. A conversion route is usable only when embedded data preservation is verified.
+- Try equivalent permitted metadata tools or a scoped helper before asking for a JSON export. If none can extract the data, report the exact unsupported metadata/capability and request a compatible export; do not claim the original file has no card merely because one parser rejects WebP.
 
 #### 3. JSON File Format
 
@@ -200,7 +154,7 @@ If all above methods fail (possibly due to system permission issues), creating s
 
 - **Prefer JSON format** (easiest to parse, no additional tools needed)
 - **PNG format**: Must use parser tool, guessing content is forbidden
-- **WebP format**: Convert to PNG then use parser tool, or use JSON format
+- **WebP format**: Extract actual embedded metadata with a compatible tool; preserve and validate it if any conversion is used
 - **Error handling**: When parsing fails, must provide clear error message, absolutely cannot guess or fabricate character information
 - **Always save parsed images as JSON format** for easier viewing and editing
 
@@ -242,8 +196,8 @@ If all above methods fail (possibly due to system permission issues), creating s
 
 **Processing**:
 
-- **Recommended**: Convert WebP to PNG first, then use PNG parser
-- If conversion fails, suggest user use JSON format or re-export from SillyTavern
+- Use an available compatible metadata parser or scoped helper to extract the actual embedded world-info JSON. The bundled parser supports PNG only; its WebP rejection is a tool limitation, not evidence that the file lacks world info.
+- Do not convert the artwork to PNG unless preservation of the embedded metadata is verified. Request a JSON export only when no permitted extraction route succeeds.
 
 ### Field Descriptions
 
@@ -277,7 +231,7 @@ If all above methods fail (possibly due to system permission issues), creating s
 
 - **Prefer JSON format** (easiest to parse, no additional tools needed)
 - **PNG format**: Use same parser tool as character cards (with `--world-info` flag)
-- **WebP format**: Recommend converting to PNG or using JSON format
+- **WebP format**: Use compatible metadata extraction; request JSON only when available permitted tools cannot recover the embedded data
 - Keywords should be specific and meaningful, avoid overly broad keywords
 - **Always save parsed images as JSON format** for easier viewing and editing
 
@@ -361,9 +315,9 @@ This skill is fully compatible with SillyTavern formats:
 
 ---
 
-## Fallback Code (For Last Resort Use)
+## Example PNG helper
 
-**Important**: The following code should only be used when all path finding methods have failed. Prioritize using copy methods.
+Prefer an existing compatible parser. This example is available when a scoped PNG helper is needed; no exhaustive path search is required. It does not implement WebP parsing. Keep its files and pinned dependencies in a separate working directory.
 
 ### package.json
 
@@ -385,7 +339,7 @@ This skill is fully compatible with SillyTavern formats:
 
 ### parse-character-card.js
 
-Complete code reference: `skills/story-roleplay/scripts/parse-character-card.js`
+Complete code reference: `<skill-dir>/scripts/parse-character-card.js`, relative to the currently loaded Skill directory. Inspect that file before copying it into a dedicated helper directory; do not guess a project-root path.
 
 **Key features**:
 

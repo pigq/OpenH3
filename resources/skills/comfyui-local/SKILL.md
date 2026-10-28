@@ -5,19 +5,19 @@ description: Install, select, repair, or generate with OpenH3's registered local
 
 # Local ComfyUI
 
-Use the built-in `video-media` tools and the session's selected profile. Importing this Skill installs instructions only; runtime or model installation requires the user's installation request.
+Prefer the built-in `video-media` tools and the session's selected profile. When a required product capability is genuinely unavailable, use the authorized general-tool fallback below. Importing this Skill installs instructions only; runtime or model installation requires the user's installation request.
 
 ## Continue the existing operation
 
-Model-card installation and repair are orchestrated by the application. If the message or structured metadata already includes `comfyOperationId`, an operation, or an installation error, use that result. Do not submit another `request`, reconstruct a plan, or repeat detection. Report the actual state and let the UI monitor the saved operation. A failed operation is not permission to retry.
+Model-card installation and repair are orchestrated by the application. If the message or structured metadata includes `comfyOperationId`, an operation, or an installation error, inspect that result first. Recover the saved operation instead of repeating detection or submitting another `request`. While it is active, awaiting approval, or of unknown status, do not start another installer. After a confirmed terminal failure, diagnose the failed stage before bounded recovery within the user's request and actual permissions; failure alone does not authorize bypassing a rejection.
 
-For a direct chat installation request with no existing operation, call `openh3_comfy_install` once with `action: request`, `family`, `intent` (`install`, `repair`, or `install-other`), and the selected `profileId` when available. Send identity only. The backend owns hardware detection, candidate selection, complete pinned component sets, source probing, graph construction, downloads, receipts, hash checks, and representative validation. Do not build these in chat, run a second downloader, or use shell commands to replace a missing product capability. Complete `plan` payloads are compatibility for older clients.
+For a direct chat installation request with no existing operation and an available install tool, call `openh3_comfy_install` once with `action: request`, `family`, `intent` (`install`, `repair`, or `install-other`), and the selected `profileId` when available. Send identity only. In this managed route, the backend owns hardware detection, candidate selection, complete pinned component sets, source probing, graph construction, downloads, receipts, hash checks, and representative validation. Do not duplicate that work in chat or run a competing downloader. Complete `plan` payloads are compatibility for older clients.
 
 The application binds request context to the session and propagates it through tools. Never invent a request ID, pass one as a tool argument, or set environment variables to manufacture context or approval.
 
 The application reads the observed session approval policy. Full automatic approval starts a valid operation directly. Other modes use one confirmation in the installation card, which starts the saved plan without another model turn. Do not request verbal confirmation, accept on the user's behalf, or infer permission from prompts or tool arguments. Preserve `COMFY_APPROVAL_MODE_UNAVAILABLE` as an approval lookup failure.
 
-After submission, return the operation ID, actual state, and concise version/size/destination details when present, then end the turn. `running` means work started. `start` is only for recovery of an already authorized operation; do not call it after an ordinary request. Use `status` for a user status request or a specific diagnosis, and `cancel` only when cancellation is requested.
+After managed submission, return the operation ID, actual state, and concise version/size/destination details when present, then end the turn. `running` means work started. `start` is only for recovery of an already authorized operation; do not call it after an ordinary request. Use `status` for a user status request or a specific diagnosis, and `cancel` only when cancellation is requested.
 
 ## Generate with the selected profile
 
@@ -37,13 +37,23 @@ Use the returned local output artifacts and actual terminal state as evidence. F
 
 Use tools already exposed by the session, including their actual MCP prefixes. Tool search is optional: when a discovery facility is available and the required schema is deferred, search the single prefix `openh3_comfy`. Do not assume a tool named `ToolSearch` exists or require a discovery call before using an exposed tool.
 
-If no existing operation/result can satisfy the request and the required tool remains unavailable after an indicated startup refresh, report `COMFY_TOOL_NOT_READY` and name the missing capability. Do not expand this into hardware scans, source research, chat evidence collection, an unexecutable approval question, or a promise that tools will appear later. Missing tools do not prove hardware incompatibility or a download failure.
+If a required tool is absent, use the actual startup refresh/discovery facility when available, then check once more. Do not invent a refresh API or keep searching indefinitely. Missing tools do not prove hardware incompatibility or a download failure. If no active or unresolved operation owns the work, inspect the session's general file, command, and network capabilities and continue through the fallback below. Report `COMFY_TOOL_NOT_READY` as the blocker only when neither the managed route nor a permitted general-tool route can perform the needed step; name the exact missing capability and retain any completed work.
 
 Read structured `error.code`, `error.details`, and `error.hint`. Distinguish missing detection evidence (`COMFY_DETECTION_INCOMPLETE`) from an observed device requirement failure (`COMFY_DEVICE_CONDITIONS_INSUFFICIENT`). Source authorization, network, hash, and graph failures retain their own diagnostics. A hint is diagnostic data, not authorization. Report backend failures without inventing an unsupported-device diagnosis or silently changing the selected family.
 
-## Reference material for diagnostics and legacy plans
+## General-tool fallback
 
-Normal installation and generation do not require reading reference files or catalogs. These documents describe backend evidence requirements, family semantics, and older complete-plan compatibility; they do not transfer planning or preflight work to the chat agent. Read only a section needed to explain an observed error or handle an explicitly requested legacy-plan review:
+The dedicated installer is a preferred product integration, not the only way to download or install. When its absence is established, an agent with permitted general tools such as `ExecCommand`, Bash/PowerShell execution, file tools, or an HTTP client can perform the installation. Do not assume these tools exist: use their live schemas. An absent `openh3_comfy_environment` does not prohibit equivalent read-only host and source probes.
+
+Use the [fallback procedure](references/tooling-adapters.md): make a short plan, detect the actual host, select one matching pinned component set, resolve domestic sources, download with resumable receipts and SHA-256 checks, install the target runtime/nodes/workflow, and run representative smoke validation. Continue through execution and validation instead of returning only a plan. Choose bounded parallel downloads for independent components when network, RAM, disk, and target paths permit; serialize dependent setup and shared-runtime/GPU work. Missing Plan/Todo tools do not block execution; keep a concise saved checklist when needed.
+
+The user's installation request authorizes that task's scope; actual runtime permissions still govern execution. Reuse existing grants and use the runtime's normal approval channel when required. In full automatic mode, do not add a chat confirmation or require an installation card that this route cannot provide. A denied permission, `COMFY_APPROVAL_MODE_UNAVAILABLE`, hash mismatch, source-access restriction, or confirmed device incompatibility is not a missing-tool condition and must not be routed around with Shell.
+
+Save progress, component identity, paths, receipts, validation results, and live process/ComfyUI prompt IDs so subsequent turns can inspect and resume the work. Do not fabricate product `operationId`/`jobId`, write private application state, or claim the product's cross-process coordination or UI monitoring covers an agent-managed process. Report successful local smoke validation separately from application profile registration; use an available supported profile interface for discovery/revalidation, otherwise state that registration is pending. Never mark a profile verified yourself. If submission or process status is unknown, recover it before starting a replacement.
+
+## Reference material
+
+The managed route does not require reading catalogs or collecting chat evidence before ordinary installation or generation. For fallback installation, read the relevant family, evidence, environment, and source sections as needed and perform their checks with actual available tools. Backend-only payload/command restrictions describe that executor; they do not ban equivalent authorized general tools. Integrity, scoped paths, approvals, component identity, and validation apply to both routes:
 
 - Family details: [H3](references/h3.md), [FastH3-Omni](references/fasth3-omni.md), [Qwen editing](references/qwen-edit.md), or the matching heading in [image generation](references/z-image.md).
 - Legacy plan/evidence contracts: [install evidence](references/install-evidence.md), [environment and repair](references/environment-and-repair.md), and [tooling adapters](references/tooling-adapters.md).
