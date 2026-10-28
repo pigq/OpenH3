@@ -88,6 +88,7 @@ impl ProviderHealthCheckService {
         };
 
         Ok(AionrsResolvedConfig {
+            thought_level: None,
             provider,
             api_key,
             model: model_id.to_owned(),

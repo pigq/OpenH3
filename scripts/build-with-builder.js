@@ -269,6 +269,15 @@ function walkFiles(dir, acc = []) {
 
 function computeSourceHash() {
   const hash = crypto.createHash('md5');
+  // Only the digest is cached; never print or persist the credential itself.
+  for (const key of [
+    'OPENH3_GATEWAY_URL',
+    'OPENH3_DEFAULT_MODEL',
+    'OPENH3_DEFAULT_API_KEY',
+    'OPENH3_DEFAULT_THOUGHT_LEVEL',
+  ]) {
+    hash.update(`${key}:${process.env[key] ?? ''}\0`);
+  }
   const rootDir = path.resolve(__dirname, '..');
   const filesToHash = [
     'package.json',

@@ -149,6 +149,8 @@ pub struct AionrsCompatOverrides {
 /// Fully resolved Aionrs configuration passed to the agent manager.
 #[derive(Debug, Clone)]
 pub struct AionrsResolvedConfig {
+    /// Initial reasoning effort from the persisted assistant/conversation defaults.
+    pub thought_level: Option<String>,
     /// LLM provider name (anthropic, openai, bedrock, vertex).
     pub provider: String,
     /// Decrypted API key.

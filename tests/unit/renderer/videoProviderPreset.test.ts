@@ -43,3 +43,29 @@ it('does not submit a provider until a gateway endpoint is configured', async ()
   await provisionVideoProvider(request);
   expect(request).not.toHaveBeenCalled();
 });
+
+it('provisions an explicitly configured distribution model, credential and reasoning level', async () => {
+  const request = vi.fn().mockResolvedValueOnce([]).mockResolvedValue({});
+  await provisionVideoProvider(request, 'https://gateway.example.test/v1/', {
+    model: 'gpt-6.1-sol',
+    apiKey: 'test-distribution-credential',
+    thoughtLevel: 'xhigh',
+  });
+  expect(request).toHaveBeenNthCalledWith(
+    2,
+    'POST',
+    '/api/providers',
+    expect.objectContaining({
+      base_url: 'https://gateway.example.test/v1',
+      api_key: 'test-distribution-credential',
+      models: ['gpt-6.1-sol'],
+      model_settings: { 'gpt-6.1-sol': { openai_api_mode: 'responses' } },
+    })
+  );
+  expect(request).toHaveBeenNthCalledWith(3, 'PUT', '/api/assistants/bare:632f31d2', {
+    defaults: {
+      model: { mode: 'fixed', value: 'realseek-video-default:gpt-6.1-sol' },
+      thought_level: { mode: 'fixed', value: 'xhigh' },
+    },
+  });
+});

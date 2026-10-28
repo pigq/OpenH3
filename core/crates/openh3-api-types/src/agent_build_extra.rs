@@ -104,6 +104,9 @@ pub struct AcpBuildExtra {
 /// Aionrs-specific fields extracted from `extra` in build task options.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AionrsBuildExtra {
+    /// Initial reasoning effort forwarded to the native engine's model requests.
+    #[serde(default)]
+    pub thought_level: Option<String>,
     #[serde(default)]
     pub system_prompt: Option<String>,
     #[serde(default)]
@@ -169,6 +172,14 @@ pub struct SlashCommandItem {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn aionrs_build_extra_preserves_reasoning_effort_seed() {
+        let parsed: super::AionrsBuildExtra = serde_json::from_value(serde_json::json!({
+            "thought_level": "xhigh"
+        }))
+        .unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap()["thought_level"], "xhigh");
+    }
     use super::*;
 
     #[test]

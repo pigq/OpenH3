@@ -684,6 +684,7 @@ mod aionrs_config_option_tests {
 
     fn make_test_config() -> AionrsResolvedConfig {
         AionrsResolvedConfig {
+            thought_level: None,
             provider: "anthropic".into(),
             api_key: "sk-test-key".into(),
             model: "claude-sonnet-4-20250514".into(),

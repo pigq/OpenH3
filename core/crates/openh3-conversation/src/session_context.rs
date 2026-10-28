@@ -1175,6 +1175,14 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn aionrs_extra_thought_level_is_exposed_as_typed_context() {
+        let repos = setup().await;
+        let row = row("aionrs", serde_json::json!({ "thought_level": "xhigh" }), None);
+        let context = repos.builder().build(&row).await.unwrap();
+        assert_eq!(aionrs_context(context).config.thought_level.as_deref(), Some("xhigh"));
+    }
+
+    #[tokio::test]
     async fn acp_team_extra_is_exposed_as_typed_context() {
         let repos = setup().await;
         upsert_builtin(&repos, "builtin-claude-test", "claude").await;

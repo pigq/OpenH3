@@ -17,6 +17,9 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { runInNewContext } from 'node:vm';
+import crypto from 'node:crypto';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const repoRoot = resolve(__dirname, '../../..');
@@ -49,6 +52,29 @@ function resolveAppBuilderInstallUtil(): string {
 }
 
 describe('build-with-builder', () => {
+  it('invalidates the cached bundle when distribution defaults or credentials change', () => {
+    const source = readFileSync(resolve(repoRoot, 'scripts/build-with-builder.js'), 'utf8');
+    const functionText = source.match(/function computeSourceHash\(\) \{[\s\S]*?(?=\nfunction loadCachedHash)/)?.[0];
+    expect(functionText).toBeTruthy();
+    const hash = (env: Record<string, string>) =>
+      runInNewContext(`${functionText}; computeSourceHash()`, {
+        crypto,
+        path,
+        __dirname: resolve(repoRoot, 'scripts'),
+        fs: { existsSync: () => false },
+        process: { env },
+      });
+    const plain = hash({});
+    for (const key of [
+      'OPENH3_GATEWAY_URL',
+      'OPENH3_DEFAULT_MODEL',
+      'OPENH3_DEFAULT_API_KEY',
+      'OPENH3_DEFAULT_THOUGHT_LEVEL',
+    ]) {
+      expect(hash({ [key]: 'first' })).not.toBe(plain);
+      expect(hash({ [key]: 'first' })).not.toBe(hash({ [key]: 'second' }));
+    }
+  });
   it('rejects skip-vite when renderer output is only a source html shell', () => {
     const outDir = resolve(repoRoot, 'out');
     const backupOutDir = resolve(repoRoot, `.tmp-out-backup-${process.pid}-${Date.now()}`);

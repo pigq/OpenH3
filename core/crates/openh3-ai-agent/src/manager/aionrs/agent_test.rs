@@ -15,6 +15,52 @@ use crate::protocol::events::FinishEventData;
 
 static NEXT_TEST_SESSION_DIR: AtomicU64 = AtomicU64::new(0);
 
+#[tokio::test]
+async fn native_reasoning_effort_reaches_responses_request() {
+    use axum::{Json, Router, http::StatusCode, routing::post};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+    let app = Router::new().route(
+        "/v1/responses",
+        post(move |Json(body): Json<Value>| {
+            let sender = sender.clone();
+            async move {
+                let _ = sender.try_send(body);
+                StatusCode::BAD_REQUEST
+            }
+        }),
+    );
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let mut config = make_test_config();
+    config.provider = "openai".into();
+    config.model = "gpt-6.1-sol".into();
+    config.base_url = Some(format!("http://{address}/v1"));
+    config.thought_level = Some("xhigh".into());
+    config.compat_overrides.openai_api_mode = Some(aion_config::compat::OpenAiApiMode::Responses);
+    let manager = AionrsAgentManager::new("reasoning-seed".into(), "/project".into(), config, None)
+        .await
+        .unwrap();
+    let turn = tokio::spawn(async move {
+        manager
+            .engine
+            .lock()
+            .await
+            .run("Reply OK without tools", "reasoning-test")
+            .await
+    });
+    let body = timeout(Duration::from_secs(10), receiver.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    turn.abort();
+    server.abort();
+    assert_eq!(body["model"], "gpt-6.1-sol");
+    assert_eq!(body["reasoning"]["effort"], "xhigh");
+    assert_eq!(body["stream"], true);
+    assert!(!body["tools"].as_array().unwrap().is_empty());
+}
+
 async fn assert_no_stop_signal(agent: &AionrsAgentManager) {
     let notified = agent.cancel_notify.notified();
     tokio::pin!(notified);
@@ -28,6 +74,7 @@ async fn assert_no_stop_signal(agent: &AionrsAgentManager) {
 fn make_test_config() -> AionrsResolvedConfig {
     let test_session_id = NEXT_TEST_SESSION_DIR.fetch_add(1, Ordering::Relaxed);
     AionrsResolvedConfig {
+        thought_level: None,
         provider: "anthropic".into(),
         api_key: "sk-test-key".into(),
         model: "claude-sonnet-4-20250514".into(),

@@ -261,6 +261,7 @@ impl AionrsAgentManager {
             .collect();
 
         let mut engine = result.engine;
+        engine.set_initial_reasoning_effort(config_extra.thought_level);
         if !is_resume && let Err(e) = engine.init_session(&provider_label, &workspace, Some(&conversation_id)) {
             // A concurrent/repeated builder may have initialized this
             // conversation between load and init. Reusing that persisted

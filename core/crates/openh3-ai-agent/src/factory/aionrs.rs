@@ -183,6 +183,7 @@ pub(super) async fn build(
     )?;
 
     let config = AionrsResolvedConfig {
+        thought_level: overrides.thought_level,
         provider,
         api_key,
         model: model_id,
