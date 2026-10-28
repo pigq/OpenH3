@@ -42,7 +42,7 @@ export async function provisionVideoProvider(
   await request('POST', '/api/providers', videoProviderPreset(gatewayUrl, defaults));
   await request('PUT', '/api/assistants/bare:632f31d2', {
     defaults: {
-      model: { mode: 'fixed', value: `${VIDEO_PROVIDER_ID}:${defaults.model}` },
+      model: { mode: 'fixed', value: defaults.model },
       thought_level: { mode: 'fixed', value: defaults.thoughtLevel },
     },
   });

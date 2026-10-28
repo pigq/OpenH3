@@ -64,7 +64,8 @@ it('provisions an explicitly configured distribution model, credential and reaso
   );
   expect(request).toHaveBeenNthCalledWith(3, 'PUT', '/api/assistants/bare:632f31d2', {
     defaults: {
-      model: { mode: 'fixed', value: 'realseek-video-default:gpt-6.1-sol' },
+      // GuidPage matches assistant defaults against provider.models by model name.
+      model: { mode: 'fixed', value: 'gpt-6.1-sol' },
       thought_level: { mode: 'fixed', value: 'xhigh' },
     },
   });
