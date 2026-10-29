@@ -14,6 +14,7 @@ import { runComfyInstallSmoke, type ComfySmokeReceipt } from '@/process/services
 
 let directory = '';
 afterEach(() => {
+  vi.restoreAllMocks();
   if (directory) fs.rmSync(directory, { recursive: true, force: true });
   vi.useRealTimers();
 });
@@ -202,6 +203,63 @@ describe('coordinated install smoke recovery', () => {
 });
 
 describe('shared Comfy runtime coordinator', () => {
+  it.runIf(process.platform === 'win32')(
+    'retries transient Windows replacement locks without losing the device fence',
+    async () => {
+      directory = fs.mkdtempSync(path.join(os.tmpdir(), 'comfy-coordinator-'));
+      const coordinator = new ComfyRuntimeCoordinator({ directory });
+      const cleanup = vi.fn(async () => undefined);
+      await coordinator.run('gpu-0', 'same', async () => undefined, cleanup);
+      const rename = fs.renameSync.bind(fs);
+      let attempts = 0;
+      const replacement = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+        attempts++;
+        if (attempts <= 2) throw Object.assign(new Error('sharing violation'), { code: 'EPERM' });
+        rename(from, to);
+      });
+      await expect(coordinator.run('gpu-0', 'same', async () => 'generated', cleanup)).resolves.toBe('generated');
+      expect(replacement).toHaveBeenCalledTimes(4);
+      expect(cleanup).not.toHaveBeenCalled();
+      expect(fs.readdirSync(directory).filter((file) => file.endsWith('.tmp'))).toEqual([]);
+      const state = fs.readdirSync(directory).find((file) => file.endsWith('.json'))!;
+      expect(JSON.parse(fs.readFileSync(path.join(directory, state), 'utf8'))).toMatchObject({ signature: 'same' });
+    }
+  );
+
+  it.runIf(process.platform === 'win32')(
+    'bounds failed replacements and preserves the committed uncertainty fence',
+    async () => {
+      directory = fs.mkdtempSync(path.join(os.tmpdir(), 'comfy-coordinator-'));
+      const coordinator = new ComfyRuntimeCoordinator({ directory });
+      const cleanup = vi.fn(async () => undefined);
+      await expect(
+        coordinator.run(
+          'gpu-0',
+          'same',
+          async () => {
+            throw new Error('unknown');
+          },
+          cleanup,
+          undefined,
+          { taskId: 'existing', isUncertain: () => true }
+        )
+      ).rejects.toThrow('unknown');
+      const state = fs.readdirSync(directory).find((file) => file.endsWith('.json'))!;
+      const committed = fs.readFileSync(path.join(directory, state), 'utf8');
+      const replacement = vi.spyOn(fs, 'renameSync').mockImplementation(() => {
+        throw Object.assign(new Error('locked'), { code: 'EACCES' });
+      });
+      const task = vi.fn(async () => undefined);
+      await expect(
+        coordinator.run('gpu-0', 'same', task, cleanup, undefined, { taskId: 'existing', recover: true })
+      ).rejects.toThrow('locked');
+      expect(replacement).toHaveBeenCalledTimes(6);
+      expect(task).not.toHaveBeenCalled();
+      expect(fs.readFileSync(path.join(directory, state), 'utf8')).toBe(committed);
+      expect(fs.readdirSync(directory).filter((file) => file.endsWith('.tmp'))).toEqual([]);
+    }
+  );
+
   it('retains the cache across workflow variants with the same component set', async () => {
     directory = fs.mkdtempSync(path.join(os.tmpdir(), 'comfy-coordinator-'));
     const coordinator = new ComfyRuntimeCoordinator({ directory });

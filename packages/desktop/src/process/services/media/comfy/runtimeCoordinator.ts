@@ -301,8 +301,28 @@ export class ComfyRuntimeCoordinator {
 
   private writeState(filename: string, state: RuntimeState): void {
     const temporary = `${filename}.${process.pid}.${crypto.randomUUID()}.tmp`;
-    fs.writeFileSync(temporary, JSON.stringify(state), { flag: 'wx', mode: 0o600 });
-    fs.renameSync(temporary, filename);
+    try {
+      fs.writeFileSync(temporary, JSON.stringify(state), { flag: 'wx', mode: 0o600 });
+      for (let attempt = 0; ; attempt++) {
+        try {
+          fs.renameSync(temporary, filename);
+          break;
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (process.platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(code ?? '') || attempt >= 5)
+            throw error;
+          // Windows scanners can briefly hold the destination. Keep the committed
+          // remote-task fence intact while retrying only the atomic replacement.
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10 * (attempt + 1));
+        }
+      }
+    } finally {
+      try {
+        fs.rmSync(temporary, { force: true });
+      } catch {
+        // Preserve the persistence error if temporary cleanup also fails.
+      }
+    }
   }
 
   private armIdle(
