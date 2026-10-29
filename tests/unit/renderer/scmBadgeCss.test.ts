@@ -80,16 +80,16 @@ describe('every badge class actually produces a CSS rule', () => {
   it('routes the ordinary filename through --text-primary, which flips per theme', () => {
     // The dark-mode bug this guards: a filename with no colour class inherited a
     // value that does not follow the theme (real-browser check: it stayed rgb(0,0,0)
-    // under the dark scheme). `--text-primary` is #000 light / #fff dark, so the token
-    // is what makes the name legible in both.
+    // under the dark scheme). The token must make the name legible against each
+    // appearance's actual background, even when the default palette changes.
     //
     // Two halves make the title true, not just plausible:
     //  1. the class resolves to the token (not a literal hex), so it can follow theme;
     expect(ruleFor('text-t-primary')).toBe('color:var(--text-primary);');
     expect(ruleFor('text-t-primary')).not.toMatch(/#[0-9a-f]{3,8}/i);
 
-    //  2. the token itself actually flips: #000 under the light selector, #fff under
-    //     the dark one. Without this the token could be defined once (no flip) and the
+    //  2. the token itself actually flips and has sufficient contrast. Without this
+    //     the token could be defined once (no flip) and the
     //     name would be legible in one theme only — the exact bug, one level down.
     const scheme = readFileSync(
       path.join(__dirname, '../../../packages/desktop/src/renderer/styles/themes/default-color-scheme.css'),
@@ -99,8 +99,24 @@ describe('every badge class actually produces a CSS rule', () => {
     expect(darkAt, 'dark theme selector must exist').toBeGreaterThan(-1);
     const light = scheme.slice(0, darkAt); // everything before the dark block = the :root/light scope
     const dark = scheme.slice(darkAt);
-    expect(light).toMatch(/--text-primary:\s*#000000/i); // light → black
-    expect(dark).toMatch(/--text-primary:\s*#ffffff/i); //  dark  → white
+    const token = (scope: string, name: string): string => {
+      const value = scope.match(new RegExp(`--${name}:\\s*(#[0-9a-f]{6})`, 'i'))?.[1];
+      expect(value, `${name} must be defined for each appearance`).toBeTruthy();
+      return value!;
+    };
+    const luminance = (color: string): number => {
+      const [r, g, b] = [1, 3, 5].map((offset) => {
+        const channel = parseInt(color.slice(offset, offset + 2), 16) / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    expect(token(light, 'text-primary')).not.toBe(token(dark, 'text-primary'));
+    for (const scope of [light, dark]) {
+      const text = luminance(token(scope, 'text-primary'));
+      const background = luminance(token(scope, 'bg-base'));
+      expect((Math.max(text, background) + 0.05) / (Math.min(text, background) + 0.05)).toBeGreaterThanOrEqual(4.5);
+    }
   });
 
   it('resolves the conflicted chip variables down to real RGB components', () => {
