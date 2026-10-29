@@ -40,6 +40,8 @@ export type ComfyWorkflowEngineOptions = {
   outputRoot: string;
   fetchImpl?: typeof fetch;
   spawnImpl?: typeof spawn;
+  /** Start a recognized managed runtime with its required launcher; false uses the generic Python launch. */
+  startRuntime?: (profile: ComfyProfile) => Promise<boolean>;
   sleep?: (milliseconds: number) => Promise<void>;
   now?: () => number;
   runtimeInspector?: (
@@ -371,17 +373,49 @@ function selectedIdentity(stats: Record<string, unknown>): ComfyServiceIdentity 
     : undefined;
 }
 
+function pythonScriptArgument(args: string[]): string | undefined {
+  for (let index = 1; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === '--') return args[index + 1];
+    if (arg === '-W' || arg === '-X') {
+      index++;
+      continue;
+    }
+    if (/^-(?:[bBdEiIOqRsSuvVx]+|[WX].+)$/.test(arg)) continue;
+    // -c/-m and application arguments cannot establish a Python script identity.
+    return arg.startsWith('-') ? undefined : arg;
+  }
+  return undefined;
+}
+
+const WINDOWS_PROCESS_EVIDENCE = `import json, os, sys, psutil
+p = psutil.Process(int(sys.argv[1]))
+created = p.create_time()
+args = p.cmdline()
+environment = p.environ() if any(os.path.basename(arg).lower() == 'aionui_h3_accel_launcher.py' for arg in args) else {}
+connections = getattr(p, 'net_connections', None) or p.connections
+result = {
+    'pid': p.pid, 'executable': p.exe(), 'cwd': p.cwd(), 'args': args,
+    'runtimeRoot': environment.get('AIONUI_H3_RUNTIME_ROOT'),
+    'accelerationRoot': environment.get('AIONUI_H3_ACCEL_ROOT'),
+    'listening': any(c.status == psutil.CONN_LISTEN and c.laddr.port == int(sys.argv[2]) and c.laddr.ip in sys.argv[3:] for c in connections(kind='tcp')),
+}
+if not p.is_running() or p.create_time() != created:
+    raise RuntimeError('process changed')
+print(json.dumps(result))`;
+
 /** Resolve the process owning the local server socket; standard /system_stats often omits sys.executable. */
 async function inspectService(
   profile: ComfyProfile,
   stats: Record<string, unknown>
 ): Promise<ComfyServiceIdentity | undefined> {
-  return inspectComfyServiceIdentity(loopbackUrl(profile).href, stats);
+  return inspectComfyServiceIdentity(loopbackUrl(profile).href, stats, profile.environment.python);
 }
 
 export async function inspectComfyServiceIdentity(
   baseUrl: string,
-  stats: Record<string, unknown>
+  stats: Record<string, unknown>,
+  python?: string
 ): Promise<ComfyServiceIdentity | undefined> {
   const fromStats = selectedIdentity(stats);
   if (fromStats) return fromStats;
@@ -391,7 +425,13 @@ export async function inspectComfyServiceIdentity(
   const options = { timeout: 5000, windowsHide: true, maxBuffer: 1024 * 1024 };
   try {
     if (process.platform === 'win32') {
-      const command = `$owner = Get-NetTCPConnection -State Listen -LocalPort ${port} -ErrorAction Stop | Select-Object -First 1 -ExpandProperty OwningProcess; Get-CimInstance Win32_Process -Filter "ProcessId=$owner" | Select-Object ProcessId,ExecutablePath,CommandLine | ConvertTo-Json -Compress`;
+      const addresses =
+        url.hostname === '[::1]'
+          ? ['::1', '::']
+          : url.hostname === 'localhost'
+            ? ['127.0.0.1', '0.0.0.0', '::1', '::']
+            : ['127.0.0.1', '0.0.0.0'];
+      const command = `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $owners = @(Get-NetTCPConnection -State Listen -LocalPort ${port} -ErrorAction Stop | Where-Object { @(${addresses.map((address) => `'${address}'`).join(',')}) -contains $_.LocalAddress } | Select-Object -ExpandProperty OwningProcess -Unique); if ($owners.Count -ne 1) { return }; Get-CimInstance Win32_Process -Filter "ProcessId=$($owners[0])" | Select-Object ProcessId,ExecutablePath,CommandLine | ConvertTo-Json -Compress`;
       const processInfo = record(
         JSON.parse(
           await runComfyCommand('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], options)
@@ -399,14 +439,72 @@ export async function inspectComfyServiceIdentity(
       );
       const executable = processInfo.ExecutablePath;
       const commandLine = processInfo.CommandLine;
-      if (typeof executable !== 'string' || typeof commandLine !== 'string') return undefined;
-      const main = /(?:"([^"]*main\.py)"|([^\s"]*main\.py))(?:\s|$)/i.exec(commandLine);
-      if (!main || !path.isAbsolute(main[1] ?? main[2])) return undefined;
-      return {
-        executable,
-        root: path.dirname(main[1] ?? main[2]),
-        pid: typeof processInfo.ProcessId === 'number' ? processInfo.ProcessId : undefined,
-      };
+      const pid = processInfo.ProcessId;
+      if (
+        typeof executable !== 'string' ||
+        !path.win32.isAbsolute(executable) ||
+        typeof commandLine !== 'string' ||
+        typeof pid !== 'number' ||
+        !Number.isInteger(pid) ||
+        pid <= 0
+      )
+        return undefined;
+      const args = (commandLine.match(/"[^"]*"|[^\s"]+/g) ?? []).map((arg) =>
+        arg.startsWith('"') ? arg.slice(1, -1) : arg
+      );
+      const script = pythonScriptArgument(args);
+      // A drive relative path depends on per-drive cwd state absent from this evidence.
+      if (!script || /^[a-z]:[^\\/]/i.test(script)) return undefined;
+      const name = path.win32.basename(script).toLowerCase();
+      if (name === 'main.py' && path.win32.isAbsolute(script))
+        return { executable, root: path.win32.dirname(script), pid };
+      if (name !== 'main.py' && name !== 'aionui_h3_accel_launcher.py') return undefined;
+      // Probe the identified Python process; the selected profile supplies no cwd/root evidence.
+      const inspector =
+        python ?? (/^python(?:w|\d+(?:\.\d+)*)?\.exe$/i.test(path.win32.basename(executable)) ? executable : undefined);
+      if (!inspector || !path.win32.isAbsolute(inspector)) return undefined;
+      const evidence = record(
+        JSON.parse(
+          await runComfyCommand(
+            inspector,
+            ['-c', WINDOWS_PROCESS_EVIDENCE, String(pid), String(port), ...addresses],
+            options
+          )
+        )
+      );
+      const cwd = evidence.cwd;
+      if (
+        evidence.pid !== pid ||
+        evidence.listening !== true ||
+        typeof evidence.executable !== 'string' ||
+        !samePath(evidence.executable, executable) ||
+        typeof cwd !== 'string' ||
+        !path.win32.isAbsolute(cwd) ||
+        !Array.isArray(evidence.args) ||
+        !evidence.args.every((arg): arg is string => typeof arg === 'string')
+      )
+        return undefined;
+      const observedScript = pythonScriptArgument(evidence.args);
+      if (!observedScript || !samePath(path.win32.resolve(cwd, observedScript), path.win32.resolve(cwd, script)))
+        return undefined;
+      if (name === 'main.py') return { executable, root: path.win32.dirname(path.win32.resolve(cwd, script)), pid };
+      const runtimeRoot = evidence.runtimeRoot;
+      const accelerationRoot = evidence.accelerationRoot;
+      if (
+        typeof runtimeRoot !== 'string' ||
+        !path.win32.isAbsolute(runtimeRoot) ||
+        !samePath(cwd, runtimeRoot) ||
+        typeof accelerationRoot !== 'string' ||
+        !path.win32.isAbsolute(accelerationRoot) ||
+        !samePath(path.win32.resolve(cwd, script), path.win32.join(accelerationRoot, name))
+      )
+        return undefined;
+      const source = fs.readFileSync(path.win32.resolve(cwd, script), 'utf8');
+      // Accept only the audited source generated by ensureH3AccelerationLauncher,
+      // not a similarly named script or copied binding lines in a different launcher.
+      if (hash(source.replaceAll('\r\n', '\n')) !== '6249b0e34b36eb95644f57840e01c94478b2aa7e3cb7b7099dfe3dfdf80f6fec')
+        return undefined;
+      return { executable, root: path.win32.join(runtimeRoot, 'ComfyUI'), pid };
     }
     const pids = await runComfyCommand('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fp'], options);
     const pid = Number(/^p(\d+)$/m.exec(pids)?.[1]);
@@ -570,6 +668,12 @@ export class ComfyWorkflowEngine {
       args.some((arg) => arg.includes('\0'))
     )
       throw new Error('COMFY_LAUNCH_ARGS_INVALID');
+    if (await this.options.startRuntime?.(structuredClone(profile))) {
+      const ready = await this.stats(profile);
+      if (!ready) throw new Error('COMFY_STARTUP_FAILED');
+      await this.assertIdentity(profile, ready);
+      return;
+    }
     const diagnosticLogPath = this.diagnosticFile('startup');
     const child = (this.options.spawnImpl ?? spawn)(
       profile.environment.python,

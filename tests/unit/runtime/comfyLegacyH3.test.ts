@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { importLegacyH3 } from '@/process/services/media/comfy/discovery/legacyH3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importLegacyH3, startLegacyH3Runtime } from '@/process/services/media/comfy/discovery/legacyH3';
 import embedded from '@/process/services/runtime/h3EmbeddedWorkflows.json';
 import { matlowaiCompleteOfflineBundle } from '@/process/services/runtime/h3OfflineBundle';
 import type { H3PortableInstallStatus } from '@/process/services/runtime/H3PortableInstaller';
@@ -28,6 +28,28 @@ beforeEach(() => {
 });
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 describe('legacy H3 discovery', () => {
+  it('starts matching legacy profiles with the existing portable acceleration launcher', async () => {
+    const ensureStarted = vi.fn(async () => ({}));
+    const profile = importLegacyH3(install, 'http://127.0.0.1:8188')[0];
+    expect(
+      await startLegacyH3Runtime(profile, { installStatus: () => install, ensureStarted }, profile.environment.baseUrl)
+    ).toBe(true);
+    expect(ensureStarted).toHaveBeenCalledExactlyOnceWith({ allowInstall: false });
+  });
+  it.each(['root', 'python', 'baseUrl', 'launchArgs', 'family'] as const)(
+    'does not redirect a different %s selection to the legacy runtime',
+    async (field) => {
+      const ensureStarted = vi.fn(async () => ({}));
+      const profile = importLegacyH3(install, 'http://127.0.0.1:8188')[0];
+      if (field === 'family') profile.family = 'fasth3-omni';
+      else if (field === 'launchArgs') profile.environment.launchArgs = ['--cpu'];
+      else profile.environment[field] += '-other';
+      expect(
+        await startLegacyH3Runtime(profile, { installStatus: () => install, ensureStarted }, 'http://127.0.0.1:8188')
+      ).toBe(false);
+      expect(ensureStarted).not.toHaveBeenCalled();
+    }
+  );
   it('imports pinned per-task recipes as unverified and preserves every existing workflow', () => {
     const before = Object.keys(embedded).map((file) => ({
       file,

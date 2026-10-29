@@ -23,7 +23,7 @@ After managed submission, return the operation ID, actual state, and concise ver
 
 ## Generate with the selected profile
 
-Use the current verified registered profile. If selection is absent or may have changed, call `openh3_comfy_profiles` with `action: list` once and use its authoritative `selection` together with `profiles`. `COMFY_SELECTION_CHANGED` requires checking the new selection and preserving the user's choice.
+Use the currently selected registered profile. A downloaded or discovered profile may generate: the backend validates it with the user's actual request and marks it verified only after successful output validation. Do not turn generation into installation or repair merely because a profile is not yet verified. If selection is absent or may have changed, call `openh3_comfy_profiles` with `action: list` once and use its authoritative `selection` together with `profiles`. `COMFY_SELECTION_CHANGED` requires checking the new selection and preserving the user's choice.
 
 Submit `openh3_comfy_generate` with `profileId` and `input`. The backend performs runtime, queue, device, node/schema, media, and binding preflight. Do not repeat raw `/system_stats`, `/queue`, `/object_info`, Python/Torch scans, catalog reads, model hashing, installation, or graph construction before each generation. Never clear another job's queue or silently switch the model, source, precision, dimensions, frame count, batch, or quality.
 

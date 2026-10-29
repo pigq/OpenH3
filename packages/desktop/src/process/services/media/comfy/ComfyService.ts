@@ -53,6 +53,8 @@ type SavedJob = ComfyGenerationJob & {
   submissionPending?: boolean;
   reconnectAfter?: number;
   verify?: boolean;
+  /** Preserve user-output validation semantics when a first generation reconnects. */
+  validationMode?: 'smoke' | 'generation';
   /** Persisted across restarts so one generation can consume at most one OOM retry. */
   oomRetryCount?: number;
 };
@@ -789,13 +791,11 @@ export class ComfyService {
     if (scope.intent !== 'generate') throw new Error('COMFY_GENERATION_INTENT_REQUIRED');
     if (scope.source !== 'local' || scope.profileId !== profileId) throw new Error('COMFY_SELECTION_CHANGED');
     if (scope.family !== profile.family) throw new Error('COMFY_FAMILY_MISMATCH');
-    if (profile.state !== 'verified' || !profile.validation?.fingerprint) throw new Error('COMFY_PROFILE_NOT_VERIFIED');
     const parsed = validateComfyGenerationInputForFamily(profile.family, input);
     const previous = [...this.jobs.values()].find(
       (job) =>
         job.requestId === requestId &&
         job.profileId === profileId &&
-        !job.verify &&
         (['queued', 'running'].includes(job.status) || (job.status === 'failed' && job.submissionUncertain)) &&
         JSON.stringify(job.submittedInput ?? job.input) === JSON.stringify(parsed)
     );
@@ -804,6 +804,10 @@ export class ComfyService {
         throw new Error('COMFY_SUBMISSION_STATE_UNKNOWN');
       return this.job(previous.id, { requestId });
     }
+    // A discovered installation is validated with the user's real request, without
+    // turning generation into a download/repair or submitting a second smoke job.
+    if (profile.state !== 'verified' || !profile.validation?.fingerprint)
+      return this.verify(requestId, profileId, parsed, 'generation');
     if ([...this.jobs.values()].filter((job) => ['queued', 'running'].includes(job.status)).length >= 200)
       throw new Error('COMFY_JOB_LIMIT');
     const id = crypto.randomUUID(),
@@ -856,13 +860,19 @@ export class ComfyService {
       input: _input,
       submittedInput: _submittedInput,
       verify: _verify,
+      validationMode: _validationMode,
       oomRetryCount: _oomRetryCount,
       reconnectAfter: _reconnectAfter,
       ...job
     } = value;
     return clone(job);
   }
-  verify(requestId: string, profileId: string, input: unknown): ComfyGenerationJob {
+  verify(
+    requestId: string,
+    profileId: string,
+    input: unknown,
+    validationMode: 'smoke' | 'generation' = 'smoke'
+  ): ComfyGenerationJob {
     const scope = this.scope(requestId),
       profile = clone(this.profile(profileId));
     if (scope.source !== 'local' || scope.family !== profile.family) throw new Error('COMFY_FAMILY_MISMATCH');
@@ -891,6 +901,9 @@ export class ComfyService {
       profile: { ...profile, validation: undefined },
       input: parsed,
       verify: true,
+      validationMode,
+      submittedInput: clone(parsed),
+      templateSnapshot: clone(scope.templateSnapshot) as TemplateSnapshot | undefined,
       kind: profile.kind,
       status: 'queued',
       progress: 0,
@@ -912,6 +925,7 @@ export class ComfyService {
         return;
       }
       this.updateJob(id, { status: 'running' });
+      let generationSettled = false;
       try {
         if (value.verify && !value.promptId) {
           const checked = await this.options.engine.validate(value.profile, controller.signal);
@@ -1041,6 +1055,7 @@ export class ComfyService {
             throw error;
           }
         });
+        generationSettled = true;
         if (!controller.signal.aborted) {
           if (!result.artifacts.some((artifact) => artifact.mimeType.startsWith(`${value.profile.kind}/`)))
             throw new Error('COMFY_SMOKE_OUTPUT_MISSING');
@@ -1052,7 +1067,11 @@ export class ComfyService {
                 artifact,
                 value.profile.kind,
                 controller.signal,
-                { profile: value.profile, input: value.input }
+                {
+                  profile: value.profile,
+                  input: value.input,
+                  mode: value.verify ? (value.validationMode ?? 'smoke') : 'generation',
+                }
               );
           }
           if (value.verify) {
@@ -1101,7 +1120,7 @@ export class ComfyService {
             return;
           }
           const terminalDiagnosis = diagnosis(error);
-          const terminal = Boolean(terminalDiagnosis) || remoteTerminal(error);
+          const terminal = generationSettled || Boolean(terminalDiagnosis) || remoteTerminal(error);
           this.updateJob(id, {
             status: 'failed',
             error: message(error),

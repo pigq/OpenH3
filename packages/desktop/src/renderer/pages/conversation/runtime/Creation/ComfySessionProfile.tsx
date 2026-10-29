@@ -28,7 +28,7 @@ function LocalProfileSelector({ conversation, snapshot }: { conversation: TChatC
   useEffect(() => setSelected(snapshot), [snapshot]);
 
   const change = async (profileId: string) => {
-    const profile = profiles.find((item) => item.id === profileId && item.state === 'verified');
+    const profile = profiles.find((item) => item.id === profileId);
     if (
       !profile ||
       changing.current ||
@@ -137,7 +137,7 @@ function LocalProfileSelector({ conversation, snapshot }: { conversation: TChatC
   const options = profiles.map((profile) => ({
     value: profile.id,
     label: `${profile.name} · ${t(`guid.templateFilters.${profile.kind}`)} · ${profile.version} · ${profile.quantization} · ${t(`guid.creation.states.${profile.state}`)}`,
-    disabled: profile.state !== 'verified',
+    disabled: false,
   }));
   if (!options.some((option) => option.value === (selected.profileId ?? selected.id)))
     options.unshift({

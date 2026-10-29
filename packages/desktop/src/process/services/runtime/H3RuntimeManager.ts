@@ -25,9 +25,12 @@ export type H3RuntimeManagerOptions = {
   ) => ChildProcess;
 };
 
+export type H3RuntimeStartOptions = { allowInstall?: boolean };
+
 export class H3RuntimeManager {
   private process?: ChildProcess;
   private startup?: Promise<unknown>;
+  private startupAllowsInstall = false;
   constructor(
     private readonly client: Pick<H3ComfyClient, 'systemStats'> = new H3ComfyClient(),
     private readonly options: H3RuntimeManagerOptions = {}
@@ -37,30 +40,42 @@ export class H3RuntimeManager {
     this.options.bundleRoot = path.resolve(bundleRoot);
   }
 
-  async ensureStarted(): Promise<unknown> {
+  async ensureStarted(options: H3RuntimeStartOptions = {}): Promise<unknown> {
     try {
       return await this.client.systemStats();
     } catch (error) {
       if (this.options.external) throw error;
     }
+    if (this.startup && this.startupAllowsInstall && options.allowInstall === false)
+      throw new Error('H3_RUNTIME_INSTALLATION_IN_PROGRESS');
     if (!this.startup) {
-      this.startup = this.startPortable().finally(() => {
+      this.startupAllowsInstall = options.allowInstall !== false;
+      this.startup = this.startPortable(this.startupAllowsInstall).finally(() => {
         this.startup = undefined;
+        this.startupAllowsInstall = false;
       });
     }
     return this.startup;
   }
 
-  private async startPortable(): Promise<unknown> {
+  private async startPortable(allowInstall: boolean): Promise<unknown> {
     const installer = this.options.portableRoot
       ? undefined
       : new H3PortableInstaller({ bundleRoot: this.options.bundleRoot });
-    const root = this.options.portableRoot ?? installer!.ensureInstalled();
-    const modelsDirectory = this.options.modelsDirectory ?? installer?.modelsDirectory() ?? path.join(root, 'models');
+    const existing = !allowInstall ? installer?.status() : undefined;
+    const root = this.options.portableRoot ?? (allowInstall ? installer!.ensureInstalled() : existing!.runtimeRoot);
+    const modelsDirectory =
+      this.options.modelsDirectory ??
+      (allowInstall ? installer?.modelsDirectory() : existing?.modelsDirectory) ??
+      path.join(root, 'models');
     const python = path.join(root, 'python_embeded', 'python.exe');
     const main = path.join(root, 'ComfyUI', 'main.py');
     if (!fs.existsSync(python) || !fs.existsSync(main)) throw new Error('H3_PORTABLE_RUNTIME_NOT_INSTALLED');
+    const selectedAcceleration = this.accelerationStatus();
+    if (!allowInstall && selectedAcceleration.mode !== 'dense' && selectedAcceleration.backend !== 'sla')
+      throw new Error(`H3_ACCELERATION_DEPENDENCIES_MISSING:${selectedAcceleration.reason}`);
     if (
+      allowInstall &&
       !this.options.spawnProcess &&
       this.accelerationStatus().backend !== 'sla' &&
       this.options.acceleration?.mode !== 'dense'

@@ -16,7 +16,10 @@ import { handleComfyRoute } from '../packages/desktop/src/process/services/media
 import { defaultComfyInstallPlanner } from '../packages/desktop/src/process/services/media/comfy/planning/installPlanner';
 import { H3_PORTABLE_INSTALL_EVIDENCE } from '../packages/desktop/src/process/services/media/comfy/planning/legacyInstallPlan';
 import { createComfyProfileDiscovery } from '../packages/desktop/src/process/services/media/comfy/discovery';
-import { importLegacyH3 } from '../packages/desktop/src/process/services/media/comfy/discovery/legacyH3';
+import {
+  importLegacyH3,
+  startLegacyH3Runtime,
+} from '../packages/desktop/src/process/services/media/comfy/discovery/legacyH3';
 import type { CreationInstallConsent } from '../packages/desktop/src/common/chat/document/creation/operation';
 import { inspectH3DownloadSpace } from '../packages/desktop/src/process/services/runtime/h3DownloadPlan';
 import { probeSetupHardware } from '../packages/desktop/src/process/services/runtime/h3SetupHardware';
@@ -203,7 +206,10 @@ const creationTimer = setInterval(() => {
 }, 1500);
 creationTimer.unref();
 const comfyManifest = path.join(dataDir, 'comfy-profiles.json');
-const comfyEngine = new ComfyWorkflowEngine({ outputRoot: path.join(dataDir, 'comfy-output') });
+const comfyEngine = new ComfyWorkflowEngine({
+  outputRoot: path.join(dataDir, 'comfy-output'),
+  startRuntime: (profile) => startLegacyH3Runtime(profile, h3Runtime, h3Client.getBaseUrl()),
+});
 let approvalBackendPort = Number(process.env.OPENH3_MEDIA_BACKEND_PORT);
 const comfyService = new ComfyService({
   filename: comfyManifest,

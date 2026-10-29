@@ -164,3 +164,84 @@ describe('representative Comfy smoke media validation', () => {
     await expect(validate(file, evidence)).resolves.toBeUndefined();
   });
 });
+
+describe('requested Comfy generation media validation', () => {
+  it.each(['black', 'white'])('accepts a valid %s image requested by the user', async (color) => {
+    const file = path.join(root, `${color}.png`);
+    execFileSync(
+      resolveMediaBinary('ffmpeg'),
+      ['-v', 'error', '-f', 'lavfi', '-i', `color=${color}:size=96x64`, '-frames:v', '1', file],
+      { windowsHide: true, timeout: 30_000, stdio: 'pipe' }
+    );
+    const evidence = { ...context(), mode: 'generation' as const };
+    evidence.profile.kind = 'image';
+    evidence.profile.family = 'z-image';
+    await expect(
+      verifyComfySmokeArtifact({ path: file, mimeType: 'image/png' }, 'image', new AbortController().signal, evidence)
+    ).resolves.toBeUndefined();
+    await expect(
+      verifyComfySmokeArtifact({ path: file, mimeType: 'image/png' }, 'image', new AbortController().signal, {
+        profile: evidence.profile,
+        input: evidence.input,
+      })
+    ).rejects.toThrow('COMFY_SMOKE_IMAGE_INVALID');
+  });
+  it.each([
+    { name: 'color bars', source: 'smptebars=size=96x64:rate=12:duration=1' },
+    { name: 'black', source: 'color=black:size=96x64:rate=12:duration=1' },
+  ])('accepts a valid static $name video', async ({ source }) => {
+    const file = video('static.mp4', source);
+    await expect(validate(file, { ...context(), mode: 'generation' as const })).resolves.toBeUndefined();
+  });
+  it('accepts synchronized silent Omni audio while retaining the required native soundtrack', async () => {
+    const evidence = { ...context(), mode: 'generation' as const };
+    evidence.profile.family = 'fasth3-omni';
+    const file = video(
+      'silent-generation.mp4',
+      'testsrc2=size=96x64:rate=24:duration=1',
+      'anullsrc=r=32000:cl=stereo:d=1',
+      '1',
+      { sampleRate: 32000, channels: 2 }
+    );
+    await expect(validate(file, evidence)).resolves.toBeUndefined();
+  });
+  it('still rejects undecodable output and mismatched requested dimensions or duration', async () => {
+    const evidence = { ...context(), mode: 'generation' as const };
+    const invalid = path.join(root, 'invalid.mp4');
+    fs.writeFileSync(invalid, 'not a video');
+    await expect(validate(invalid, evidence)).rejects.toThrow('COMFY_SMOKE_VIDEO_INVALID');
+    const file = video('static.mp4', 'smptebars=size=96x64:rate=12:duration=1');
+    await expect(validate(file, { ...evidence, input: { ...evidence.input, width: 128 } })).rejects.toThrow(
+      'COMFY_SMOKE_VIDEO_INVALID'
+    );
+    await expect(validate(file, { ...evidence, input: { ...evidence.input, durationSeconds: 3 } })).rejects.toThrow(
+      'COMFY_SMOKE_VIDEO_INVALID'
+    );
+  });
+  it('still requires Omni audio presence, format, frame rate, and synchronization', async () => {
+    const evidence = { ...context(), mode: 'generation' as const };
+    evidence.profile.family = 'fasth3-omni';
+    const absent = video('absent.mp4', 'testsrc2=size=96x64:rate=24:duration=1');
+    const mono = video('mono.mp4', 'testsrc2=size=96x64:rate=24:duration=1', true);
+    const lowRate = video('low-rate.mp4', 'testsrc2=size=96x64:rate=24:duration=1', true, '1', {
+      sampleRate: 24000,
+      channels: 2,
+    });
+    const wrongFps = video('wrong-fps.mp4', 'testsrc2=size=96x64:rate=12:duration=1', true, '1', {
+      sampleRate: 32000,
+      channels: 2,
+    });
+    const short = video(
+      'short.mp4',
+      'testsrc2=size=96x64:rate=24:duration=1',
+      'sine=frequency=440:sample_rate=32000:duration=0.2',
+      '1',
+      { sampleRate: 32000, channels: 2 }
+    );
+    await Promise.all(
+      [absent, mono, lowRate, wrongFps, short].map((file) =>
+        expect(validate(file, evidence)).rejects.toThrow('COMFY_SMOKE_VIDEO_INVALID')
+      )
+    );
+  });
+});

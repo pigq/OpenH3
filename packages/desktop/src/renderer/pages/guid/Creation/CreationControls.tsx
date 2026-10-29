@@ -81,7 +81,7 @@ export default function CreationControls({ selection, models, model, onChange, o
                     modelIds: { ...previous.modelIds, [`${selection.source}-${selection.kind}`]: item.id },
                   }));
                   setOpen(false);
-                  if (item.source === 'local' && !item.available) onManageLocal(item);
+                  if (item.source === 'local' && !item.profileId && !item.available) onManageLocal(item);
                 }}
               >
                 <span

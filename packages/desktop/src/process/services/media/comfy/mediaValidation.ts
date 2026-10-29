@@ -3,7 +3,11 @@ import { promisify } from 'node:util';
 import type { ComfyGenerationInput, ComfyProfile } from '@/common/chat/document/creation/comfy';
 import { resolveMediaBinary } from '../mediaBinary';
 
-export type ComfySmokeContext = { profile: ComfyProfile; input: ComfyGenerationInput };
+export type ComfySmokeContext = {
+  profile: ComfyProfile;
+  input: ComfyGenerationInput;
+  mode?: 'smoke' | 'generation';
+};
 const exec = promisify(execFile);
 function checkAbort(signal: AbortSignal): void {
   if (signal.aborted) throw new Error('COMFY_INSTALL_CANCELLED');
@@ -44,7 +48,7 @@ function hasAudibleSamples(samples: Buffer): boolean {
   return false;
 }
 
-/** Decode representative smoke media and check the capabilities exercised by this exact recipe. */
+/** Validate decoded media and recipe capabilities; content heuristics apply only to smoke probes. */
 export async function verifyComfySmokeArtifact(
   artifact: { path: string; mimeType: string },
   kind: ComfyProfile['kind'],
@@ -120,9 +124,14 @@ export async function verifyComfySmokeArtifact(
       if (!decoded.stdout.length) throw new Error('empty pixels');
       samples.push(decoded.stdout);
     }
-    if (!samples.some((sample) => sample.some((pixel) => pixel > 1) && sample.some((pixel) => pixel < 254)))
-      throw new Error('blank pixels');
-    if (kind === 'video' && samples.every((sample) => sample.equals(samples[0]))) throw new Error('frozen video');
+    // User requests may intentionally produce a solid image, a static scene, or
+    // silent audio. Only the controlled smoke prompt promises nontrivial content.
+    const smoke = context?.mode !== 'generation';
+    if (smoke) {
+      if (!samples.some((sample) => sample.some((pixel) => pixel > 1) && sample.some((pixel) => pixel < 254)))
+        throw new Error('blank pixels');
+      if (kind === 'video' && samples.every((sample) => sample.equals(samples[0]))) throw new Error('frozen video');
+    }
     const requiresAudio =
       context?.profile.family === 'fasth3-omni' ||
       context?.profile.capabilities.some((capability) =>
@@ -165,7 +174,7 @@ export async function verifyComfySmokeArtifact(
       if (!decoded.stdout.length) throw new Error('empty native audio');
       if (Math.abs(decoded.stdout.length / 16000 - duration) > audioTolerance)
         throw new Error('unsynchronized decoded audio');
-      if (context?.profile.family === 'fasth3-omni' && !hasAudibleSamples(decoded.stdout))
+      if (smoke && context?.profile.family === 'fasth3-omni' && !hasAudibleSamples(decoded.stdout))
         throw new Error('silent native audio');
     }
     checkAbort(signal);

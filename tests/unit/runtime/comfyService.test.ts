@@ -585,6 +585,140 @@ describe('Comfy installation and profile service', () => {
     engine.snapshotFingerprint.mockRejectedValueOnce(new Error('COMFY_SERVER_UNAVAILABLE'));
     expect((await service.refreshProfiles())[0].state).toBe('verified');
   });
+  it('validates an existing downloaded model with the requested generation instead of installing it', async () => {
+    const verifyArtifact = vi.fn(async () => undefined);
+    const { service, engine, install } = setup({ verifyArtifact });
+    service.register(profile);
+    service.bind({
+      requestId,
+      conversationId: 'chat',
+      profileId: profile.id,
+      family: profile.family,
+      intent: 'generate',
+    });
+    const input = { prompt: 'A cup on a wooden table', seed: 42 };
+    const job = service.generate(requestId, profile.id, input);
+    expect(service.generate(requestId, profile.id, input).id).toBe(job.id);
+    expect(service.profiles()[0].state).not.toBe('verified');
+    await service.idle();
+    expect(install).not.toHaveBeenCalled();
+    expect(engine.validate).toHaveBeenCalledOnce();
+    expect(engine.generate).toHaveBeenCalledOnce();
+    expect(engine.generate.mock.calls[0][1]).toEqual(input);
+    expect(verifyArtifact).toHaveBeenCalledWith(
+      expect.anything(),
+      'image',
+      expect.any(AbortSignal),
+      expect.objectContaining({ mode: 'generation', input })
+    );
+    expect(service.job(job.id, { requestId })).not.toHaveProperty('validationMode');
+    expect(service.job(job.id, { requestId })).toMatchObject({
+      status: 'succeeded',
+      artifacts: [{ mimeType: 'image/png' }],
+    });
+    expect(service.profiles()[0].state).toBe('verified');
+  });
+  it('keeps a failed generation validation unavailable without creating an installation', async () => {
+    const { service, engine, install } = setup();
+    service.register(profile);
+    service.bind({
+      requestId,
+      conversationId: 'chat',
+      profileId: profile.id,
+      family: profile.family,
+      intent: 'generate',
+    });
+    engine.validate.mockRejectedValueOnce(new Error('COMFY_SERVER_ENVIRONMENT_MISMATCH'));
+    const job = service.generate(requestId, profile.id, { prompt: 'test' });
+    await service.idle();
+    expect(service.job(job.id, { requestId })).toMatchObject({
+      status: 'failed',
+      error: 'COMFY_SERVER_ENVIRONMENT_MISMATCH',
+    });
+    expect(engine.generate).not.toHaveBeenCalled();
+    expect(install).not.toHaveBeenCalled();
+    expect(service.profiles()[0].state).not.toBe('verified');
+  });
+  it('does not mark first generation verified when its returned media cannot be validated', async () => {
+    const { service, engine, install } = setup({
+      verifyArtifact: async () => {
+        throw new Error('COMFY_SMOKE_OUTPUT_INVALID');
+      },
+    });
+    engine.generate.mockImplementationOnce(async (...args: unknown[]) => {
+      (args[4] as (id: string) => void)('invalid-media-prompt');
+      return {
+        promptId: 'invalid-media-prompt',
+        artifacts: [{ path: path.join(root, 'out.png'), mimeType: 'image/png' }],
+      };
+    });
+    service.register(profile);
+    service.bind({
+      requestId,
+      conversationId: 'chat',
+      profileId: profile.id,
+      family: profile.family,
+      intent: 'generate',
+    });
+    const job = service.generate(requestId, profile.id, { prompt: 'test' });
+    await service.idle();
+    expect(service.job(job.id, { requestId })).toMatchObject({
+      status: 'failed',
+      error: 'COMFY_SMOKE_OUTPUT_INVALID',
+      submissionUncertain: false,
+    });
+    expect(service.profiles()[0].state).not.toBe('verified');
+    expect(install).not.toHaveBeenCalled();
+    expect(service.generate(requestId, profile.id, { prompt: 'test' }).id).not.toBe(job.id);
+    await service.idle();
+  });
+  it('resumes a first-generation validation after restart without submitting or installing again', async () => {
+    const { service, engine, install, probe } = setup();
+    service.register(profile);
+    service.bind({
+      requestId,
+      conversationId: 'chat',
+      profileId: profile.id,
+      family: profile.family,
+      intent: 'generate',
+    });
+    engine.generate.mockImplementationOnce(async (...args: unknown[]) => {
+      (args[4] as (id: string) => void)('first-prompt');
+      throw new Error('COMFY_HISTORY_UNAVAILABLE');
+    });
+    const input = { prompt: 'keep the original request', seed: 99 };
+    const job = service.generate(requestId, profile.id, input);
+    await service.idle();
+    expect(service.generate(requestId, profile.id, input).id).toBe(job.id);
+    expect(service.job(job.id, { requestId })).toMatchObject({ status: 'running', promptId: 'first-prompt' });
+    await service.close();
+    engine.resume.mockResolvedValueOnce({
+      promptId: 'first-prompt',
+      artifacts: [{ path: path.join(root, 'out.png'), mimeType: 'image/png' }],
+    });
+    const verifyArtifact = vi.fn(async () => undefined);
+    const restarted = new ComfyService({
+      filename: path.join(root, 'state.json'),
+      engine,
+      install,
+      probe,
+      verifyArtifact,
+    });
+    restarted.recoverJobs();
+    await restarted.idle();
+    expect(engine.generate).toHaveBeenCalledOnce();
+    expect(engine.resume).toHaveBeenCalledOnce();
+    expect(restarted.job(job.id, { requestId }).status).toBe('succeeded');
+    expect(restarted.profiles()[0].state).toBe('verified');
+    expect(verifyArtifact).toHaveBeenCalledWith(
+      expect.anything(),
+      'image',
+      expect.any(AbortSignal),
+      expect.objectContaining({ mode: 'generation', input })
+    );
+    expect(install).not.toHaveBeenCalled();
+    await restarted.close();
+  });
   it('stores a submitted prompt and resumes it without duplicating generation after restart', async () => {
     const { service, engine, install, probe } = setup();
     service.register(profile);
@@ -624,13 +758,20 @@ describe('Comfy installation and profile service', () => {
     expect(engine.generate).toHaveBeenCalledTimes(2);
   });
   it('runs explicit validation jobs in the same queue and never generates during installation intent', async () => {
-    const { service } = setup();
+    const verifyArtifact = vi.fn(async () => undefined);
+    const { service } = setup({ verifyArtifact });
     service.register(profile);
     const job = service.verify(requestId, profile.id, { prompt: 'smoke' });
     expect(service.verify(requestId, profile.id, { prompt: 'smoke' }).id).toBe(job.id);
     await service.idle();
     expect(service.job(job.id, { requestId }).status).toBe('succeeded');
     expect(service.profiles()[0].state).toBe('verified');
+    expect(verifyArtifact).toHaveBeenCalledWith(
+      expect.anything(),
+      'image',
+      expect.any(AbortSignal),
+      expect.objectContaining({ mode: 'smoke' })
+    );
     service.bind({
       requestId,
       conversationId: 'chat',

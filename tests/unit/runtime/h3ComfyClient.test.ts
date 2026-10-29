@@ -4,8 +4,30 @@ import { createH3Job, inferH3Mode } from '@/common/chat/document/h3Job';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import * as comfyIdentity from '@/process/services/media/comfy/workflowEngine';
 
 describe('H3 watchdog reconciliation', () => {
+  it('inspects the portable runtime using the configured bundle interpreter', async () => {
+    const bundleRoot = path.resolve('fixture-bundle');
+    const stats = { system: { python_version: '3.12' } };
+    const identity = { executable: path.resolve('python.exe'), root: path.resolve('comfy'), pid: 1 };
+    const inspect = vi.spyOn(comfyIdentity, 'inspectComfyServiceIdentity').mockResolvedValue(identity);
+    try {
+      const client = new H3ComfyClient({
+        bundleRoot: () => bundleRoot,
+        fetchImpl: (async () => Response.json(stats)) as typeof fetch,
+      });
+      await expect(client.runtimeBinding()).resolves.toMatchObject({ identity });
+      expect(inspect).toHaveBeenCalledWith(
+        client.getBaseUrl(),
+        stats,
+        path.join(bundleRoot, 'runtime', 'ComfyUI_windows_portable', 'python_embeded', 'python.exe')
+      );
+    } finally {
+      inspect.mockRestore();
+    }
+  });
+
   it('binds memory cleanup to the original process and confirms an already empty allocator', async () => {
     let freed = false;
     const fetchImpl = vi.fn(async (url) => {

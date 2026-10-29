@@ -11,7 +11,38 @@ import {
   H3_MATLOWAI_COMFY_MODEL_MANIFEST,
 } from '@/process/services/runtime/h3Profiles';
 import type { H3PortableInstallStatus } from '@/process/services/runtime/H3PortableInstaller';
+import type { H3RuntimeStartOptions } from '@/process/services/runtime/H3RuntimeManager';
 import type { ComfyProfile } from '@/common/chat/document/creation/comfy';
+
+/** Preserve the portable launcher's acceleration setup for the exact selected runtime. */
+export async function startLegacyH3Runtime(
+  profile: ComfyProfile,
+  runtime: {
+    installStatus: () => H3PortableInstallStatus;
+    ensureStarted: (options?: H3RuntimeStartOptions) => Promise<unknown>;
+  },
+  baseUrl: string
+): Promise<boolean> {
+  if (profile.family !== 'h3' || profile.environment.baseUrl !== baseUrl) return false;
+  const install = runtime.installStatus();
+  const canonical = (value: string) =>
+    process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
+  if (
+    canonical(profile.environment.root) !== canonical(path.join(install.runtimeRoot, 'ComfyUI')) ||
+    canonical(profile.environment.python) !==
+      canonical(path.join(install.runtimeRoot, 'python_embeded', 'python.exe')) ||
+    JSON.stringify(profile.environment.launchArgs) !==
+      JSON.stringify([
+        '--windows-standalone-build',
+        '--disable-auto-launch',
+        '--models-directory',
+        install.modelsDirectory,
+      ])
+  )
+    return false;
+  await runtime.ensureStarted({ allowInstall: false });
+  return true;
+}
 
 /** Import existing local files as unverified profiles, preserving weights, workflows and historical jobs. */
 export function importLegacyH3(install: H3PortableInstallStatus, baseUrl: string): ComfyProfile[] {

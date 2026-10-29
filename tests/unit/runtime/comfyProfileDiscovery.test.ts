@@ -261,6 +261,18 @@ describe('incremental local Comfy profile discovery', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(4);
   });
 
+  it('uses the registered endpoint interpreter only to inspect its actual socket owner', async () => {
+    writeModels();
+    const [registered] = await setup()([]);
+    const inspectIdentity = vi.fn(async () => ({ executable: python, root }));
+    const discover = setup({
+      fetchImpl: (async () => Response.json({ system: { python_version: '3.12' } })) as typeof fetch,
+      inspectIdentity,
+    });
+    await discover([registered]);
+    expect(inspectIdentity).toHaveBeenCalledWith(registered.environment.baseUrl, expect.any(Object), python);
+  });
+
   it('returns one shared scan for overlapping profile refreshes and rejects an altered packaged graph', async () => {
     writeModels();
     const loadCatalog = vi.fn(() => {

@@ -23,7 +23,7 @@ export type ComfyProfileDiscoveryOptions = {
   legacyProfiles?: () => ComfyProfile[];
   endpoints?: () => string[];
   fetchImpl?: typeof fetch;
-  inspectIdentity?: (baseUrl: string, stats: JsonRecord) => Promise<ComfyServiceIdentity | undefined>;
+  inspectIdentity?: (baseUrl: string, stats: JsonRecord, python?: string) => Promise<ComfyServiceIdentity | undefined>;
   loadCatalog?: () => DiscoveryCatalog;
   now?: () => number;
   /** Network discovery is cached; file metadata remains cheap and incremental. */
@@ -228,7 +228,18 @@ export function createComfyProfileDiscovery(options: ComfyProfileDiscoveryOption
                 if (!response.ok) return undefined;
                 const stats = record(await response.json());
                 if (!Object.keys(record(stats.system)).length) return undefined;
-                const identity = await (options.inspectIdentity ?? inspectComfyServiceIdentity)(url.origin, stats);
+                const selected = registered.find((profile) => {
+                  try {
+                    return new URL(profile.environment.baseUrl).origin === url.origin;
+                  } catch {
+                    return false;
+                  }
+                });
+                const identity = await (options.inspectIdentity ?? inspectComfyServiceIdentity)(
+                  url.origin,
+                  stats,
+                  selected?.environment.python
+                );
                 if (
                   !identity ||
                   !path.isAbsolute(identity.root) ||

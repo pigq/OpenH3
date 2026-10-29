@@ -157,6 +157,24 @@ describe('conversation local profile selection', () => {
     expect(mocks.bind).not.toHaveBeenCalled();
   });
 
+  it('lets a downloaded profile validate through generation without starting repair', async () => {
+    render(<ComfySessionProfile conversation={conversation()} />);
+    const option = screen.getByRole('button', { name: /Qwen-Edit FP8/ });
+    expect(option).toBeEnabled();
+    fireEvent.click(option);
+    await waitFor(() =>
+      expect(mocks.bind).toHaveBeenCalledWith('original-request', 'conv-1', 'qwen-fp8', 'qwen-edit', 'generate', {
+        source: 'local',
+        kind: 'image',
+      })
+    );
+    expect(mocks.update.mock.calls[0][0].updates.extra.creation_request).toMatchObject({
+      profileId: 'qwen-fp8',
+      state: 'downloaded',
+      intent: 'generate',
+    });
+  });
+
   it('explicitly activates a repaired profile even when it is already selected', async () => {
     render(<ComfySessionProfile conversation={conversation({ ...snapshot, intent: 'repair' })} />);
     fireEvent.click(screen.getByRole('button', { name: 'guid.comfy.use' }));

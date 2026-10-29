@@ -249,8 +249,20 @@ export class H3ComfyClient {
 
   async runtimeBinding() {
     const stats = (await this.systemStats()) as Record<string, unknown>;
-    const identity = await (this.options.runtimeInspector ?? inspectComfyServiceIdentity)(this.baseUrl, stats);
+    const identity = await this.inspectRuntime(stats);
     return { kind: 'h3' as const, baseUrl: this.baseUrl, identity };
+  }
+
+  private inspectRuntime(stats: Record<string, unknown>): Promise<ComfyServiceIdentity | undefined> {
+    if (this.options.runtimeInspector) return this.options.runtimeInspector(this.baseUrl, stats);
+    const python = path.join(
+      this.options.bundleRoot?.() ?? resolveH3BundleRoot(),
+      'runtime',
+      'ComfyUI_windows_portable',
+      'python_embeded',
+      'python.exe'
+    );
+    return inspectComfyServiceIdentity(this.baseUrl, stats, python);
   }
 
   runtimeSignature(): string {
@@ -304,7 +316,7 @@ export class H3ComfyClient {
   /** Confirm queue idleness and observed VRAM recovery after accepting /free. */
   async clearMemory(expectedIdentity?: ComfyServiceIdentity): Promise<void> {
     const before = (await this.systemStats()) as Record<string, unknown>;
-    const identity = await (this.options.runtimeInspector ?? inspectComfyServiceIdentity)(this.baseUrl, before);
+    const identity = await this.inspectRuntime(before);
     if (!identity) throw new Error('H3_MEMORY_CLEAR_IDENTITY_UNAVAILABLE');
     const sameIdentity = (value: ComfyServiceIdentity | undefined, expected: ComfyServiceIdentity): boolean =>
       Boolean(
@@ -336,7 +348,7 @@ export class H3ComfyClient {
       await this.pause(Math.min(1000, this.pollIntervalMs || 1), AbortSignal.timeout(15_000));
       await idle();
       const after = (await this.systemStats()) as Record<string, unknown>;
-      const currentIdentity = await (this.options.runtimeInspector ?? inspectComfyServiceIdentity)(this.baseUrl, after);
+      const currentIdentity = await this.inspectRuntime(after);
       if (!sameIdentity(currentIdentity, identity)) throw new Error('H3_MEMORY_CLEAR_RUNTIME_CHANGED');
       const observed = memory(after);
       const devices = Array.isArray(after.devices) ? (after.devices as Array<Record<string, unknown>>) : [];

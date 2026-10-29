@@ -5,8 +5,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ComfyProfile } from '@/common/chat/document/creation/comfy';
-import { ComfyWorkflowEngine } from '@/process/services/media/comfy/workflowEngine';
+import { ComfyWorkflowEngine, inspectComfyServiceIdentity } from '@/process/services/media/comfy/workflowEngine';
+import * as comfyEnvironment from '@/process/services/media/comfy/discovery/environment';
 import { ComfyRuntimeCoordinator } from '@/process/services/media/comfy/runtimeCoordinator';
+import { ensureH3AccelerationLauncher } from '@/process/services/runtime/h3Acceleration';
 
 let root: string;
 let profile: ComfyProfile;
@@ -111,6 +113,154 @@ function engine(fetchImpl = fetchFixture(), options: Record<string, unknown> = {
     ...options,
   });
 }
+
+describe('Windows ComfyUI socket owner identity', () => {
+  const originalPlatform = process.platform;
+  const runtimeRoot = 'C:\\portable H3';
+  const python = `${runtimeRoot}\\python_embeded\\python.exe`;
+  const accelerationRoot = 'C:\\H3 acceleration';
+  const wrapper = `${accelerationRoot}\\aionui_h3_accel_launcher.py`;
+  let wrapperSource: string;
+  let run: ReturnType<typeof vi.spyOn<typeof comfyEnvironment, 'runComfyCommand'>>;
+  const processInfo = (script = 'ComfyUI/main.py') => ({
+    ProcessId: 4321,
+    ExecutablePath: python,
+    CommandLine: `"${python}" -s "${script}" --port 8188`,
+  });
+  const evidence = (overrides: Record<string, unknown> = {}) => ({
+    pid: 4321,
+    executable: python,
+    cwd: runtimeRoot,
+    args: [python, '-s', 'ComfyUI/main.py', '--port', '8188'],
+    listening: true,
+    ...overrides,
+  });
+  beforeEach(() => {
+    wrapperSource = fs.readFileSync(ensureH3AccelerationLauncher(root, runtimeRoot), 'utf8');
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    run = vi.spyOn(comfyEnvironment, 'runComfyCommand');
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    Object.defineProperty(process, 'platform', { value: originalPlatform });
+  });
+  const inspect = () => inspectComfyServiceIdentity('http://127.0.0.1:8188', stats);
+
+  it('resolves the legacy portable relative main from the socket owner actual cwd', async () => {
+    run.mockResolvedValueOnce(JSON.stringify(processInfo())).mockResolvedValueOnce(JSON.stringify(evidence()));
+    await expect(inspect()).resolves.toEqual({ executable: python, root: `${runtimeRoot}\\ComfyUI`, pid: 4321 });
+    expect(run.mock.calls[1][0]).toBe(python);
+    expect(run.mock.calls[1][1]).toEqual(expect.arrayContaining(['4321', '8188']));
+  });
+
+  it('preserves absolute main.py process inspection without a Python probe', async () => {
+    run.mockResolvedValueOnce(JSON.stringify(processInfo(`${runtimeRoot}\\ComfyUI\\main.py`)));
+    await expect(inspect()).resolves.toEqual({ executable: python, root: `${runtimeRoot}\\ComfyUI`, pid: 4321 });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses an explicitly selected interpreter for OS inspection without replacing the observed executable', async () => {
+    const inspector = 'D:\\selected Python\\python.exe';
+    run.mockResolvedValueOnce(JSON.stringify(processInfo())).mockResolvedValueOnce(JSON.stringify(evidence()));
+    await expect(inspectComfyServiceIdentity('http://127.0.0.1:8188', stats, inspector)).resolves.toEqual({
+      executable: python,
+      root: `${runtimeRoot}\\ComfyUI`,
+      pid: 4321,
+    });
+    expect(run.mock.calls[1][0]).toBe(inspector);
+  });
+
+  it('does not infer a root from a drive relative Python script path', async () => {
+    run
+      .mockResolvedValueOnce(JSON.stringify(processInfo('D:main.py')))
+      .mockResolvedValueOnce(JSON.stringify(evidence({ args: [python, 'D:main.py'] })));
+    await expect(inspect()).resolves.toBeUndefined();
+  });
+
+  it('does not identify an arbitrary script from main.py appearing among its application arguments', async () => {
+    run.mockResolvedValueOnce(
+      JSON.stringify({
+        ...processInfo(),
+        CommandLine: `"${python}" unrelated.py "${runtimeRoot}\\ComfyUI\\main.py"`,
+      })
+    );
+    await expect(inspect()).resolves.toBeUndefined();
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a different actual cwd as a different root instead of assuming the selected portable root', async () => {
+    run
+      .mockResolvedValueOnce(JSON.stringify(processInfo()))
+      .mockResolvedValueOnce(JSON.stringify(evidence({ cwd: 'D:\\other runtime' })));
+    await expect(inspect()).resolves.toMatchObject({ root: 'D:\\other runtime\\ComfyUI' });
+  });
+
+  it.each([
+    { cwd: undefined },
+    { cwd: 'relative' },
+    { pid: 9999 },
+    { executable: 'C:\\other\\python.exe' },
+    { listening: false },
+    { args: [python, '-c', 'print("main.py")'] },
+  ])('rejects relative process identity without matching OS evidence: %j', async (invalid) => {
+    run.mockResolvedValueOnce(JSON.stringify(processInfo())).mockResolvedValueOnce(JSON.stringify(evidence(invalid)));
+    await expect(inspect()).resolves.toBeUndefined();
+  });
+
+  it('fails closed when process cwd or socket ownership cannot be inspected', async () => {
+    run.mockResolvedValueOnce(JSON.stringify(processInfo())).mockRejectedValueOnce(new Error('AccessDenied'));
+    await expect(inspect()).resolves.toBeUndefined();
+  });
+
+  it('recognizes the generated acceleration wrapper using its process environment and source', async () => {
+    run
+      .mockResolvedValueOnce(JSON.stringify(processInfo(wrapper)))
+      .mockResolvedValueOnce(
+        JSON.stringify(evidence({ args: [python, wrapper, '--port', '8188'], runtimeRoot, accelerationRoot }))
+      );
+    const read = fs.readFileSync.bind(fs);
+    vi.spyOn(fs, 'readFileSync').mockImplementation((file, options) =>
+      file === wrapper ? wrapperSource : read(file, options)
+    );
+    await expect(inspect()).resolves.toEqual({ executable: python, root: `${runtimeRoot}\\ComfyUI`, pid: 4321 });
+  });
+
+  it.each([
+    { runtimeRoot: undefined },
+    { runtimeRoot: 'relative' },
+    { runtimeRoot: 'D:\\other runtime' },
+    { accelerationRoot: 'D:\\other acceleration' },
+  ])('rejects an acceleration wrapper without matching runtime evidence: %j', async (invalid) => {
+    run
+      .mockResolvedValueOnce(JSON.stringify(processInfo(wrapper)))
+      .mockResolvedValueOnce(
+        JSON.stringify(evidence({ args: [python, wrapper], runtimeRoot, accelerationRoot, ...invalid }))
+      );
+    await expect(inspect()).resolves.toBeUndefined();
+  });
+
+  it('rejects an arbitrary script named like the acceleration wrapper', async () => {
+    run
+      .mockResolvedValueOnce(JSON.stringify(processInfo(wrapper)))
+      .mockResolvedValueOnce(JSON.stringify(evidence({ args: [python, wrapper], runtimeRoot, accelerationRoot })));
+    const read = fs.readFileSync.bind(fs);
+    vi.spyOn(fs, 'readFileSync').mockImplementation((file, options) =>
+      file === wrapper ? 'print("unrelated server")' : read(file, options)
+    );
+    await expect(inspect()).resolves.toBeUndefined();
+  });
+
+  it('rejects a different launcher that contains the expected main.py binding lines', async () => {
+    run
+      .mockResolvedValueOnce(JSON.stringify(processInfo(wrapper)))
+      .mockResolvedValueOnce(JSON.stringify(evidence({ args: [python, wrapper], runtimeRoot, accelerationRoot })));
+    const read = fs.readFileSync.bind(fs);
+    vi.spyOn(fs, 'readFileSync').mockImplementation((file, options) =>
+      file === wrapper ? `${wrapperSource}\nstart_unrelated_server()\n` : read(file, options)
+    );
+    await expect(inspect()).resolves.toBeUndefined();
+  });
+});
 
 describe('generic ComfyUI workflow engine', () => {
   it('keeps a known prompt recoverable when the fingerprint system_stats read disconnects', async () => {
@@ -567,6 +717,86 @@ describe('generic ComfyUI workflow engine', () => {
     );
     await runtime.stopOwned();
     expect(child.kill).toHaveBeenCalledOnce();
+  });
+
+  it('delegates a selected offline runtime to its launcher and verifies its server before reusing it', async () => {
+    let online = false;
+    const spawnImpl = vi.fn();
+    const runtimeInspector = vi.fn(async () => ({ executable: profile.environment.python, root }));
+    const startRuntime = vi.fn(async () => {
+      online = true;
+      return true;
+    });
+    const runtime = engine(
+      vi.fn(async () => {
+        if (!online) throw new Error('offline');
+        return Response.json(stats);
+      }) as typeof fetch,
+      { startRuntime, spawnImpl, runtimeInspector }
+    );
+    await expect(runtime.ensureStarted(profile)).resolves.toBeUndefined();
+    expect(startRuntime).toHaveBeenCalledExactlyOnceWith(profile);
+    expect(runtimeInspector).toHaveBeenCalledOnce();
+    expect(spawnImpl).not.toHaveBeenCalled();
+    await runtime.stopOwned();
+  });
+
+  it.each(['unavailable', 'unconfirmed', 'mismatch', 'launcher-failure'])(
+    'fails closed when a delegated runtime reports %s',
+    async (failure) => {
+      let attempted = false;
+      const spawnImpl = vi.fn();
+      const runtime = engine(
+        vi.fn(async () => {
+          if (!attempted || failure === 'unavailable') throw new Error('offline');
+          return Response.json(stats);
+        }) as typeof fetch,
+        {
+          spawnImpl,
+          startRuntime: async () => {
+            attempted = true;
+            if (failure === 'launcher-failure') throw new Error('H3_PORTABLE_START_FAILED');
+            return true;
+          },
+          runtimeInspector: async () =>
+            failure === 'unconfirmed' ? undefined : { executable: path.join(root, 'other.exe'), root },
+        }
+      );
+      const expected = {
+        unavailable: 'COMFY_STARTUP_FAILED',
+        unconfirmed: 'COMFY_SERVER_ENVIRONMENT_UNCONFIRMED',
+        mismatch: 'COMFY_SERVER_ENVIRONMENT_MISMATCH',
+        'launcher-failure': 'H3_PORTABLE_START_FAILED',
+      }[failure];
+      await expect(runtime.ensureStarted(profile)).rejects.toThrow(expected);
+      expect(spawnImpl).not.toHaveBeenCalled();
+    }
+  );
+
+  it('reuses an online matching server without invoking its delegated launcher', async () => {
+    const startRuntime = vi.fn();
+    await engine(fetchFixture(), { startRuntime }).ensureStarted(profile);
+    expect(startRuntime).not.toHaveBeenCalled();
+  });
+
+  it('uses the generic launch path when the delegated launcher declines the profile', async () => {
+    let online = false;
+    const child = Object.assign(new EventEmitter(), { stdout: null, stderr: null, kill: vi.fn() });
+    const startRuntime = vi.fn(async () => false);
+    const spawnImpl = vi.fn(() => {
+      online = true;
+      return child as unknown as ChildProcess;
+    });
+    const runtime = engine(
+      vi.fn(async () => {
+        if (!online) throw new Error('offline');
+        return Response.json(stats);
+      }) as typeof fetch,
+      { startRuntime, spawnImpl }
+    );
+    await expect(runtime.ensureStarted(profile)).resolves.toBeUndefined();
+    expect(startRuntime).toHaveBeenCalledOnce();
+    expect(spawnImpl).toHaveBeenCalledOnce();
   });
 
   it('does not resubmit an ambiguous prompt POST and bounds failed history polling', async () => {
