@@ -67,18 +67,72 @@
      it, so the code-region weight follows the selection for free. */
   --font-mono-weight: var(--code-font-weight, inherit);
   --code-font-size: 13px;
-  --aion-overlay-bg: #ffffff;
-  --aion-overlay-text: #1d2129;
-  --aion-overlay-border: #e5e6eb;
+  --aion-overlay-bg: var(--bg-base);
+  --aion-overlay-text: var(--text-primary);
+  --aion-overlay-border: var(--border-base);
   --aion-overlay-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
 }
 
 html[data-theme='dark'],
 body[arco-theme='dark'] {
-  --aion-overlay-bg: #0e0e0e;
-  --aion-overlay-text: #f2f3f5;
-  --aion-overlay-border: #333333;
+  --aion-overlay-bg: var(--bg-base);
+  --aion-overlay-text: var(--text-primary);
+  --aion-overlay-border: var(--border-base);
   --aion-overlay-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+/* Keep Arco controls on the same OpenH3 surfaces as the app chrome. Custom
+   themes can still override the semantic tokens through the theme contract. */
+body,
+body[arco-theme='dark'] {
+  --color-bg-1: var(--bg-base);
+  --color-bg-2: var(--bg-base);
+  --color-bg-3: var(--bg-1);
+  --color-bg-4: var(--bg-2);
+  --color-bg-5: var(--bg-hover);
+  --color-text-1: var(--text-primary);
+  --color-text-2: var(--text-secondary);
+  --color-text-3: var(--text-secondary);
+  --color-text-4: var(--text-disabled);
+  --color-border-1: var(--border-light);
+  --color-border-2: var(--border-base);
+  --color-border-3: var(--bg-3);
+  --color-border-4: var(--bg-4);
+  --color-fill-1: var(--bg-1);
+  --color-fill-2: var(--bg-2);
+  --color-fill-3: var(--bg-hover);
+  --color-fill-4: var(--bg-active);
+  --color-primary: var(--primary);
+}
+
+body {
+  --primary-1: 238, 243, 252;
+  --primary-2: 227, 235, 248;
+  --primary-3: 206, 219, 241;
+  --primary-4: 173, 195, 233;
+  --primary-5: 94, 137, 214;
+  --primary-6: 53, 104, 200;
+  --primary-7: 41, 87, 173;
+  --primary-8: 32, 69, 139;
+  --primary-9: 25, 53, 99;
+  --primary-10: 19, 35, 64;
+}
+
+body[arco-theme='dark'] {
+  --primary-1: 28, 38, 57;
+  --primary-2: 37, 52, 77;
+  --primary-3: 48, 70, 103;
+  --primary-4: 64, 95, 141;
+  --primary-5: 119, 158, 229;
+  --primary-6: 143, 179, 244;
+  --primary-7: 173, 201, 248;
+  --primary-8: 143, 179, 244;
+  --primary-9: 173, 201, 248;
+  --primary-10: 225, 235, 252;
+}
+
+body[arco-theme='dark'] .arco-btn-primary:not(.arco-btn-disabled) {
+  color: var(--bg-base);
 }
 
 /* Arco's arco.css puts 'Inter' first in font-family, which causes very thin

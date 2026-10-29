@@ -17,7 +17,9 @@ import CssThemeModal from './CssThemeModal.tsx';
 import { BUILTIN_THEMES, DEFAULT_THEME_ID } from './presets.ts';
 import { BACKGROUND_BLOCK_START, injectBackgroundCssBlock } from './backgroundUtils.ts';
 import { resolveExtensionAssetUrl } from '@renderer/utils/platform.ts';
-import { LIGHT_THEME_ID, SYSTEM_THEME_ID } from '@/common/theme/constants';
+import { DARK_THEME_ID, LIGHT_THEME_ID, SYSTEM_THEME_ID } from '@/common/theme/constants';
+import defaultThemeCss from '@renderer/styles/themes/default-color-scheme.css?raw';
+import styles from './CssThemeSettings.module.css';
 
 interface ThemePreviewPalette {
   appBg: string;
@@ -30,31 +32,6 @@ interface ThemePreviewPalette {
   userBubble: string;
   aiBubble: string;
 }
-
-const fallbackThemePreviewPaletteByMode: Record<'light' | 'dark', ThemePreviewPalette> = {
-  light: {
-    appBg: '#f7f8fa',
-    headerBg: '#eef1f5',
-    sideBg: '#eef1f5',
-    mainBg: '#f7f8fa',
-    border: '#d9dde5',
-    accent: '#3b82f6',
-    textMuted: '#8b95a7',
-    userBubble: '#dbeafe',
-    aiBubble: '#e5e7eb',
-  },
-  dark: {
-    appBg: '#171a1f',
-    headerBg: '#1f242d',
-    sideBg: '#1f242d',
-    mainBg: '#171a1f',
-    border: '#303744',
-    accent: '#60a5fa',
-    textMuted: '#8b95a7',
-    userBubble: '#1e3a5f',
-    aiBubble: '#2b313c',
-  },
-};
 
 const stripImportant = (value: string) => value.replace(/\s*!important\s*/gi, '').trim();
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -113,6 +90,33 @@ const readFromVarMap = (vars: Record<string, string>, keys: string[]) => {
   return '';
 };
 
+// Read the shipped tokens so the gallery stays faithful to the actual default
+// theme in both appearances, regardless of the currently selected appearance.
+const defaultPreviewPalette = (mode: 'light' | 'dark'): ThemePreviewPalette => {
+  const vars = {
+    ...parseCssVarsFromBlocks(defaultThemeCss, "[data-color-scheme='default']"),
+    ...(mode === 'dark'
+      ? parseCssVarsFromBlocks(defaultThemeCss, "[data-color-scheme='default'][data-theme='dark']")
+      : {}),
+  };
+  const read = (...keys: string[]) => readFromVarMap(vars, keys);
+  return {
+    appBg: read('bg-1'),
+    headerBg: read('bg-base'),
+    sideBg: read('bg-1'),
+    mainBg: read('bg-base'),
+    border: read('border-base'),
+    accent: read('primary'),
+    textMuted: read('text-secondary'),
+    userBubble: read('message-user-bg'),
+    aiBubble: read('bg-2'),
+  };
+};
+const fallbackThemePreviewPaletteByMode = {
+  light: defaultPreviewPalette('light'),
+  dark: defaultPreviewPalette('dark'),
+};
+
 const extractThemePreviewPalette = (css: string, mode: 'light' | 'dark'): ThemePreviewPalette => {
   const modeFallback = fallbackThemePreviewPaletteByMode[mode];
   const rootVars = parseCssVarsFromBlocks(css, ':root');
@@ -126,10 +130,15 @@ const extractThemePreviewPalette = (css: string, mode: 'light' | 'dark'): ThemeP
   const appBgRaw = readFromVarMap(activeVars, ['bg-1', 'color-bg-1']);
   const panelBgRaw = readFromVarMap(activeVars, ['bg-2', 'color-bg-2', 'fill-1', 'color-fill-1']);
   const borderRaw = readFromVarMap(activeVars, ['bg-3', 'color-border-2', 'border-base']);
-  const accentRaw = readFromVarMap(activeVars, ['color-primary', 'color-primary-base', 'primary-6']);
+  const accentRaw = readFromVarMap(activeVars, ['primary', 'color-primary', 'color-primary-base', 'primary-6']);
   const textMutedRaw = readFromVarMap(activeVars, ['color-text-3', 'text-secondary', 'color-text-2']);
   const aiBubbleRaw = readFromVarMap(activeVars, ['color-fill-2', 'fill-2', 'bg-2', 'color-bg-2']);
-  const userBubbleRaw = readFromVarMap(activeVars, ['color-primary-light-3', 'color-primary-light-2', 'color-primary']);
+  const userBubbleRaw = readFromVarMap(activeVars, [
+    'message-user-bg',
+    'color-primary-light-3',
+    'color-primary-light-2',
+    'color-primary',
+  ]);
 
   return {
     appBg: normalizeColorLike(appBgRaw, modeFallback.appBg),
@@ -146,27 +155,26 @@ const extractThemePreviewPalette = (css: string, mode: 'light' | 'dark'): ThemeP
 
 const ThemeLayoutPreview: React.FC<{ palette: ThemePreviewPalette }> = ({ palette }) => {
   return (
-    <div className='absolute inset-0 pointer-events-none'>
+    <div className='absolute inset-0 pointer-events-none' aria-hidden='true'>
       <div className='absolute inset-0' style={{ background: palette.appBg }} />
       <div
         className='absolute start-8px end-8px top-8px bottom-8px rounded-8px overflow-hidden border border-solid'
         style={{ borderColor: palette.border, background: palette.mainBg }}
       >
         <div
-          className='h-14px border-b border-solid flex items-center px-6px gap-4px'
+          className='h-20px border-b border-solid flex items-center px-6px gap-4px'
           style={{ borderColor: palette.border, background: palette.headerBg }}
         >
           <span className='block w-5px h-5px rounded-full' style={{ background: palette.accent, opacity: 0.9 }}></span>
-          <span
-            className='block w-18px h-4px rounded-full'
-            style={{ background: palette.border, opacity: 0.45 }}
-          ></span>
+          <span className='text-8px font-semibold tracking-0.2px' style={{ color: palette.textMuted }}>
+            OpenH3
+          </span>
           <span
             className='block w-12px h-4px rounded-full ms-auto'
             style={{ background: palette.border, opacity: 0.45 }}
           ></span>
         </div>
-        <div style={{ height: 'calc(100% - 14px)', display: 'flex' }}>
+        <div style={{ height: 'calc(100% - 20px)', display: 'flex' }}>
           <div
             className='border-e border-solid px-3px py-3px flex flex-col gap-3px'
             style={{ width: '23%', borderColor: palette.border, background: palette.sideBg }}
@@ -244,17 +252,25 @@ const CssThemeSettings: React.FC = () => {
   const [themes, setThemes] = useState<Theme[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingTheme, setEditingTheme] = useState<Theme | null>(null);
-  const [hoveredThemeId, setHoveredThemeId] = useState<string | null>(null);
 
   const activeThemeId = activeId ?? activeTheme?.id ?? DEFAULT_THEME_ID;
+  const themeName = useCallback(
+    (theme: Theme) =>
+      theme.id === LIGHT_THEME_ID
+        ? `OpenH3 · ${t('settings.lightMode')}`
+        : theme.id === DARK_THEME_ID
+          ? `OpenH3 · ${t('settings.darkMode')}`
+          : theme.name,
+    [t]
+  );
 
   const themePreviewPalettes = useMemo(() => {
     const map = new Map<string, ThemePreviewPalette>();
     themes.forEach((cssTheme) => {
-      map.set(cssTheme.id, extractThemePreviewPalette(cssTheme.css || '', currentTheme === 'dark' ? 'dark' : 'light'));
+      map.set(cssTheme.id, extractThemePreviewPalette(cssTheme.css || '', cssTheme.appearance));
     });
     return map;
-  }, [themes, currentTheme]);
+  }, [themes]);
 
   // Virtual "Follow System" card, third in the gallery (after Light and Dark).
   // Not part of BUILTIN_THEMES — it must never enter resolution/dedup/persistence.
@@ -326,12 +342,12 @@ const CssThemeSettings: React.FC = () => {
     async (theme: Theme) => {
       try {
         await selectTheme(theme.id);
-        Message.success(t('settings.cssTheme.applied', { name: theme.name }));
+        Message.success(t('settings.cssTheme.applied', { name: themeName(theme) }));
       } catch {
         Message.error(t('settings.cssTheme.applyFailed'));
       }
     },
-    [selectTheme, t]
+    [selectTheme, t, themeName]
   );
 
   /**
@@ -345,8 +361,7 @@ const CssThemeSettings: React.FC = () => {
   /**
    * 打开编辑主题弹窗 / Open edit theme modal
    */
-  const handleEditTheme = useCallback((theme: Theme, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleEditTheme = useCallback((theme: Theme) => {
     setEditingTheme(theme);
     setModalVisible(true);
   }, []);
@@ -450,7 +465,7 @@ const CssThemeSettings: React.FC = () => {
           short list (e.g. just Light/Dark/Follow System) stays at its natural
           size and leaves the trailing space empty instead of stretching each
           card across the whole row. */}
-      <div className='flex flex-wrap gap-12px'>
+      <div className={styles.gallery}>
         {displayThemes.map((theme) => {
           const previewPalette =
             themePreviewPalettes.get(theme.id) ||
@@ -458,7 +473,7 @@ const CssThemeSettings: React.FC = () => {
           const cardStyle = theme.cover
             ? {
                 backgroundImage: `url(${theme.cover})`,
-                backgroundSize: '100% 100%',
+                backgroundSize: 'cover',
                 backgroundPosition: 'center',
                 backgroundRepeat: 'no-repeat',
                 backgroundColor: previewPalette.appBg,
@@ -469,37 +484,38 @@ const CssThemeSettings: React.FC = () => {
               key={theme.id}
               data-testid={`theme-card-${theme.id}`}
               data-active={activeThemeId === theme.id}
-              className={`relative cursor-pointer rounded-12px overflow-hidden border-2 transition-all duration-200 h-112px w-200px flex-shrink-0 ${activeThemeId === theme.id ? 'border-[var(--color-primary)]' : 'border-transparent hover:border-border-2'}`}
-              style={cardStyle}
-              onClick={() => handleSelectTheme(theme)}
-              onMouseEnter={() => setHoveredThemeId(theme.id)}
-              onMouseLeave={() => setHoveredThemeId(null)}
+              className={styles.card}
             >
-              {theme.id === SYSTEM_THEME_ID ? (
-                <SystemThemePreview />
-              ) : (
-                !theme.cover && <ThemeLayoutPreview palette={previewPalette} />
-              )}
-
-              {/* 底部渐变遮罩与名称、编辑按钮 / Bottom gradient overlay with name and edit button */}
-              <div className='absolute bottom-0 start-0 end-0 h-1/3 bg-gradient-to-t from-black/60 to-transparent flex items-end justify-between p-8px'>
-                <span className='text-13px text-white truncate flex-1'>{theme.name}</span>
-                {/* 编辑按钮（仅用户主题） / Edit button (user themes only) */}
-                {hoveredThemeId === theme.id && !theme.builtin && (
-                  <div
-                    className='p-4px rounded-6px bg-white/20 cursor-pointer hover:bg-white/40 transition-colors ms-8px'
-                    onClick={(e) => handleEditTheme(theme, e)}
-                  >
-                    <EditTwo theme='outline' size='16' fill='#fff' />
-                  </div>
-                )}
-              </div>
-
-              {/* 选中标记 / Selected indicator */}
-              {activeThemeId === theme.id && (
-                <div className='absolute top-8px end-8px'>
-                  <CheckOne theme='filled' size='20' fill='var(--color-primary)' />
+              <Button
+                type='text'
+                className={styles.selectButton}
+                aria-label={themeName(theme)}
+                aria-pressed={activeThemeId === theme.id}
+                onClick={() => void handleSelectTheme(theme)}
+              >
+                <div className={styles.preview} style={cardStyle}>
+                  {theme.id === SYSTEM_THEME_ID ? (
+                    <SystemThemePreview />
+                  ) : (
+                    !theme.cover && <ThemeLayoutPreview palette={previewPalette} />
+                  )}
                 </div>
+                <div className={styles.caption}>
+                  <span className={styles.name}>{themeName(theme)}</span>
+                  {activeThemeId === theme.id && (
+                    <CheckOne size={16} theme='filled' fill='var(--primary)' aria-hidden='true' />
+                  )}
+                </div>
+              </Button>
+              {!theme.builtin && (
+                <Button
+                  type='text'
+                  size='mini'
+                  className={styles.editButton}
+                  aria-label={`${t('common.edit')} ${themeName(theme)}`}
+                  icon={<EditTwo size={14} fill='var(--text-secondary)' />}
+                  onClick={() => handleEditTheme(theme)}
+                />
               )}
             </div>
           );
