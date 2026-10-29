@@ -5,6 +5,8 @@ description: Install, select, repair, or generate with OpenH3's registered local
 
 # Local ComfyUI
 
+When a legacy bundled server exposes `aionui_comfy_*` instead of `openh3_comfy_*`, use the available `aionui_` alias for the same operation; do not treat the alias as a missing capability.
+
 Prefer the built-in `video-media` tools and the session's selected profile. When a required product capability is genuinely unavailable, use the authorized general-tool fallback below. Importing this Skill installs instructions only; runtime or model installation requires the user's installation request.
 
 ## Continue the existing operation

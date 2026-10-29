@@ -214,6 +214,27 @@ describe('useGuidSend', () => {
     }
   );
 
+  it('accepts legacy AionUi ComfyUI tool aliases from an existing installation', async () => {
+    const deps = createGenerationDeps();
+    checkCreationToolsMock.mockResolvedValue({
+      success: true,
+      tools: [
+        'aionui_comfy_environment',
+        'aionui_comfy_profiles',
+        'aionui_comfy_generate',
+        'aionui_comfy_job_status',
+        'aionui_comfy_cancel_job',
+      ].map((name) => ({ name })),
+    });
+
+    const { result } = renderHook(() => useGuidSend(deps));
+    await act(async () => {
+      expect(await result.current.handleSend()).toBe(true);
+    });
+
+    expect(createConversationInvokeMock).toHaveBeenCalledTimes(1);
+  });
+
   it('reports a structured MCP failure without displaying the transport payload or submitting a chat', async () => {
     const deps = createGenerationDeps();
     checkCreationToolsMock.mockRejectedValue(

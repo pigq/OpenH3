@@ -31,6 +31,18 @@ import { mutate as swrMutate } from 'swr';
 import { getConversationCreateErrorMessage } from '@/renderer/pages/conversation/utils/conversationCreateError';
 import { comfyFamilyDetails, writeComfyDraftIntent, type ComfyDraftIntent } from '../Creation/comfyDraft';
 
+/**
+ * Built-in ComfyUI MCP servers from older OpenH3/AionUi releases expose the
+ * `aionui_*` names. The bundled server registers both spellings, but an
+ * already-running or persisted legacy process can legitimately report only
+ * the old alias. Treat the aliases as the same capability so an installed
+ * model is not blocked before the agent can submit a generation job.
+ */
+const compatibleComfyToolNames = (name: string): string[] => [name, name.replace(/^openh3_/, 'aionui_')];
+
+const hasCompatibleComfyTool = (tools: Set<string>, name: string): boolean =>
+  compatibleComfyToolNames(name).some((candidate) => tools.has(candidate));
+
 export type GuidSendDeps = {
   creationModel?: CreationModel;
   creationIntent?: ComfyDraftIntent;
@@ -284,7 +296,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
                   'openh3_comfy_cancel_job',
                 ]
               : ['openh3_comfy_install'];
-          const missing = needed.filter((name) => !tools.has(name));
+          const missing = needed.filter((name) => !hasCompatibleComfyTool(tools, name));
           if (!check.success || missing.length) {
             reason = !check.success
               ? (check.code ?? 'COMFY_MCP_CONNECTION_FAILED')
