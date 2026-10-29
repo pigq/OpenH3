@@ -50,6 +50,21 @@ pub trait IMcpServerRepository: Send + Sync {
     async fn update(&self, user_id: &str, id: &str, params: UpdateMcpServerParams<'_>)
     -> Result<McpServerRow, DbError>;
 
+    /// Atomically apply a builtin migration while retiring a duplicate builtin.
+    /// Both snapshots must still match the stored user-owned rows; otherwise
+    /// return a conflict so the caller can reload instead of losing concurrent edits.
+    /// The survivor keeps its ID. The duplicate is disabled, renamed to a unique
+    /// tombstone, and soft-deleted. Disabled wins over either row or update params.
+    async fn merge_builtin_duplicate(
+        &self,
+        _user_id: &str,
+        _survivor: &McpServerRow,
+        _duplicate: &McpServerRow,
+        _params: UpdateMcpServerParams<'_>,
+    ) -> Result<McpServerRow, DbError> {
+        Err(DbError::Conflict("Atomic builtin MCP merge is not supported".into()))
+    }
+
     /// Soft-deletes an MCP server by ID. Returns `DbError::NotFound` if the ID
     /// doesn't exist.
     async fn delete(&self, user_id: &str, id: &str) -> Result<(), DbError>;

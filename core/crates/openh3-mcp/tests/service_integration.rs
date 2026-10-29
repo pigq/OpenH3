@@ -11,7 +11,7 @@ const OTHER_USERNAME: &str = "user-2";
 use openh3_api_types::{
     BatchImportMcpServersRequest, CreateMcpServerRequest, ImportMcpServerRequest, McpTransport, UpdateMcpServerRequest,
 };
-use openh3_db::{IUserRepository, SqliteMcpServerRepository, SqliteUserRepository};
+use openh3_db::{IMcpServerRepository, IUserRepository, SqliteMcpServerRepository, SqliteUserRepository};
 use openh3_mcp::{McpConfigService, McpError};
 
 async fn make_service() -> McpConfigService {
@@ -312,6 +312,394 @@ async fn edit_name_conflict() {
         .await
         .unwrap_err();
     assert!(matches!(err, McpError::InvalidEdit(_)));
+}
+
+// ---------------------------------------------------------------------------
+// Builtin upgrade migrations
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn builtin_legacy_names_migrate_in_place_preserving_enabled_and_custom_env() {
+    for (legacy, canonical) in [
+        ("aionui-video-media", "openh3-video-media"),
+        ("aionui-browser", "openh3-browser"),
+        ("aionui-image-generation", "openh3-image-generation"),
+        ("AionUi Image Generation", "openh3-image-generation"),
+        ("builtin-image-gen", "openh3-image-generation"),
+    ] {
+        let svc = make_service().await;
+        let mut request = stdio_req(legacy);
+        request.builtin = true;
+        if let McpTransport::Stdio { env, .. } = &mut request.transport {
+            env.insert("USER_CONFIG".into(), "retain-me".into());
+        }
+        let created = svc.add_server(TEST_USER_ID, request).await.unwrap();
+        svc.toggle_server(TEST_USER_ID, &created.id).await.unwrap();
+        let update = UpdateMcpServerRequest {
+            name: Some(canonical.into()),
+            description: None,
+            transport: Some(McpTransport::Stdio {
+                command: "node".into(),
+                args: vec!["/new/resources/builtin-mcp.js".into()],
+                env: HashMap::from([("MANAGED_CONFIG".into(), "current".into())]),
+            }),
+            original_json: None,
+            builtin: Some(true),
+        };
+        let updated = svc.edit_server(TEST_USER_ID, &created.id, update).await.unwrap();
+        assert_eq!(updated.id, created.id);
+        assert_eq!(updated.name, canonical);
+        assert!(updated.builtin);
+        assert!(updated.enabled);
+        let McpTransport::Stdio { command, env, .. } = &updated.transport else {
+            panic!("expected stdio")
+        };
+        assert_eq!(command, "node");
+        assert_eq!(env.get("USER_CONFIG").map(String::as_str), Some("retain-me"));
+        assert_eq!(env.get("MANAGED_CONFIG").map(String::as_str), Some("current"));
+        assert_eq!(svc.list_servers(TEST_USER_ID).await.unwrap().len(), 1);
+
+        // A repeated bootstrap must remain an ordinary idempotent edit.
+        svc.edit_server(
+            TEST_USER_ID,
+            &created.id,
+            UpdateMcpServerRequest {
+                name: Some(canonical.into()),
+                description: None,
+                transport: None,
+                original_json: None,
+                builtin: Some(true),
+            },
+        )
+        .await
+        .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn builtin_migration_requires_stored_builtin_flag_and_matching_name_pair() {
+    let svc = make_service().await;
+    for (name, builtin, target, requested_builtin) in [
+        ("aionui-video-media", false, "openh3-video-media", Some(true)),
+        ("aionui-browser", true, "openh3-video-media", Some(true)),
+        ("custom-builtin", true, "openh3-browser", Some(true)),
+        ("aionui-image-generation", true, "openh3-image-generation", Some(false)),
+    ] {
+        let mut request = stdio_req(name);
+        request.builtin = builtin;
+        let created = svc.add_server(TEST_USER_ID, request).await.unwrap();
+        let err = svc
+            .edit_server(
+                TEST_USER_ID,
+                &created.id,
+                UpdateMcpServerRequest {
+                    name: Some(target.into()),
+                    description: None,
+                    transport: None,
+                    original_json: None,
+                    builtin: requested_builtin,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, McpError::InvalidEdit(ref message) if message.contains("cannot be changed")),
+            "{err}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn builtin_migration_reports_canonical_conflict_without_changing_legacy_row() {
+    let svc = make_service().await;
+    let mut request = stdio_req("aionui-browser");
+    request.builtin = true;
+    let legacy = svc.add_server(TEST_USER_ID, request).await.unwrap();
+    svc.add_server(TEST_USER_ID, stdio_req("openh3-browser")).await.unwrap();
+    let err = svc
+        .edit_server(
+            TEST_USER_ID,
+            &legacy.id,
+            UpdateMcpServerRequest {
+                name: Some("openh3-browser".into()),
+                description: None,
+                transport: None,
+                original_json: None,
+                builtin: Some(true),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, McpError::Conflict(ref name) if name == "openh3-browser"),
+        "{err}"
+    );
+    assert_eq!(
+        svc.get_server(TEST_USER_ID, &legacy.id).await.unwrap().name,
+        "aionui-browser"
+    );
+}
+
+#[tokio::test]
+async fn builtin_migration_cannot_update_another_users_server() {
+    let (svc, other_user_id) = make_service_with_other_user().await;
+    let mut request = stdio_req("aionui-browser");
+    request.builtin = true;
+    let legacy = svc.add_server(TEST_USER_ID, request).await.unwrap();
+    let err = svc
+        .edit_server(
+            &other_user_id,
+            &legacy.id,
+            UpdateMcpServerRequest {
+                name: Some("openh3-browser".into()),
+                description: None,
+                transport: None,
+                original_json: None,
+                builtin: Some(true),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, McpError::NotFound(ref id) if id == &legacy.id), "{err}");
+}
+
+#[tokio::test]
+async fn builtin_migration_merges_duplicate_in_place_with_disabled_winning() {
+    for (legacy_enabled, canonical_enabled) in [(false, false), (false, true), (true, false), (true, true)] {
+        let db = openh3_db::init_database_memory().await.unwrap();
+        let repo = Arc::new(SqliteMcpServerRepository::new(db.pool().clone()));
+        let svc = McpConfigService::new(repo.clone());
+        let mut legacy_request = stdio_req("aionui-browser");
+        legacy_request.builtin = true;
+        if let McpTransport::Stdio { env, .. } = &mut legacy_request.transport {
+            env.extend(HashMap::from([
+                ("LEGACY_ONLY".into(), "legacy".into()),
+                ("COLLISION".into(), "legacy".into()),
+            ]));
+        }
+        let legacy = svc.add_server(TEST_USER_ID, legacy_request).await.unwrap();
+        let mut canonical_request = stdio_req("openh3-browser");
+        canonical_request.builtin = true;
+        if let McpTransport::Stdio { env, .. } = &mut canonical_request.transport {
+            env.extend(HashMap::from([
+                ("CANONICAL_ONLY".into(), "canonical".into()),
+                ("COLLISION".into(), "canonical".into()),
+            ]));
+        }
+        let canonical = svc.add_server(TEST_USER_ID, canonical_request).await.unwrap();
+        if legacy_enabled {
+            svc.toggle_server(TEST_USER_ID, &legacy.id).await.unwrap();
+        }
+        if canonical_enabled {
+            svc.toggle_server(TEST_USER_ID, &canonical.id).await.unwrap();
+        }
+        let updated = svc
+            .edit_server(
+                TEST_USER_ID,
+                &legacy.id,
+                UpdateMcpServerRequest {
+                    name: Some("openh3-browser".into()),
+                    description: None,
+                    transport: Some(McpTransport::Stdio {
+                        command: "node".into(),
+                        args: vec!["/current/builtin-mcp-browser.js".into()],
+                        env: HashMap::from([("COLLISION".into(), "request".into())]),
+                    }),
+                    original_json: None,
+                    builtin: Some(true),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(updated.id, legacy.id);
+        assert_eq!(updated.name, "openh3-browser");
+        assert_eq!(updated.enabled, legacy_enabled && canonical_enabled);
+        let McpTransport::Stdio { command, args, env } = &updated.transport else {
+            panic!("expected stdio")
+        };
+        assert_eq!(command, "node");
+        assert_eq!(args, &["/current/builtin-mcp-browser.js"]);
+        assert_eq!(env.get("LEGACY_ONLY").map(String::as_str), Some("legacy"));
+        assert_eq!(env.get("CANONICAL_ONLY").map(String::as_str), Some("canonical"));
+        assert_eq!(env.get("COLLISION").map(String::as_str), Some("request"));
+        assert_eq!(svc.list_servers(TEST_USER_ID).await.unwrap().len(), 1);
+        let retired = repo.find_by_id_any(TEST_USER_ID, &canonical.id).await.unwrap().unwrap();
+        assert!(retired.deleted_at.is_some());
+        assert!(!retired.enabled);
+        assert_ne!(retired.name, "openh3-browser");
+    }
+}
+
+#[tokio::test]
+async fn builtin_migration_merges_soft_deleted_canonical_without_releasing_unique_name() {
+    let svc = make_service().await;
+    let mut request = stdio_req("aionui-browser");
+    request.builtin = true;
+    let legacy = svc.add_server(TEST_USER_ID, request).await.unwrap();
+    svc.toggle_server(TEST_USER_ID, &legacy.id).await.unwrap();
+    let mut request = stdio_req("openh3-browser");
+    request.builtin = true;
+    let canonical = svc.add_server(TEST_USER_ID, request).await.unwrap();
+    svc.delete_server(TEST_USER_ID, &canonical.id).await.unwrap();
+    let updated = svc
+        .edit_server(
+            TEST_USER_ID,
+            &legacy.id,
+            UpdateMcpServerRequest {
+                name: Some("openh3-browser".into()),
+                description: None,
+                transport: None,
+                original_json: None,
+                builtin: Some(true),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.id, legacy.id);
+    assert_eq!(updated.name, "openh3-browser");
+    assert!(!updated.enabled);
+    assert_eq!(svc.list_servers(TEST_USER_ID).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn builtin_migration_original_json_matches_merged_transport_and_survives_edit_roundtrip() {
+    let svc = make_service().await;
+    for (name, key, value) in [
+        ("aionui-browser", "LEGACY_ONLY", "legacy"),
+        ("openh3-browser", "CANONICAL_ONLY", "canonical"),
+    ] {
+        let mut request = stdio_req(name);
+        request.builtin = true;
+        if let McpTransport::Stdio { env, .. } = &mut request.transport {
+            env.insert(key.into(), value.into());
+        }
+        svc.add_server(TEST_USER_ID, request).await.unwrap();
+    }
+    let legacy = svc
+        .list_servers(TEST_USER_ID)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|server| server.name == "aionui-browser")
+        .unwrap();
+    // The bootstrap request only knows its own env. Its editable JSON can also
+    // contain an old nested transport that the UI parser would otherwise prefer.
+    let stale_json = serde_json::json!({
+        "metadata": { "keep": true },
+        "mcpServers": {
+            "aionui-browser": {
+                "command": "node",
+                "args": ["/stale/browser.js"],
+                "env": { "REQUEST_ONLY": "request" },
+                "transport": { "type": "http", "url": "https://stale.example/mcp" },
+                "timeout": 45,
+            },
+        },
+    })
+    .to_string();
+    let updated = svc
+        .edit_server(
+            TEST_USER_ID,
+            &legacy.id,
+            UpdateMcpServerRequest {
+                name: Some("openh3-browser".into()),
+                description: Some(Some("Current browser".into())),
+                transport: Some(McpTransport::Stdio {
+                    command: "node".into(),
+                    args: vec!["/current/browser.js".into()],
+                    env: HashMap::from([("REQUEST_ONLY".into(), "request".into())]),
+                }),
+                original_json: Some(Some(stale_json)),
+                builtin: Some(true),
+            },
+        )
+        .await
+        .unwrap();
+    let original = updated.original_json.as_ref().unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(original).unwrap();
+    let config = &parsed["mcpServers"]["openh3-browser"];
+    assert!(parsed["mcpServers"].get("aionui-browser").is_none());
+    assert_eq!(parsed["metadata"]["keep"], true);
+    assert_eq!(config["timeout"], 45);
+    assert_eq!(config["description"], "Current browser");
+    assert!(config.get("transport").is_none());
+    assert_eq!(config["command"], "node");
+    assert_eq!(config["args"], serde_json::json!(["/current/browser.js"]));
+    let McpTransport::Stdio { env, .. } = &updated.transport else {
+        panic!("expected stdio")
+    };
+    assert_eq!(config["env"], serde_json::to_value(env).unwrap());
+    assert_eq!(config["env"]["CANONICAL_ONLY"], "canonical");
+    assert_eq!(config["env"]["LEGACY_ONLY"], "legacy");
+    assert_eq!(config["env"]["REQUEST_ONLY"], "request");
+
+    // Model JsonImportModal opening stored JSON and saving its parsed transport.
+    let roundtrip = svc
+        .edit_server(
+            TEST_USER_ID,
+            &updated.id,
+            UpdateMcpServerRequest {
+                name: Some("openh3-browser".into()),
+                description: None,
+                transport: Some(McpTransport::Stdio {
+                    command: config["command"].as_str().unwrap().into(),
+                    args: serde_json::from_value(config["args"].clone()).unwrap(),
+                    env: serde_json::from_value(config["env"].clone()).unwrap(),
+                }),
+                original_json: Some(Some(original.clone())),
+                builtin: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&roundtrip.transport).unwrap(),
+        serde_json::to_value(&updated.transport).unwrap()
+    );
+    assert_eq!(roundtrip.original_json, updated.original_json);
+}
+
+#[tokio::test]
+async fn builtin_rename_only_regenerates_existing_original_json_with_canonical_key() {
+    let svc = make_service().await;
+    let mut request = stdio_req("aionui-video-media");
+    request.builtin = true;
+    request.original_json = Some(
+        serde_json::json!({
+            "mcpServers": { "aionui-video-media": {
+                "command": "stale-command", "env": {}, "timeout": 30,
+            } },
+        })
+        .to_string(),
+    );
+    if let McpTransport::Stdio { env, .. } = &mut request.transport {
+        env.insert("USER_SETTING".into(), "retain".into());
+    }
+    let created = svc.add_server(TEST_USER_ID, request).await.unwrap();
+    let updated = svc
+        .edit_server(
+            TEST_USER_ID,
+            &created.id,
+            UpdateMcpServerRequest {
+                name: Some("openh3-video-media".into()),
+                description: None,
+                transport: None,
+                original_json: None,
+                builtin: Some(true),
+            },
+        )
+        .await
+        .unwrap();
+    let original: serde_json::Value = serde_json::from_str(updated.original_json.as_deref().unwrap()).unwrap();
+    let config = &original["mcpServers"]["openh3-video-media"];
+    assert!(original["mcpServers"].get("aionui-video-media").is_none());
+    assert_eq!(config["command"], "npx");
+    assert_eq!(config["env"]["USER_SETTING"], "retain");
+    assert_eq!(config["timeout"], 30);
+    assert_eq!(
+        serde_json::to_value(&updated.transport).unwrap(),
+        serde_json::to_value(&created.transport).unwrap()
+    );
 }
 
 // ---------------------------------------------------------------------------

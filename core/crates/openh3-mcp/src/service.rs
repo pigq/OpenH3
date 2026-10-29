@@ -97,8 +97,15 @@ impl McpConfigService {
             .await?
             .ok_or_else(|| McpError::NotFound(id.to_owned()))?;
 
+        let builtin_name_migration = existing_server.builtin
+            && req.builtin != Some(false)
+            && req
+                .name
+                .as_deref()
+                .is_some_and(|new_name| is_builtin_name_migration(&existing_server.name, new_name));
         if let Some(ref new_name) = req.name
             && new_name != &existing_server.name
+            && !builtin_name_migration
         {
             return Err(McpError::InvalidEdit(format!(
                 "MCP server name cannot be changed during edit; keep '{current_name}'",
@@ -106,25 +113,71 @@ impl McpConfigService {
             )));
         }
 
-        // Check name uniqueness if renaming
+        // Only product-owned canonical duplicates may be retired by the migration.
+        let mut duplicate_server = None;
         if let Some(ref new_name) = req.name
             && let Some(existing) = self.repo.find_by_name_any(user_id, new_name).await?
             && existing.id != id
         {
-            if existing.builtin {
+            if builtin_name_migration && existing.builtin {
+                duplicate_server = Some(existing);
+            } else if existing.builtin {
                 return Err(McpError::Conflict(format!(
                     "Builtin MCP server name '{new_name}' is reserved"
                 )));
+            } else {
+                return Err(McpError::Conflict(new_name.clone()));
             }
-            return Err(McpError::Conflict(new_name.clone()));
         }
 
         // Build transport fields if provided
-        let transport = req
+        let mut transport = req
             .transport
             .map(McpServerTransport::from)
             .map(normalize_transport)
             .transpose()?;
+        let mut original_json = req.original_json;
+        if builtin_name_migration {
+            let existing_transport =
+                McpServerTransport::from_db(&existing_server.transport_type, &existing_server.transport_config)?;
+            let final_transport = transport.get_or_insert_with(|| existing_transport.clone());
+            if let McpServerTransport::Stdio { env, .. } = final_transport {
+                let mut merged_env = match duplicate_server.as_ref() {
+                    Some(duplicate) => {
+                        match McpServerTransport::from_db(&duplicate.transport_type, &duplicate.transport_config)? {
+                            McpServerTransport::Stdio { env, .. } => env,
+                            _ => Default::default(),
+                        }
+                    }
+                    None => Default::default(),
+                };
+                // Preserve both records' user configuration; the requested legacy
+                // record wins over its duplicate, and current bootstrap values win last.
+                if let McpServerTransport::Stdio { env, .. } = existing_transport {
+                    merged_env.extend(env);
+                }
+                merged_env.extend(std::mem::take(env));
+                *env = merged_env;
+            }
+            // The JSON editor prefers this snapshot over transport. Regenerate
+            // from the final merged values so its next save cannot discard env.
+            let source_json = original_json
+                .as_ref()
+                .map(|value| value.as_deref())
+                .unwrap_or(existing_server.original_json.as_deref());
+            let description = req
+                .description
+                .as_ref()
+                .map(|value| value.as_deref())
+                .unwrap_or(existing_server.description.as_deref());
+            original_json = Some(Some(synchronize_builtin_original_json(
+                source_json,
+                &existing_server.name,
+                req.name.as_deref().unwrap_or(&existing_server.name),
+                description,
+                final_transport,
+            )?));
+        }
         let config_json = transport.as_ref().map(McpServerTransport::to_config_json).transpose()?;
 
         let params = UpdateMcpServerParams {
@@ -132,12 +185,26 @@ impl McpConfigService {
             description: req.description.as_ref().map(|opt| opt.as_deref()),
             transport_type: transport.as_ref().map(McpServerTransport::transport_type),
             transport_config: config_json.as_deref(),
-            original_json: req.original_json.as_ref().map(|opt| opt.as_deref()),
+            original_json: original_json.as_ref().map(|opt| opt.as_deref()),
             builtin: req.builtin,
             ..Default::default()
         };
 
-        let row = self.repo.update(user_id, id, params).await?;
+        let row = if let Some(duplicate) = duplicate_server {
+            let row = self
+                .repo
+                .merge_builtin_duplicate(user_id, &existing_server, &duplicate, params)
+                .await
+                .map_err(|error| match error {
+                    openh3_db::DbError::Conflict(message) => McpError::Conflict(message),
+                    error => McpError::Database(error),
+                })?;
+            info!(mcp_server_id = %id, retired_mcp_server_id = %duplicate.id, enabled = row.enabled,
+                "merged duplicate builtin MCP server during upgrade");
+            row
+        } else {
+            self.repo.update(user_id, id, params).await?
+        };
         let server = McpServer::from_row(row)?;
         Ok(server.into_response())
     }
@@ -289,6 +356,70 @@ impl McpConfigService {
         let server = McpServer::from_row(row)?;
         Ok(server.into_response())
     }
+}
+
+fn synchronize_builtin_original_json(
+    original: Option<&str>,
+    previous_name: &str,
+    name: &str,
+    description: Option<&str>,
+    transport: &McpServerTransport,
+) -> Result<String, McpError> {
+    let mut document = original
+        .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+    if !document.contains_key("mcpServers") {
+        document = serde_json::Map::from_iter([("mcpServers".to_owned(), document.into())]);
+    }
+    let mut servers = document
+        .remove("mcpServers")
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+    let mut config = servers
+        .remove(previous_name)
+        .or_else(|| servers.remove(name))
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+    // Remove both flattened and nested historical transport representations:
+    // the editor gives a nested transport precedence over the current fields.
+    for key in [
+        "type",
+        "transport",
+        "command",
+        "args",
+        "env",
+        "url",
+        "headers",
+        "description",
+    ] {
+        config.remove(key);
+    }
+    let transport_config: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(&transport.to_config_json()?)?;
+    config.extend(transport_config);
+    if !matches!(transport, McpServerTransport::Stdio { .. }) {
+        config.insert("type".into(), transport.transport_type().into());
+    }
+    if let Some(description) = description {
+        config.insert("description".into(), description.into());
+    }
+    servers.insert(name.into(), config.into());
+    document.insert("mcpServers".into(), servers.into());
+    Ok(serde_json::to_string_pretty(&document)?)
+}
+
+fn is_builtin_name_migration(current: &str, requested: &str) -> bool {
+    // Keep in sync with the desktop's builtin MCP historical name lists.
+    matches!(
+        (current, requested),
+        ("aionui-video-media", "openh3-video-media")
+            | ("aionui-browser", "openh3-browser")
+            | (
+                "aionui-image-generation" | "AionUi Image Generation" | "builtin-image-gen",
+                "openh3-image-generation"
+            )
+    )
 }
 
 fn normalize_transport(transport: McpServerTransport) -> Result<McpServerTransport, McpError> {

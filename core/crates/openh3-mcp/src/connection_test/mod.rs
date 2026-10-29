@@ -1,4 +1,5 @@
 mod protocol;
+mod stderr_diagnostics;
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -26,6 +27,7 @@ use protocol::{
     run_stdio_protocol, spawn_error_result, success_result, timeout_result, wait_for_endpoint,
     wait_for_jsonrpc_response,
 };
+use stderr_diagnostics::{StderrCapture, diagnostic_from_code};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -79,7 +81,11 @@ impl McpConnectionTestService {
         user_id: Option<&str>,
         runtime_scope_id: Option<&str>,
     ) -> McpConnectionTestResult {
-        debug!(name, ?transport, "starting MCP connection test");
+        debug!(
+            name,
+            transport_type = mcp_transport_type(transport),
+            "starting MCP connection test"
+        );
         let transport_type = mcp_transport_type(transport);
         let mcp_server_id = runtime_scope_id.unwrap_or(name);
         log_mcp_transport_start(mcp_server_id, transport_type);
@@ -135,7 +141,7 @@ impl McpConnectionTestService {
             .envs(env.iter())
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null());
+            .stderr(std::process::Stdio::piped());
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,
@@ -144,13 +150,26 @@ impl McpConnectionTestService {
 
         let stdin = child.stdin.take().expect("stdin was piped");
         let stdout = child.stdout.take().expect("stdout was piped");
-        let result = match tokio::time::timeout(self.timeout, run_stdio_protocol(stdin, stdout)).await {
+        let mut stderr = child.stderr.take().expect("stderr was piped");
+        let mut captured = StderrCapture::default();
+        let protocol = tokio::time::timeout(self.timeout, run_stdio_protocol(stdin, stdout));
+        tokio::pin!(protocol);
+        // Poll the protocol and stderr together, without creating a detached reader task.
+        let outcome = tokio::select! {
+            result = &mut protocol => result,
+            () = captured.drain(&mut stderr) => protocol.await,
+        };
+        let mut result = match outcome {
             Ok(r) => r,
             Err(_) => timeout_result(self.timeout),
         };
         if let Err(error) = kill_process_tree(&mut child).await {
             warn!(%error, "failed to clean up MCP stdio connection test process tree");
         }
+        // Descendants may hold the pipe open even after the direct child exits.
+        let _ = tokio::time::timeout(Duration::from_millis(200), captured.drain(&mut stderr)).await;
+        let exit_code = child.try_wait().ok().flatten().and_then(|status| status.code());
+        captured.enrich_failure(&mut result, exit_code);
         result
     }
 
@@ -508,6 +527,44 @@ fn log_mcp_transport_result(mcp_server_id: &str, transport_type: &str, result: &
     let status = if result.success { "success" } else { "error" };
     let tool_count = result.tools.as_ref().map_or(0, Vec::len);
     let error_class = result.code.map(classify_mcp_error_code).unwrap_or("none");
+    let error_code = result.code.map(McpConnectionTestErrorCode::as_str).unwrap_or("none");
+    let details = result.details.as_ref();
+    let stage = details
+        .and_then(|details| details.get("stage"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|stage| {
+            matches!(
+                *stage,
+                "initialize_send"
+                    | "initialize_response"
+                    | "initialized_send"
+                    | "tools_list_send"
+                    | "tools_list_response"
+                    | "endpoint"
+            )
+        })
+        .unwrap_or("none");
+    let diagnostic = details
+        .and_then(|details| details.get("stderr_diagnostic"))
+        .and_then(serde_json::Value::as_str)
+        .and_then(diagnostic_from_code);
+    let stderr_diagnostic = diagnostic.map(|diagnostic| diagnostic.code).unwrap_or("none");
+    let error_message = diagnostic
+        .map(|diagnostic| diagnostic.message)
+        .unwrap_or_else(|| match result.code {
+            Some(McpConnectionTestErrorCode::CommandNotFound) => "MCP executable was not found",
+            Some(McpConnectionTestErrorCode::CommandPermissionDenied) => "MCP executable permission was denied",
+            Some(McpConnectionTestErrorCode::CommandStartFailed) => "MCP server could not start",
+            Some(McpConnectionTestErrorCode::Timeout) => "MCP connection test timed out",
+            Some(McpConnectionTestErrorCode::ProtocolError) => "MCP protocol exchange did not complete",
+            Some(McpConnectionTestErrorCode::RpcError) => "MCP server returned a JSON-RPC error",
+            Some(McpConnectionTestErrorCode::ConnectionFailed) => "MCP server could not be reached",
+            Some(McpConnectionTestErrorCode::HttpError) => "MCP server returned an HTTP error",
+            None => "none",
+        });
+    let exit_code = details
+        .and_then(|details| details.get("exit_code"))
+        .and_then(serde_json::Value::as_i64);
     warn!(
         target: "aionui_feedback_diagnostics",
         diagnostic_event = "feedback.runtime.mcp_transport_result",
@@ -515,6 +572,11 @@ fn log_mcp_transport_result(mcp_server_id: &str, transport_type: &str, result: &
         transport_type = %transport_type,
         status = %status,
         error_class = %error_class,
+        error_code = %error_code,
+        stage = %stage,
+        stderr_diagnostic = %stderr_diagnostic,
+        error_message = %error_message,
+        exit_code,
         tool_count,
         "feedback.runtime.mcp_transport_result"
     );
@@ -525,9 +587,10 @@ fn classify_mcp_error_code(code: McpConnectionTestErrorCode) -> &'static str {
         McpConnectionTestErrorCode::CommandNotFound => "command_not_found",
         McpConnectionTestErrorCode::CommandPermissionDenied => "permission_denied",
         McpConnectionTestErrorCode::Timeout => "timeout",
-        McpConnectionTestErrorCode::ProtocolError | McpConnectionTestErrorCode::RpcError => "schema_error",
+        McpConnectionTestErrorCode::ProtocolError => "protocol_error",
+        McpConnectionTestErrorCode::RpcError => "rpc_error",
         McpConnectionTestErrorCode::ConnectionFailed | McpConnectionTestErrorCode::HttpError => "network",
-        McpConnectionTestErrorCode::CommandStartFailed => "unknown",
+        McpConnectionTestErrorCode::CommandStartFailed => "process_start",
     }
 }
 
@@ -662,6 +725,50 @@ mod tests {
         assert!(captured.contains("tool_count=0"), "{captured}");
         assert!(!captured.contains("secret-command"), "{captured}");
         assert!(!captured.contains("token abc"), "{captured}");
+    }
+
+    #[test]
+    fn mcp_transport_failure_logs_safe_code_stage_and_diagnostic() {
+        let result = protocol::error_result(
+            McpConnectionTestErrorCode::CommandStartFailed,
+            "do not log: secret-command --token private-value".into(),
+            Some(serde_json::json!({
+                "stage": "initialize_response",
+                "stderr_diagnostic": "browser_bridge_unavailable",
+                "exit_code": 17,
+                "stderr": "private-value",
+            })),
+        );
+        let captured = capture_logs(Level::INFO, || log_mcp_transport_result("server-1", "stdio", &result));
+        assert!(captured.contains("error_code=MCP_COMMAND_START_FAILED"), "{captured}");
+        assert!(captured.contains("stage=initialize_response"), "{captured}");
+        assert!(
+            captured.contains("stderr_diagnostic=browser_bridge_unavailable"),
+            "{captured}"
+        );
+        assert!(captured.contains("browser bridge"), "{captured}");
+        assert!(captured.contains("exit_code=17"), "{captured}");
+        assert!(!captured.contains("private-value"), "{captured}");
+        assert!(!captured.contains("secret-command"), "{captured}");
+        assert_eq!(
+            classify_mcp_error_code(McpConnectionTestErrorCode::ProtocolError),
+            "protocol_error"
+        );
+        assert_eq!(
+            classify_mcp_error_code(McpConnectionTestErrorCode::RpcError),
+            "rpc_error"
+        );
+    }
+
+    #[test]
+    fn mcp_transport_failure_logs_reject_untrusted_diagnostic_fields() {
+        let result = protocol::error_result(
+            McpConnectionTestErrorCode::ProtocolError,
+            "private-value".into(),
+            Some(serde_json::json!({ "stage": "private-value", "stderr_diagnostic": "private-value" })),
+        );
+        let captured = capture_logs(Level::INFO, || log_mcp_transport_result("server-1", "stdio", &result));
+        assert!(!captured.contains("private-value"), "{captured}");
     }
 
     #[cfg(unix)]

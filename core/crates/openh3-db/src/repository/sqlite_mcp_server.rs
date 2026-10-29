@@ -196,6 +196,84 @@ impl IMcpServerRepository for SqliteMcpServerRepository {
         Ok(merged)
     }
 
+    async fn merge_builtin_duplicate(
+        &self,
+        user_id: &str,
+        survivor: &McpServerRow,
+        duplicate: &McpServerRow,
+        params: UpdateMcpServerParams<'_>,
+    ) -> Result<McpServerRow, DbError> {
+        let mut tx = self.pool.begin().await?;
+        let mut rows = Vec::with_capacity(2);
+        for expected in [survivor, duplicate] {
+            let stored = sqlx::query_as::<_, McpServerRow>("SELECT * FROM mcp_servers WHERE user_id = ? AND id = ?")
+                .bind(user_id)
+                .bind(&expected.id)
+                .fetch_optional(&mut *tx)
+                .await?
+                .ok_or_else(|| DbError::NotFound(format!("MCP server '{}' not found", expected.id)))?;
+            if !snapshot_matches(&stored, expected) {
+                return Err(DbError::Conflict(
+                    "MCP server changed during builtin migration; reload and retry".into(),
+                ));
+            }
+            rows.push(stored);
+        }
+        let duplicate = rows.pop().expect("duplicate was loaded");
+        let survivor = rows.pop().expect("survivor was loaded");
+        if survivor.id == duplicate.id
+            || !survivor.builtin
+            || !duplicate.builtin
+            || survivor.deleted_at.is_some()
+            || params.name != Some(duplicate.name.as_str())
+            || params.builtin == Some(false)
+            || params.deleted_at.flatten().is_some()
+        {
+            return Err(DbError::Conflict(
+                "Only distinct builtin MCP records can be merged".into(),
+            ));
+        }
+        let enabled = survivor.enabled && duplicate.enabled && params.enabled.unwrap_or(true);
+        let mut merged = merge_update(survivor, params);
+        merged.enabled = enabled;
+        let now = merged.updated_at;
+        // Soft deletion alone cannot free UNIQUE(user_id, name). Keep the row/ID
+        // for historical references, but reserve a unique tombstone name instead.
+        let tombstone = format!("__openh3_merged__{}", duplicate.id);
+        sqlx::query(
+            "UPDATE mcp_servers SET name = ?, enabled = 0, deleted_at = COALESCE(deleted_at, ?), \
+            updated_at = ? WHERE user_id = ? AND id = ?",
+        )
+        .bind(&tombstone)
+        .bind(now)
+        .bind(now)
+        .bind(user_id)
+        .bind(&duplicate.id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE mcp_servers SET name = ?, description = ?, enabled = ?, transport_type = ?, \
+            transport_config = ?, tools = ?, original_json = ?, builtin = ?, deleted_at = ?, updated_at = ? \
+            WHERE user_id = ? AND id = ?",
+        )
+        .bind(&merged.name)
+        .bind(&merged.description)
+        .bind(merged.enabled)
+        .bind(&merged.transport_type)
+        .bind(&merged.transport_config)
+        .bind(&merged.tools)
+        .bind(&merged.original_json)
+        .bind(merged.builtin)
+        .bind(merged.deleted_at)
+        .bind(merged.updated_at)
+        .bind(user_id)
+        .bind(&merged.id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(merged)
+    }
+
     async fn delete(&self, user_id: &str, id: &str) -> Result<(), DbError> {
         let now = openh3_common::now_ms();
         let result = sqlx::query(
@@ -322,6 +400,24 @@ fn merge_update(existing: McpServerRow, params: UpdateMcpServerParams<'_>) -> Mc
         created_at: existing.created_at,
         updated_at: now,
     }
+}
+
+fn snapshot_matches(stored: &McpServerRow, expected: &McpServerRow) -> bool {
+    stored.id == expected.id
+        && stored.user_id == expected.user_id
+        && stored.name == expected.name
+        && stored.description == expected.description
+        && stored.enabled == expected.enabled
+        && stored.transport_type == expected.transport_type
+        && stored.transport_config == expected.transport_config
+        && stored.tools == expected.tools
+        && stored.original_json == expected.original_json
+        && stored.builtin == expected.builtin
+        && stored.deleted_at == expected.deleted_at
+        && stored.created_at == expected.created_at
+        && stored.updated_at == expected.updated_at
+        && stored.last_test_status == expected.last_test_status
+        && stored.last_connected == expected.last_connected
 }
 
 fn is_unique_violation(err: &dyn sqlx::error::DatabaseError) -> bool {
@@ -696,5 +792,162 @@ mod tests {
         repo.delete(USER_B, &server_b.id).await.unwrap();
         assert_eq!(repo.list(USER_A).await.unwrap().len(), 1);
         assert!(repo.list(USER_B).await.unwrap().is_empty());
+    }
+
+    async fn builtin_pair(repo: &SqliteMcpServerRepository) -> (McpServerRow, McpServerRow) {
+        let legacy = repo
+            .create(CreateMcpServerParams {
+                name: "aionui-browser",
+                builtin: true,
+                enabled: true,
+                ..stdio_params()
+            })
+            .await
+            .unwrap();
+        let canonical = repo
+            .create(CreateMcpServerParams {
+                name: "openh3-browser",
+                builtin: true,
+                ..stdio_params()
+            })
+            .await
+            .unwrap();
+        (legacy, canonical)
+    }
+
+    #[tokio::test]
+    async fn builtin_merge_keeps_survivor_and_tombstones_duplicate() {
+        let (repo, _db) = setup().await;
+        let (legacy, canonical) = builtin_pair(&repo).await;
+        let merged = repo
+            .merge_builtin_duplicate(
+                USER_A,
+                &legacy,
+                &canonical,
+                UpdateMcpServerParams {
+                    name: Some("openh3-browser"),
+                    enabled: Some(true),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(merged.id, legacy.id);
+        assert_eq!(merged.name, "openh3-browser");
+        assert!(!merged.enabled);
+        assert_eq!(repo.list(USER_A).await.unwrap().len(), 1);
+        let retired = repo.find_by_id_any(USER_A, &canonical.id).await.unwrap().unwrap();
+        assert!(!retired.enabled);
+        assert!(retired.deleted_at.is_some());
+        assert_ne!(retired.name, canonical.name);
+    }
+
+    #[tokio::test]
+    async fn builtin_merge_rolls_back_retirement_if_survivor_write_fails() {
+        let (repo, db) = setup().await;
+        let (legacy, canonical) = builtin_pair(&repo).await;
+        sqlx::query(
+            "CREATE TRIGGER reject_builtin_rename BEFORE UPDATE OF name ON mcp_servers \
+            WHEN OLD.name = 'aionui-browser' BEGIN SELECT RAISE(ABORT, 'fixture survivor write failure'); END",
+        )
+        .execute(db.pool())
+        .await
+        .unwrap();
+        let error = repo
+            .merge_builtin_duplicate(
+                USER_A,
+                &legacy,
+                &canonical,
+                UpdateMcpServerParams {
+                    name: Some("openh3-browser"),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("fixture survivor write failure"), "{error}");
+        assert_eq!(repo.list(USER_A).await.unwrap().len(), 2);
+        assert_eq!(
+            repo.find_by_id(USER_A, &legacy.id).await.unwrap().unwrap().name,
+            legacy.name
+        );
+        assert_eq!(
+            repo.find_by_id(USER_A, &canonical.id).await.unwrap().unwrap().name,
+            canonical.name
+        );
+    }
+
+    #[tokio::test]
+    async fn builtin_merge_rejects_foreign_user_and_stale_snapshots() {
+        let (repo, _db) = setup().await;
+        let (legacy, canonical) = builtin_pair(&repo).await;
+        let error = repo
+            .merge_builtin_duplicate(
+                USER_B,
+                &legacy,
+                &canonical,
+                UpdateMcpServerParams {
+                    name: Some("openh3-browser"),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(error, DbError::NotFound(_)), "{error}");
+        repo.update(
+            USER_A,
+            &canonical.id,
+            UpdateMcpServerParams {
+                enabled: Some(true),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let error = repo
+            .merge_builtin_duplicate(
+                USER_A,
+                &legacy,
+                &canonical,
+                UpdateMcpServerParams {
+                    name: Some("openh3-browser"),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(error, DbError::Conflict(_)), "{error}");
+        assert_eq!(repo.list(USER_A).await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn builtin_merge_rejects_user_owned_canonical() {
+        let (repo, _db) = setup().await;
+        let (legacy, mut canonical) = builtin_pair(&repo).await;
+        canonical = repo
+            .update(
+                USER_A,
+                &canonical.id,
+                UpdateMcpServerParams {
+                    builtin: Some(false),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let error = repo
+            .merge_builtin_duplicate(
+                USER_A,
+                &legacy,
+                &canonical,
+                UpdateMcpServerParams {
+                    name: Some("openh3-browser"),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(error, DbError::Conflict(_)), "{error}");
+        assert_eq!(repo.list(USER_A).await.unwrap().len(), 2);
     }
 }
