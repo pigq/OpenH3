@@ -4,18 +4,21 @@ import { z } from 'zod';
 
 type Reply = { isError?: boolean; content: Array<{ type: string; text: string }> };
 type RegisteredTool = { schema: z.ZodRawShape; callback: (input: Record<string, unknown>) => Promise<Reply> };
-const { registered, fetchMock, cloudMock } = vi.hoisted(() => ({
+const { registered, fetchMock, cloudMock, connectMock, exitMock } = vi.hoisted(() => ({
   registered: new Map<string, RegisteredTool>(),
   fetchMock: vi.fn(),
   cloudMock: vi.fn(),
+  connectMock: vi.fn(),
+  exitMock: vi.fn(),
 }));
 vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => ({
   McpServer: class {
     tool(name: string, _description: string, schema: z.ZodRawShape, callback: RegisteredTool['callback']) {
+      if (registered.has(name)) throw new Error(`Tool ${name} is already registered`);
       registered.set(name, { schema, callback });
     }
     connect() {
-      return Promise.resolve();
+      return connectMock();
     }
   },
 }));
@@ -59,6 +62,10 @@ beforeEach(async () => {
   fetchMock.mockReset();
   cloudMock.mockReset();
   cloudMock.mockResolvedValue({ success: true, text: 'Cloud image ready' });
+  connectMock.mockReset().mockResolvedValue(undefined);
+  exitMock.mockReset();
+  vi.spyOn(process, 'exit').mockImplementation(exitMock as never);
+  vi.spyOn(console, 'error').mockImplementation(() => {});
   vi.stubGlobal('fetch', fetchMock);
   vi.stubEnv('AIONUI_CREATION_REQUEST_ID', requestId);
   vi.stubEnv('AIONUI_CREATION_SOURCE', 'local');
@@ -70,11 +77,21 @@ beforeEach(async () => {
   await import('@/process/resources/builtinMcp/imageGenServer');
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
 
 describe('local image tool routing', () => {
+  it('starts the MCP transport with each product tool name registered exactly once', () => {
+    expect([...registered.keys()]).toEqual(['openh3_image_generation', 'aionui_image_generation']);
+    expect(registered.get('openh3_image_generation')?.callback).toBe(
+      registered.get('aionui_image_generation')?.callback
+    );
+    expect(connectMock).toHaveBeenCalledOnce();
+    expect(exitMock).not.toHaveBeenCalled();
+  });
+
   it('uses current service selection instead of stale environment and returns a generic image job', async () => {
     vi.stubEnv('AIONUI_CREATION_SOURCE', 'cloud');
     vi.stubEnv('AIONUI_CREATION_KIND', 'video');
@@ -93,18 +110,41 @@ describe('local image tool routing', () => {
     expect(cloudMock).not.toHaveBeenCalled();
   });
 
-  it('requires a verified selected profile rather than choosing a different available image model', async () => {
+  it.each(['downloaded', 'loadable', 'invalid'])(
+    'delegates the selected %s profile to backend validation without switching models or marking it verified',
+    async (state) => {
+      const selected = { ...profile, state };
+      respond({
+        ...localSelection(),
+        profiles: [selected, { id: 'other-profile', state: 'verified', kind: 'image' }],
+      });
+      const job = { id: 'validation-job', status: 'queued', profileId: profile.id, kind: 'image', artifacts: [] };
+      respond(job);
+
+      const reply = await invoke({ prompt: 'A red sphere' });
+
+      expect(reply.isError).not.toBe(true);
+      expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+        profileId: profile.id,
+        requestId,
+        input: { prompt: 'A red sphere' },
+      });
+      expect(selected.state).toBe(state);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(cloudMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it('surfaces backend profile validation failures without switching models or using cloud', async () => {
     respond({
       ...localSelection(),
-      profiles: [
-        { ...profile, state: 'loadable' },
-        { id: 'other-profile', state: 'verified', kind: 'image' },
-      ],
+      profiles: [{ ...profile, state: 'downloaded' }],
     });
+    respond({ error: 'COMFY_PROFILE_FILES_MISSING' }, 400);
     const reply = await invoke({ prompt: 'A red sphere' });
     expect(reply.isError).toBe(true);
-    expect(reply.content[0].text).toContain('COMFY_PROFILE_NOT_VERIFIED');
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(reply.content[0].text).toContain('COMFY_PROFILE_FILES_MISSING');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(cloudMock).not.toHaveBeenCalled();
   });
 

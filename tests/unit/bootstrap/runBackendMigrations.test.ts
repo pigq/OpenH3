@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { IMAGE_GEN_ENV_KEYS } from '@/common/config/imageGenerationMcpEnv';
+import { BUILTIN_BROWSER_MCP_NAME } from '@/common/config/constants';
 import {
   BUILTIN_IMAGE_GEN_NAME,
   BUILTIN_VIDEO_MEDIA_NAME,
@@ -123,6 +124,45 @@ const configFile = {
   set: configFileSetMock,
 };
 
+const browserServer = (overrides: Partial<IMcpServer> = {}): IMcpServer => ({
+  ...imageServer(),
+  id: 'legacy-browser-id',
+  name: 'aionui-browser',
+  enabled: false,
+  transport: {
+    type: 'stdio',
+    command: 'node',
+    args: ['D:/old-install/out/main/builtin-mcp-browser.js'],
+    env: { CUSTOM_BROWSER_SETTING: 'preserve' },
+  },
+  original_json: '{}',
+  ...overrides,
+});
+
+function useServerInventory(initial: IMcpServer[]): IMcpServer[] {
+  const inventory = structuredClone(initial);
+  listServersMock.mockImplementation(async () => structuredClone(inventory));
+  batchImportServersMock.mockImplementation(async ({ servers }: { servers: IMcpServer[] }) => {
+    for (const server of servers) {
+      if (inventory.some((existing) => existing.name === server.name)) throw new Error('Duplicate MCP server name');
+      inventory.push({ ...server, id: `imported-${server.name}`, created_at: 2, updated_at: 2 });
+    }
+    return servers;
+  });
+  updateServerMock.mockImplementation(async ({ id, data }: { id: string; data: Partial<IMcpServer> }) => {
+    const server = inventory.find((candidate) => candidate.id === id)!;
+    const conflict = inventory.find((candidate) => candidate.id !== id && candidate.name === data.name);
+    if (conflict) {
+      // The backend owns controlled built-in alias consolidation; custom rows remain reserved.
+      if (!server.builtin || !conflict.builtin) throw new Error('Duplicate MCP server name');
+      inventory.splice(inventory.indexOf(conflict), 1);
+    }
+    Object.assign(server, data);
+    return structuredClone(server);
+  });
+  return inventory;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   configFileGetMock.mockResolvedValue(undefined);
@@ -214,6 +254,114 @@ describe('built-in ComfyUI tool upgrades', () => {
       });
     }
   );
+});
+
+describe('built-in browser upgrades', () => {
+  it('renames the legacy browser in place without importing a conflicting canonical row and is idempotent', async () => {
+    const legacy = browserServer();
+    const inventory = useServerInventory([imageServer(), legacy]);
+
+    await runBackendMigrations(configFile as never);
+
+    expect(inventory.filter((server) => server.name.includes('browser'))).toEqual([
+      expect.objectContaining({ id: legacy.id, name: BUILTIN_BROWSER_MCP_NAME, enabled: false }),
+    ]);
+    expect(batchImportServersMock.mock.calls.flatMap(([request]) => request.servers)).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: BUILTIN_BROWSER_MCP_NAME })])
+    );
+    const browser = inventory.find((server) => server.id === legacy.id)!;
+    expect(browser.transport).toEqual({
+      type: 'stdio',
+      command: 'node',
+      args: ['/mock/builtin-mcp-browser.js'],
+      env: { CUSTOM_BROWSER_SETTING: 'preserve' },
+    });
+    const updateCount = updateServerMock.mock.calls.length;
+    const importCount = batchImportServersMock.mock.calls.length;
+
+    await runBackendMigrations(configFile as never);
+
+    expect(updateServerMock).toHaveBeenCalledTimes(updateCount);
+    expect(batchImportServersMock).toHaveBeenCalledTimes(importCount);
+  });
+
+  it('consolidates an already duplicated built-in browser through the legacy ID regardless of list order', async () => {
+    const legacy = browserServer();
+    const inventory = useServerInventory([
+      imageServer(),
+      browserServer({ id: 'new-browser-id', name: BUILTIN_BROWSER_MCP_NAME, enabled: true }),
+      legacy,
+    ]);
+
+    await runBackendMigrations(configFile as never);
+
+    expect(inventory.filter((server) => server.name.includes('browser'))).toEqual([
+      expect.objectContaining({ id: legacy.id, name: BUILTIN_BROWSER_MCP_NAME, enabled: false }),
+    ]);
+    expect(updateServerMock).toHaveBeenCalledWith({
+      id: legacy.id,
+      data: expect.objectContaining({ name: BUILTIN_BROWSER_MCP_NAME }),
+    });
+  });
+
+  it('preserves a user custom service using a historical browser name', async () => {
+    const custom = browserServer({ builtin: false, transport: { type: 'http', url: 'https://custom.test/mcp' } });
+    const inventory = useServerInventory([imageServer(), custom]);
+
+    await runBackendMigrations(configFile as never);
+
+    expect(inventory.find((server) => server.id === custom.id)).toEqual(custom);
+    expect(updateServerMock.mock.calls.some(([request]) => request.id === custom.id)).toBe(false);
+  });
+
+  it('leaves both records intact when a custom service owns the canonical browser name', async () => {
+    const custom = browserServer({
+      id: 'custom-browser-id',
+      name: BUILTIN_BROWSER_MCP_NAME,
+      builtin: false,
+      transport: { type: 'http', url: 'https://custom.test/mcp' },
+    });
+    const legacy = browserServer();
+    const inventory = useServerInventory([imageServer(), custom, legacy]);
+
+    await runBackendMigrations(configFile as never);
+
+    expect(inventory.find((server) => server.id === custom.id)).toEqual(custom);
+    expect(inventory.find((server) => server.id === legacy.id)).toEqual(legacy);
+    expect(updateServerMock.mock.calls.some(([request]) => request.id === custom.id)).toBe(false);
+  });
+
+  it('repairs other built-ins even when the image update fails', async () => {
+    const media = { ...imageServer(), id: 'media-id', name: 'aionui-video-media', original_json: '{}' };
+    const inventory = useServerInventory([imageServer(), media, browserServer()]);
+    const update = updateServerMock.getMockImplementation()!;
+    updateServerMock.mockImplementation(async (request) => {
+      if (request.id === 'image-server-id') throw new Error('Image update unavailable');
+      return update(request);
+    });
+    inventory[0].original_json = '{}';
+
+    await runBackendMigrations(configFile as never);
+
+    expect(inventory.find((server) => server.id === media.id)?.name).toBe(BUILTIN_VIDEO_MEDIA_NAME);
+    expect(inventory.find((server) => server.id === 'legacy-browser-id')?.name).toBe(BUILTIN_BROWSER_MCP_NAME);
+  });
+
+  it('repairs existing browser and image entries even when a missing default cannot be imported', async () => {
+    const inventory = useServerInventory([{ ...imageServer(), original_json: '{}' }, browserServer()]);
+    batchImportServersMock.mockRejectedValue(new Error('Default import unavailable'));
+
+    await runBackendMigrations(configFile as never);
+
+    expect(inventory[0].original_json).toBe(imageServer().original_json);
+    expect(inventory.find((server) => server.id === 'legacy-browser-id')?.name).toBe(BUILTIN_BROWSER_MCP_NAME);
+    expect(batchImportServersMock.mock.calls.flatMap(([request]) => request.servers)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: BUILTIN_VIDEO_MEDIA_NAME }),
+        expect.objectContaining({ name: 'chrome-devtools' }),
+      ])
+    );
+  });
 });
 
 describe('runBackendMigrations', () => {

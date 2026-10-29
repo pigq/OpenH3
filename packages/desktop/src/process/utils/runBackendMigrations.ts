@@ -255,7 +255,11 @@ function buildDefaultMcpServers(): McpImportServer[] {
       original_json: JSON.stringify(
         {
           mcpServers: {
-            [BUILTIN_VIDEO_MEDIA_NAME]: { command: 'node', args: [getBuiltinMcpScriptPath('builtin-mcp-video-media')] },
+            [BUILTIN_VIDEO_MEDIA_NAME]: {
+              command: 'node',
+              args: [getBuiltinMcpScriptPath('builtin-mcp-video-media')],
+              env: {},
+            },
           },
         },
         null,
@@ -347,6 +351,27 @@ function buildOriginalJsonFromTransport(server: Pick<IMcpServer, 'name' | 'descr
   );
 }
 
+function findManagedBuiltinServer(
+  servers: IMcpServer[],
+  canonicalName: string,
+  matchesName: (name: string) => boolean
+): IMcpServer | undefined {
+  const managed = servers.filter((server) => server.builtin === true && matchesName(server.name));
+  // Keep the pre-upgrade ID when a failed upgrade has already inserted the new name.
+  // The backend consolidates controlled built-in aliases during the in-place rename.
+  return managed.find((server) => server.name !== canonicalName) || managed[0];
+}
+
+async function runBuiltinMcpStep(name: string, run: () => Promise<void>): Promise<boolean> {
+  try {
+    await run();
+    return true;
+  } catch (error) {
+    console.warn('[Migration] Built-in MCP migration failed: %s', name, error);
+    return false;
+  }
+}
+
 async function ensureBootstrapMcpServersInDb(configFile: ConfigFile): Promise<void> {
   const [backendPrefs, fileImageConfig, providers] = await Promise.all([
     fetchBackendClientPreferences(),
@@ -355,9 +380,9 @@ async function ensureBootstrapMcpServersInDb(configFile: ConfigFile): Promise<vo
   ]);
   const imageConfig = resolveImageGenerationMigrationConfig(backendPrefs, fileImageConfig);
   const imageConfigSource = resolveImageGenerationMigrationConfigSource(backendPrefs, fileImageConfig);
-  const existing = await mcpService.listServers.invoke();
-  const existingByName = new Map((existing ?? []).map((server) => [server.name, server]));
-  const existingImageServer = existing?.find((server) => isBuiltinImageGenerationName(server.name));
+  const existing = (await mcpService.listServers.invoke()) || [];
+  const existingByName = new Map(existing.map((server) => [server.name, server]));
+  const existingImageServer = findManagedBuiltinServer(existing, BUILTIN_IMAGE_GEN_NAME, isBuiltinImageGenerationName);
   const existingImageEnv =
     existingImageServer?.transport.type === 'stdio' ? existingImageServer.transport.env : undefined;
   const imageEnvResolution = resolveImageGenerationMcpEnv(imageConfig, providers, existingImageEnv);
@@ -365,125 +390,139 @@ async function ensureBootstrapMcpServersInDb(configFile: ConfigFile): Promise<vo
   const imageServer = buildBuiltinImageGenerationServer(imageEnvResolution, imageConfig);
   const defaultServers = buildDefaultMcpServers();
   const hasBuiltinServer = (server: McpImportServer) =>
-    existing?.some((candidate) =>
-      server.name === BUILTIN_IMAGE_GEN_NAME
-        ? isBuiltinImageGenerationName(candidate.name)
-        : server.name === BUILTIN_VIDEO_MEDIA_NAME
-          ? isBuiltinVideoMediaName(candidate.name)
-          : candidate.name === server.name
+    existing.some(
+      (candidate) =>
+        candidate.name === server.name ||
+        (candidate.builtin === true &&
+          (server.name === BUILTIN_IMAGE_GEN_NAME
+            ? isBuiltinImageGenerationName(candidate.name)
+            : server.name === BUILTIN_VIDEO_MEDIA_NAME
+              ? isBuiltinVideoMediaName(candidate.name)
+              : server.name === BUILTIN_BROWSER_MCP_NAME && isBuiltinBrowserMcpName(candidate.name)))
     );
   const missing = [...defaultServers, imageServer].filter((server) => !hasBuiltinServer(server));
   let imageServerUpdated = false;
 
-  if (missing.length > 0) {
-    await mcpService.batchImportServers.invoke({ servers: missing });
-  }
+  const imports = await Promise.all(
+    missing.map((server) =>
+      runBuiltinMcpStep(`import ${server.name}`, async () => {
+        await mcpService.batchImportServers.invoke({ servers: [server] });
+      })
+    )
+  );
+  const importedCount = imports.filter(Boolean).length;
 
-  const existingChromeDevtools = existingByName.get(BUILTIN_CHROME_DEVTOOLS_NAME);
-  if (
-    existingChromeDevtools &&
-    (existingChromeDevtools.builtin !== true ||
-      !existingChromeDevtools.original_json ||
-      existingChromeDevtools.original_json.trim() === '' ||
-      existingChromeDevtools.original_json.trim() === '{}')
-  ) {
-    await mcpService.updateServer.invoke({
-      id: existingChromeDevtools.id,
-      data: {
-        builtin: true,
-        original_json: buildOriginalJsonFromTransport(existingChromeDevtools),
-      },
-    });
-  }
-
-  const refreshedServers = await mcpService.listServers.invoke();
-  const chromeDevtoolsServer = refreshedServers.find((server) => server.name === BUILTIN_CHROME_DEVTOOLS_NAME);
-  await ensureBuiltinChromeDevtoolsAvailability(chromeDevtoolsServer);
-
-  if (
-    imageEnvResolution.ok === true &&
-    existingImageServer &&
-    existingImageServer.transport.type === 'stdio' &&
-    imageServer.transport.type === 'stdio'
-  ) {
-    const mergedEnv = {
-      ...removeImageGenerationEnvKeys(existingImageServer.transport.env || {}),
-      ...imageEnvResolution.env,
-    };
-    const updatedTransport = {
-      ...imageServer.transport,
-      env: mergedEnv,
-    };
-    const original_json = JSON.stringify(
-      {
-        mcpServers: {
-          [BUILTIN_IMAGE_GEN_NAME]: {
-            command: updatedTransport.command,
-            args: updatedTransport.args || [],
-            env: mergedEnv,
-          },
-        },
-      },
-      null,
-      2
-    );
-    const imageTransportChanged = !isSameStdioTransport(existingImageServer.transport, updatedTransport);
-    const imageOriginalJsonChanged = existingImageServer.original_json !== original_json;
-    const imageServerChanged = imageTransportChanged || imageOriginalJsonChanged;
-    console.info(
-      '[Migration] image MCP bootstrap decision, server id: %s, transport changed: %s, json changed: %s, will update: %s',
-      existingImageServer.id,
-      imageTransportChanged ? 'yes' : 'no',
-      imageOriginalJsonChanged ? 'yes' : 'no',
-      imageServerChanged ? 'yes' : 'no'
-    );
-    if (imageServerChanged) {
-      await mcpService.updateServer.invoke({
-        id: existingImageServer.id,
-        data: {
-          name: BUILTIN_IMAGE_GEN_NAME,
-          builtin: true,
-          transport: updatedTransport,
-          original_json,
-        },
-      });
-      imageServerUpdated = true;
-    }
-  } else if (existingImageServer && imageEnvResolution.ok === false) {
-    console.warn(
-      '[Migration] skipped image MCP env update because provider could not be resolved, server id: %s, reason: %s',
-      existingImageServer.id,
-      imageEnvResolution.reason
-    );
-  }
-
-  // Upgrade the entrypoint as well as its name. A surviving old checkout can
-  // launch successfully while exposing none of the newer ComfyUI tools.
-  const existingVideoServer = existing?.find((server) => isBuiltinVideoMediaName(server.name));
-  if (existingVideoServer) {
-    const transport: IMcpServer['transport'] = {
-      type: 'stdio',
-      command: 'node',
-      args: [getBuiltinMcpScriptPath('builtin-mcp-video-media')],
-      ...(existingVideoServer.transport.type === 'stdio' ? { env: existingVideoServer.transport.env } : {}),
-    };
-    const original_json = buildOriginalJsonFromTransport({
-      name: BUILTIN_VIDEO_MEDIA_NAME,
-      transport,
-    });
+  await runBuiltinMcpStep(BUILTIN_CHROME_DEVTOOLS_NAME, async () => {
+    const existingChromeDevtools = existingByName.get(BUILTIN_CHROME_DEVTOOLS_NAME);
     if (
-      existingVideoServer.name !== BUILTIN_VIDEO_MEDIA_NAME ||
-      existingVideoServer.builtin !== true ||
-      !isSameStdioTransport(existingVideoServer.transport, transport) ||
-      existingVideoServer.original_json !== original_json
+      existingChromeDevtools &&
+      (existingChromeDevtools.builtin !== true ||
+        !existingChromeDevtools.original_json ||
+        existingChromeDevtools.original_json.trim() === '' ||
+        existingChromeDevtools.original_json.trim() === '{}')
     ) {
       await mcpService.updateServer.invoke({
-        id: existingVideoServer.id,
-        data: { name: BUILTIN_VIDEO_MEDIA_NAME, builtin: true, transport, original_json },
+        id: existingChromeDevtools.id,
+        data: {
+          builtin: true,
+          original_json: buildOriginalJsonFromTransport(existingChromeDevtools),
+        },
       });
-      console.info('[Migration] Updated built-in media MCP entrypoint, server id: %s', existingVideoServer.id);
     }
-  }
+
+    const refreshedServers = await mcpService.listServers.invoke();
+    const chromeDevtoolsServer = refreshedServers.find((server) => server.name === BUILTIN_CHROME_DEVTOOLS_NAME);
+    await ensureBuiltinChromeDevtoolsAvailability(chromeDevtoolsServer);
+  });
+
+  await runBuiltinMcpStep(BUILTIN_IMAGE_GEN_NAME, async () => {
+    if (
+      imageEnvResolution.ok === true &&
+      existingImageServer &&
+      existingImageServer.transport.type === 'stdio' &&
+      imageServer.transport.type === 'stdio'
+    ) {
+      const mergedEnv = {
+        ...removeImageGenerationEnvKeys(existingImageServer.transport.env || {}),
+        ...imageEnvResolution.env,
+      };
+      const updatedTransport = {
+        ...imageServer.transport,
+        env: mergedEnv,
+      };
+      const original_json = JSON.stringify(
+        {
+          mcpServers: {
+            [BUILTIN_IMAGE_GEN_NAME]: {
+              command: updatedTransport.command,
+              args: updatedTransport.args || [],
+              env: mergedEnv,
+            },
+          },
+        },
+        null,
+        2
+      );
+      const imageTransportChanged = !isSameStdioTransport(existingImageServer.transport, updatedTransport);
+      const imageOriginalJsonChanged = existingImageServer.original_json !== original_json;
+      const imageServerChanged = imageTransportChanged || imageOriginalJsonChanged;
+      console.info(
+        '[Migration] image MCP bootstrap decision, server id: %s, transport changed: %s, json changed: %s, will update: %s',
+        existingImageServer.id,
+        imageTransportChanged ? 'yes' : 'no',
+        imageOriginalJsonChanged ? 'yes' : 'no',
+        imageServerChanged ? 'yes' : 'no'
+      );
+      if (imageServerChanged) {
+        await mcpService.updateServer.invoke({
+          id: existingImageServer.id,
+          data: {
+            name: BUILTIN_IMAGE_GEN_NAME,
+            builtin: true,
+            transport: updatedTransport,
+            original_json,
+          },
+        });
+        imageServerUpdated = true;
+      }
+    } else if (existingImageServer && imageEnvResolution.ok === false) {
+      console.warn(
+        '[Migration] skipped image MCP env update because provider could not be resolved, server id: %s, reason: %s',
+        existingImageServer.id,
+        imageEnvResolution.reason
+      );
+    }
+  });
+
+  await runBuiltinMcpStep(BUILTIN_VIDEO_MEDIA_NAME, async () => {
+    // Upgrade the entrypoint as well as its name. A surviving old checkout can
+    // launch successfully while exposing none of the newer ComfyUI tools.
+    const existingVideoServer = findManagedBuiltinServer(existing, BUILTIN_VIDEO_MEDIA_NAME, isBuiltinVideoMediaName);
+    if (existingVideoServer) {
+      const transport: IMcpServer['transport'] = {
+        type: 'stdio',
+        command: 'node',
+        args: [getBuiltinMcpScriptPath('builtin-mcp-video-media')],
+        ...(existingVideoServer.transport.type === 'stdio' ? { env: existingVideoServer.transport.env } : {}),
+      };
+      const original_json = buildOriginalJsonFromTransport({
+        name: BUILTIN_VIDEO_MEDIA_NAME,
+        transport,
+      });
+      if (
+        existingVideoServer.name !== BUILTIN_VIDEO_MEDIA_NAME ||
+        existingVideoServer.builtin !== true ||
+        !isSameStdioTransport(existingVideoServer.transport, transport) ||
+        existingVideoServer.original_json !== original_json
+      ) {
+        await mcpService.updateServer.invoke({
+          id: existingVideoServer.id,
+          data: { name: BUILTIN_VIDEO_MEDIA_NAME, builtin: true, transport, original_json },
+        });
+        console.info('[Migration] Updated built-in media MCP entrypoint, server id: %s', existingVideoServer.id);
+      }
+    }
+  });
 
   /**
    * 修复浏览器 MCP 记录里过期的脚本绝对路径。
@@ -500,45 +539,61 @@ async function ensureBootstrapMcpServersInDb(configFile: ConfigFile): Promise<vo
    * is decided by name, it is never re-inserted, leaving the browser tools broken with
    * no self-heal. Reconcile against the real path on every startup instead.
    */
-  const existingBrowserServer = existing.find((server) => isBuiltinBrowserMcpName(server.name));
+  const existingBrowserServer = findManagedBuiltinServer(existing, BUILTIN_BROWSER_MCP_NAME, isBuiltinBrowserMcpName);
   let browserServerUpdated = false;
-  if (existingBrowserServer) {
-    const desiredBrowserServer = buildBuiltinBrowserServer();
-    const browserTransportChanged = !isSameStdioTransport(
-      existingBrowserServer.transport,
-      desiredBrowserServer.transport
-    );
-    const browserJsonChanged = existingBrowserServer.original_json !== desiredBrowserServer.original_json;
-    if (browserTransportChanged || browserJsonChanged) {
-      console.info(
-        '[Migration] browser MCP path drifted, server id: %s, transport changed: %s, json changed: %s',
-        existingBrowserServer.id,
-        browserTransportChanged ? 'yes' : 'no',
-        browserJsonChanged ? 'yes' : 'no'
-      );
-      await mcpService.updateServer.invoke({
-        id: existingBrowserServer.id,
-        data: {
+  await runBuiltinMcpStep(BUILTIN_BROWSER_MCP_NAME, async () => {
+    if (existingBrowserServer) {
+      const desiredBrowserServer = buildBuiltinBrowserServer();
+      if (
+        desiredBrowserServer.transport.type === 'stdio' &&
+        existingBrowserServer.transport.type === 'stdio' &&
+        existingBrowserServer.transport.env
+      ) {
+        desiredBrowserServer.transport = {
+          ...desiredBrowserServer.transport,
+          env: existingBrowserServer.transport.env,
+        };
+        desiredBrowserServer.original_json = buildOriginalJsonFromTransport({
           name: BUILTIN_BROWSER_MCP_NAME,
-          builtin: true,
           transport: desiredBrowserServer.transport,
-          original_json: desiredBrowserServer.original_json,
-        },
-      });
-      browserServerUpdated = true;
-    } else if (existingBrowserServer.name !== BUILTIN_BROWSER_MCP_NAME) {
-      // Rename legacy records in place without touching enabled state or user data.
-      await mcpService.updateServer.invoke({
-        id: existingBrowserServer.id,
-        data: { name: BUILTIN_BROWSER_MCP_NAME, builtin: true },
-      });
-      browserServerUpdated = true;
+        });
+      }
+      const browserTransportChanged = !isSameStdioTransport(
+        existingBrowserServer.transport,
+        desiredBrowserServer.transport
+      );
+      const browserJsonChanged = existingBrowserServer.original_json !== desiredBrowserServer.original_json;
+      if (browserTransportChanged || browserJsonChanged) {
+        console.info(
+          '[Migration] browser MCP path drifted, server id: %s, transport changed: %s, json changed: %s',
+          existingBrowserServer.id,
+          browserTransportChanged ? 'yes' : 'no',
+          browserJsonChanged ? 'yes' : 'no'
+        );
+        await mcpService.updateServer.invoke({
+          id: existingBrowserServer.id,
+          data: {
+            name: BUILTIN_BROWSER_MCP_NAME,
+            builtin: true,
+            transport: desiredBrowserServer.transport,
+            original_json: desiredBrowserServer.original_json,
+          },
+        });
+        browserServerUpdated = true;
+      } else if (existingBrowserServer.name !== BUILTIN_BROWSER_MCP_NAME) {
+        // Rename legacy records in place without touching enabled state or user data.
+        await mcpService.updateServer.invoke({
+          id: existingBrowserServer.id,
+          data: { name: BUILTIN_BROWSER_MCP_NAME, builtin: true },
+        });
+        browserServerUpdated = true;
+      }
     }
-  }
+  });
 
   console.info(
     '[Migration] MCP bootstrap completed, imported %d missing defaults, updated image server: %s, updated browser server: %s, image config source: %s, image enabled: %s',
-    missing.length,
+    importedCount,
     imageServerUpdated ? 'yes' : 'no',
     browserServerUpdated ? 'yes' : 'no',
     imageConfigSource,

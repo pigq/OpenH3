@@ -61,7 +61,6 @@ async function localImageGeneration(
   if (!selection.profileId) throw new Error('COMFY_SELECTED_PROFILE_REQUIRED');
   const profile = profiles.find((candidate) => candidate.id === selection.profileId);
   if (!profile || profile.kind !== 'image') throw new Error('CREATION_IMAGE_NOT_SELECTED');
-  if (profile.state !== 'verified') throw new Error('COMFY_PROFILE_NOT_VERIFIED');
   if (imageUris?.some((uri) => /^https?:\/\//i.test(uri))) throw new Error('COMFY_LOCAL_IMAGE_PATH_REQUIRED');
   const input = comfyGenerationInputSchema.parse({
     prompt,
@@ -106,7 +105,7 @@ async function main() {
     registerProductTool(
       server,
       name,
-      'Generate or edit images using the user-selected source and model. For a local creation session, use its currently selected verified registered ComfyUI image profile and the comfyui-local skill; this tool queues a generic ComfyUI job and returns comfyJobId. Local inputs must be local image paths. For cloud sessions, use the configured provider. Pass all user-provided image inputs. Never silently switch source/model or install a missing local profile; prepare installation separately through openh3_comfy_install and UI consent. The client monitors queued local jobs; end your turn after submission.',
+      'Generate or edit images using the user-selected source and model. For a local creation session, use its currently selected registered ComfyUI image profile and the comfyui-local skill; the backend validates that profile before queueing a generic ComfyUI job and returning comfyJobId. Local inputs must be local image paths. For cloud sessions, use the configured provider. Pass all user-provided image inputs. Never silently switch source/model or install a missing local profile; prepare installation separately through openh3_comfy_install and UI consent. The client monitors queued local jobs; end your turn after submission.',
       {
         prompt: z
           .string()
@@ -165,7 +164,7 @@ async function main() {
             content: [
               {
                 type: 'text' as const,
-                text: 'CREATION_REQUEST_CONTEXT_MISSING: local generation requires a bound creation session and selected verified ComfyUI profile. Use the comfyui-local skill to prepare or select that profile.',
+                text: 'CREATION_REQUEST_CONTEXT_MISSING: local generation requires a bound creation session and selected registered ComfyUI profile. Use the comfyui-local skill to prepare or select that profile.',
               },
             ],
           };
@@ -209,9 +208,6 @@ async function main() {
       }
     );
 
-  registerImageGenerationTool('openh3_image_generation');
-  // Keep the old tool name available to existing skills and assistant
-  // snapshots. Both names execute the same provider-bound implementation.
   registerImageGenerationTool('openh3_image_generation');
 
   const transport = new StdioServerTransport();
