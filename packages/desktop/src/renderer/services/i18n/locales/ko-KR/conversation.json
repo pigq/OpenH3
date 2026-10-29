@@ -840,6 +840,14 @@
       "install": "모델 설치 / 복구",
       "generation": "생성 작업"
     },
+    "summaries": {
+      "checkEnvironment": "로컬 ComfyUI 환경 확인",
+      "confirmModel": "모델 구성 확인",
+      "installModel": "로컬 모델 설치",
+      "generateVideo": "동영상 생성",
+      "generateMedia": "미디어 생성",
+      "waitForGeneration": "생성 완료 대기"
+    },
     "detecting": "장치 감지 및 설치 계획 준비 중",
     "deviceInsufficient": "장치 요구 사항이 충족되지 않습니다. 아래 부족한 항목을 확인하세요.",
     "detectionIncomplete": "감지가 완료되지 않았습니다. 장치가 호환되지 않는다는 뜻은 아닙니다."

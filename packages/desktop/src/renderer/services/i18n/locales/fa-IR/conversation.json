@@ -840,6 +840,14 @@
       "install": "نصب / تعمیر مدل",
       "generation": "تولید"
     },
+    "summaries": {
+      "checkEnvironment": "بررسی محیط محلی ComfyUI",
+      "confirmModel": "تأیید پیکربندی مدل",
+      "installModel": "نصب مدل محلی",
+      "generateVideo": "تولید ویدیو",
+      "generateMedia": "تولید رسانه",
+      "waitForGeneration": "انتظار برای پایان تولید"
+    },
     "detecting": "شناسایی دستگاه و آماده‌سازی نصب",
     "deviceInsufficient": "دستگاه الزامات را برآورده نمی‌کند. موارد لازم در پایین آمده‌اند.",
     "detectionIncomplete": "شناسایی کامل نشده است. این به معنی ناسازگاری دستگاه نیست."

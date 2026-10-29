@@ -150,6 +150,83 @@ describe('unified work projection', () => {
     ).toEqual([]);
   });
 
+  it('shows an active ComfyUI tool immediately with a human task summary', () => {
+    const snapshot = projectWorkProgress([tool('generate', 'aionui_h3_generate_video', 'running')], {
+      ...runtime,
+      isProcessing: true,
+    });
+
+    expect(snapshot.tasks).toHaveLength(1);
+    expect(snapshot.tasks[0]).toMatchObject({ id: 'generate', status: 'running' });
+    expect(snapshot.tasks[0].title).toBe('');
+    expect(snapshot.tasks[0].summaryKey).toBe('generateVideo');
+  });
+
+  it('never exposes an opaque function identifier as a task title', () => {
+    const snapshot = projectWorkProgress([tool('opaque', 'vendor_internal_step_v2', 'running')], {
+      ...runtime,
+      isProcessing: true,
+    });
+
+    expect(snapshot.tasks[0]).toMatchObject({ title: '', status: 'running' });
+  });
+
+  it('uses the live plan even when it has only one in-progress step', () => {
+    const snapshot = projectWorkProgress([plan([{ content: '生成视频', status: 'in_progress' }])], {
+      ...runtime,
+      isProcessing: true,
+    });
+
+    expect(snapshot.tasks[0]).toMatchObject({ kind: 'plan', status: 'running' });
+    expect(snapshot.tasks[0].children).toEqual([expect.objectContaining({ title: '生成视频', status: 'running' })]);
+  });
+
+  it('coalesces repeated job-status polls into one checklist item', () => {
+    const messages = [
+      tool('status-1', 'aionui_h3_job_status', 'completed', { args: { jobId: 'job-1' } }),
+      tool('status-2', 'aionui_h3_job_status', 'running', { args: { jobId: 'job-1' } }),
+    ];
+
+    const tasks = projectWorkProgress(messages, { ...runtime, isProcessing: true }).tasks;
+
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({
+      id: 'generation-status:job-1',
+      summaryKey: 'waitForGeneration',
+      status: 'running',
+    });
+  });
+
+  it('keeps a structured plan as the checklist instead of adding tool calls as duplicate tasks', () => {
+    const snapshot = projectWorkProgress(
+      [
+        plan([
+          { content: '检查本地环境', status: 'completed' },
+          { content: '生成视频', status: 'in_progress' },
+        ]),
+        tool('generate', 'aionui_h3_generate_video', 'running'),
+      ],
+      { ...runtime, isProcessing: true }
+    );
+
+    expect(snapshot.tasks).toHaveLength(1);
+    expect(snapshot.tasks[0].children?.map(({ title }) => title)).toEqual(['检查本地环境', '生成视频']);
+  });
+
+  it('does not leak completed tool calls from an earlier user turn into the current checklist', () => {
+    const snapshot = projectWorkProgress(
+      [
+        tool('old', 'aionui_h3_generate_video', 'completed'),
+        { id: 'user', conversation_id: 'c1', type: 'text', position: 'right', content: { content: '新问题' } },
+        tool('current', 'aionui_h3_job_status', 'running', { args: { jobId: 'current-job' } }),
+      ],
+      { ...runtime, isProcessing: true }
+    );
+
+    expect(snapshot.tasks).toHaveLength(1);
+    expect(snapshot.tasks[0]).toMatchObject({ id: 'generation-status:current-job', status: 'running' });
+  });
+
   it('retains completed steps and marks unfinished foreground work interrupted after restart', () => {
     const snapshot = projectWorkProgress(
       [
@@ -426,6 +503,90 @@ describe('work progress right-panel integration', () => {
     expect(screen.queryByTestId('conversation-work-progress')).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('conversation.workProgress.title'));
     expect(screen.getByTestId('conversation-work-progress')).toBeVisible();
+  });
+
+  it('renders the localized task summary instead of the ComfyUI function name', () => {
+    setCurrentConversation('c1');
+    publishWorkProgress(
+      'c1',
+      projectWorkProgress([tool('generate', 'aionui_h3_generate_video', 'running')], {
+        ...runtime,
+        isProcessing: true,
+      })
+    );
+
+    render(<ConversationWorkProgress conversationId='c1' />);
+
+    expect(screen.getByText('conversation.workProgress.summaries.generateVideo')).toBeInTheDocument();
+    expect(screen.queryByText('aionui_h3_generate_video')).not.toBeInTheDocument();
+  });
+
+  it('renders plan entries as the checklist without an extra Plan row', () => {
+    setCurrentConversation('c1');
+    publishWorkProgress(
+      'c1',
+      projectWorkProgress(
+        [
+          plan([
+            { content: '检查本地环境', status: 'completed' },
+            { content: '生成视频', status: 'in_progress' },
+          ]),
+        ],
+        { ...runtime, isProcessing: true }
+      )
+    );
+
+    render(<ConversationWorkProgress conversationId='c1' />);
+
+    expect(screen.getByText('检查本地环境')).toBeInTheDocument();
+    expect(screen.getByText('生成视频')).toBeInTheDocument();
+    expect(screen.queryByText('conversation.workProgress.kinds.plan')).not.toBeInTheDocument();
+  });
+
+  it('updates completed progress live and keeps status labels out of the ordinary checklist text', () => {
+    const steps = [
+      { content: '检测设备', status: 'completed' as const },
+      { content: '下载模型', status: 'in_progress' as const },
+      { content: '验证生成', status: 'pending' as const },
+    ];
+    publishWorkProgress('c1', projectWorkProgress([plan(steps)], { ...runtime, isProcessing: true }));
+    render(<ConversationWorkProgress conversationId='c1' />);
+
+    const progress = screen.getByRole('progressbar');
+    expect(progress).toHaveAttribute('aria-valuenow', '1');
+    expect(progress).toHaveAttribute('aria-valuemax', '3');
+    expect(screen.getByRole('status')).toHaveTextContent('conversation.workProgress.statuses.running');
+    expect(screen.getByRole('list')).toHaveTextContent('下载模型');
+    expect(screen.getByRole('list')).not.toHaveTextContent('conversation.workProgress.statuses.completed');
+    expect(screen.getByRole('img', { name: 'conversation.workProgress.statuses.completed' })).toBeInTheDocument();
+    expect(document.querySelector('[aria-current="step"]')).toHaveTextContent('下载模型');
+
+    act(() =>
+      publishWorkProgress(
+        'c1',
+        projectWorkProgress([plan(steps.map(({ content }) => ({ content, status: 'completed' })))], runtime)
+      )
+    );
+    expect(progress).toHaveAttribute('aria-valuenow', '3');
+    expect(screen.getByRole('status')).toHaveTextContent('conversation.workProgress.statuses.completed');
+    expect(document.querySelector('[aria-current="step"]')).toBeNull();
+  });
+
+  it('shows waiting and error explanations while keeping recovery tied to the existing conversation', () => {
+    publishWorkProgress('c1', {
+      tasks: [{ id: 'failed-step', title: '校验模型', kind: 'task', status: 'failed', detail: 'SHA-256 mismatch' }],
+      isProcessing: false,
+      pendingConfirmations: 1,
+    });
+    render(<ConversationWorkProgress conversationId='c1' />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('conversation.workProgress.statuses.waiting');
+    expect(screen.getByText('conversation.workProgress.waitingHint')).toBeInTheDocument();
+    expect(screen.getByRole('list')).toHaveTextContent('conversation.workProgress.statuses.failed');
+    expect(screen.getByText('SHA-256 mismatch')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.workProgress.prepareResume' }));
+    expect(mocks.prefill).toHaveBeenCalledWith('c1', 'conversation.workProgress.resumePrompt');
+    expect(mocks.authorize).not.toHaveBeenCalled();
   });
 
   it('keeps the progress entry available with no plan and isolates conversation switches', () => {

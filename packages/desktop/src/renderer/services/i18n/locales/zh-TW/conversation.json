@@ -840,6 +840,14 @@
       "install": "模型安裝 / 修復",
       "generation": "生成任務"
     },
+    "summaries": {
+      "checkEnvironment": "檢查本機 ComfyUI 環境",
+      "confirmModel": "確認模型設定",
+      "installModel": "安裝本機模型",
+      "generateVideo": "產生影片",
+      "generateMedia": "產生媒體",
+      "waitForGeneration": "等待產生完成"
+    },
     "detecting": "正在偵測裝置並產生安裝計畫",
     "deviceInsufficient": "裝置條件不足，請查看下方具體缺項。",
     "detectionIncomplete": "環境偵測尚未完成，這不代表裝置不相容。"

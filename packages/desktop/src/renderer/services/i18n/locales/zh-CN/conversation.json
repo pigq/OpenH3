@@ -840,6 +840,14 @@
       "install": "模型安装 / 修复",
       "generation": "生成任务"
     },
+    "summaries": {
+      "checkEnvironment": "检查本地 ComfyUI 环境",
+      "confirmModel": "确认模型配置",
+      "installModel": "安装本地模型",
+      "generateVideo": "生成视频",
+      "generateMedia": "生成媒体",
+      "waitForGeneration": "等待生成完成"
+    },
     "detecting": "正在检测设备并生成安装计划",
     "deviceInsufficient": "设备条件不足，请查看下方具体缺项。",
     "detectionIncomplete": "环境检测尚未完成，这不代表设备不兼容。"

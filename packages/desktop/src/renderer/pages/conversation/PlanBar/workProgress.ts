@@ -9,9 +9,18 @@ import { useSyncExternalStore } from 'react';
 
 export type WorkStatus = 'pending' | 'running' | 'completed' | 'failed' | 'interrupted' | 'waiting' | 'cancelled';
 export type WorkKind = 'plan' | 'task' | 'subagent' | 'background' | 'workflow' | 'install' | 'generation';
+/** Localized summary used when an agent only reports a tool identifier. */
+export type WorkSummaryKey =
+  | 'checkEnvironment'
+  | 'confirmModel'
+  | 'installModel'
+  | 'generateVideo'
+  | 'generateMedia'
+  | 'waitForGeneration';
 export type WorkTask = {
   id: string;
   title: string;
+  summaryKey?: WorkSummaryKey;
   kind: WorkKind;
   status: WorkStatus;
   detail?: string;
@@ -97,6 +106,58 @@ function aggregateStatus(children: WorkTask[]): WorkStatus {
   return 'completed';
 }
 
+const normalizedToolName = (name: string): string =>
+  name
+    .trim()
+    .toLowerCase()
+    .replace(/^aionui_/, 'openh3_');
+
+/**
+ * Tool identifiers are useful for diagnostics but are not a user-facing plan.
+ * Keep this mapping at the projection boundary so all backends (native and ACP)
+ * get the same summaries without requiring every agent to emit a Plan event.
+ */
+function summaryKeyForTool(name: string): WorkSummaryKey | undefined {
+  const normalized = normalizedToolName(name);
+  if (/openh3_(?:comfy_)?environment$/.test(normalized)) return 'checkEnvironment';
+  if (/openh3_(?:comfy_)?profiles?$/.test(normalized) || normalized === 'openh3_comfy_revalidate')
+    return 'confirmModel';
+  if (/openh3_(?:comfy_)?install(?:_model)?$/.test(normalized) || normalized === 'openh3_h3_install_video_model')
+    return 'installModel';
+  if (
+    /openh3_(?:h3|video)_generate_video$/.test(normalized) ||
+    normalized === 'openh3_video_process' ||
+    normalized === 'openh3_comfy_generate'
+  )
+    return normalized === 'openh3_comfy_generate' ? 'generateMedia' : 'generateVideo';
+  if (/openh3_(?:h3_|video_|comfy_)?job_status$/.test(normalized)) return 'waitForGeneration';
+  if (/openh3_h3_(?:runtime|free_memory)(?:_status)?$/.test(normalized)) return 'checkEnvironment';
+  if (/openh3_h3_(?:queue|acceleration)_status$/.test(normalized)) return 'confirmModel';
+  if (normalized === 'openh3_image_generation') return 'generateMedia';
+  return undefined;
+}
+
+const looksLikeToolIdentifier = (value: string, name: string): boolean => {
+  const candidate = value.trim();
+  if (!candidate || candidate === name.trim()) return true;
+  return /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+$/i.test(candidate);
+};
+
+function resolveToolSummary(
+  name: string,
+  description: string | undefined,
+  input: Record<string, unknown>
+): Pick<WorkTask, 'title' | 'summaryKey'> {
+  const summaryKey =
+    summaryKeyForTool(name) === 'generateMedia' &&
+    (input.kind === 'video' || input.mediaType === 'video' || input.media_type === 'video')
+      ? 'generateVideo'
+      : summaryKeyForTool(name);
+  if (summaryKey) return { title: '', summaryKey };
+  const candidate = description?.trim() || text(input.description)?.trim();
+  return candidate && !looksLikeToolIdentifier(candidate, name) ? { title: candidate } : { title: '' };
+}
+
 /** A deterministic projection of existing persisted tool/plan records, never a second execution queue. */
 export function projectWorkProgress(
   messages: TMessage[],
@@ -113,7 +174,10 @@ export function projectWorkProgress(
     if (runtime.pendingConfirmations > 0) return 'waiting';
     return runtime.hydrated && !runtime.isProcessing ? 'interrupted' : value;
   };
-  if (latestPlan?.type === 'plan' && latestPlan.content.entries.length > 1) {
+  if (
+    latestPlan?.type === 'plan' &&
+    (latestPlan.content.entries.length > 1 || latestPlan.content.entries.some((entry) => entry.status !== 'completed'))
+  ) {
     const entries = latestPlan.content.entries;
     const belongsToOlderTurn = Boolean(
       latestPlan.content.turn_id && runtime.activeTurnId && latestPlan.content.turn_id !== runtime.activeTurnId
@@ -158,7 +222,11 @@ export function projectWorkProgress(
         continue;
       const children = message.content.map((entry) => ({
         id: entry.call_id,
-        title: entry.name,
+        ...(summaryKeyForTool(entry.name)
+          ? { title: '', summaryKey: summaryKeyForTool(entry.name) }
+          : !looksLikeToolIdentifier(entry.name, '')
+            ? { title: entry.name }
+            : resolveToolSummary(entry.name, entry.description, {})),
         detail: entry.description,
         kind: 'task' as const,
         status: stale(status(entry.status)),
@@ -189,15 +257,23 @@ export function projectWorkProgress(
     const name = native?.name ?? acp?.title ?? '';
     if (/TodoWrite|TaskCreate|TaskUpdate|update_plan/i.test(name)) continue;
     const input = native?.input ?? native?.args ?? acp?.rawInput ?? {};
-    const description = native?.description ?? text(input.description) ?? name;
-    const toolKind = kind(name, description, input);
-    if (toolKind === 'task' && (index <= lastUser || recentTools.length < 2)) continue;
+    const description = native?.description ?? text(input.description);
+    const toolKind = kind(name, description ?? '', input);
     const detached =
-      / · (?:bg task|subagent) /.test(description) ||
+      / · (?:bg task|subagent) /.test(description ?? '') ||
       input.run_in_background === true ||
       detachedExec(input) ||
       detachedExec(native?.args ?? {});
+    if (index <= lastUser && !detached) continue;
     const toolStatus = status(native?.status ?? acp?.status);
+    const summary = resolveToolSummary(name, description, input);
+    if ([...tasks.values()].some((task) => task.kind === 'plan') && toolKind === 'task') continue;
+    const terminal = ['completed', 'failed', 'cancelled'].includes(toolStatus);
+    const hasMeaningfulSummary = Boolean(summary.summaryKey || summary.title);
+    // A single completed ordinary tool is not a multi-step task. Known ComfyUI
+    // tools, active/failed work, and explicitly described tool sequences remain
+    // visible immediately so the panel does not wait for a second completion.
+    if (toolKind === 'task' && terminal && !hasMeaningfulSummary && recentTools.length < 2) continue;
     if (
       toolKind === 'background' &&
       !detached &&
@@ -206,9 +282,13 @@ export function projectWorkProgress(
     )
       continue;
     const id = native?.call_id ?? acp?.tool_call_id ?? message.id;
-    tasks.set(id, {
-      id,
-      title: description,
+    const trackedId =
+      summary.summaryKey === 'waitForGeneration'
+        ? `generation-status:${text(input.jobId) ?? text(input.job_id) ?? 'latest'}`
+        : id;
+    tasks.set(trackedId, {
+      id: trackedId,
+      ...summary,
       kind: toolKind,
       status: detached ? toolStatus : stale(toolStatus),
       detail: native?.error,

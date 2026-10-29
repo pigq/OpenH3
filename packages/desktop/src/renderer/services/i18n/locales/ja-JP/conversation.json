@@ -840,6 +840,14 @@
       "install": "モデルのインストール / 修復",
       "generation": "生成タスク"
     },
+    "summaries": {
+      "checkEnvironment": "ローカル ComfyUI 環境を確認",
+      "confirmModel": "モデル設定を確認",
+      "installModel": "ローカルモデルをインストール",
+      "generateVideo": "動画を生成",
+      "generateMedia": "メディアを生成",
+      "waitForGeneration": "生成完了を待機"
+    },
     "detecting": "デバイス検出とインストール準備中",
     "deviceInsufficient": "デバイス要件を満たしていません。下の不足項目を確認してください。",
     "detectionIncomplete": "検出が未完了です。デバイスの非互換を意味するものではありません。"

@@ -1,17 +1,33 @@
 import { Button } from '@arco-design/web-react';
-import { CheckOne, CloseOne, PauseOne } from '@icon-park/react';
+import { Check, CloseOne, Down, PauseOne, Time } from '@icon-park/react';
 import { requestConversationSendBoxPrefill } from '@/renderer/hooks/chat/useSendBoxDraft';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import ComfyOperationResult from '@/renderer/pages/conversation/runtime/Creation/ComfyOperationResult';
-import { useWorkProgress, type WorkTask } from './workProgress';
+import { useWorkProgress, type WorkStatus, type WorkTask } from './workProgress';
+import styles from './WorkProgress.module.css';
+
+const leafTasks = (tasks: WorkTask[]): WorkTask[] =>
+  tasks.flatMap((task) => (task.children?.length ? leafTasks(task.children) : [task]));
 
 export default function ConversationWorkProgress({ conversationId }: { conversationId: string }) {
   const { t } = useTranslation();
   const snapshot = useWorkProgress(conversationId);
   const [openedOperations, setOpenedOperations] = useState<Set<string>>(() => new Set());
-  const entries = snapshot.tasks.flatMap((task) => task.children ?? [task]);
+  const entries = leafTasks(snapshot.tasks);
+  // A plan is already a checklist. Keep the wrapper in the projection for
+  // identity/status aggregation, but render its entries directly like the
+  // sketch instead of adding an extra "Plan" row above the checklist.
+  const visibleTasks = snapshot.tasks.flatMap((task) =>
+    task.kind === 'plan' && task.children ? task.children : [task]
+  );
   const completed = entries.filter((entry) => entry.status === 'completed').length;
+  const overallStatus: WorkStatus =
+    snapshot.pendingConfirmations > 0
+      ? 'waiting'
+      : ((['failed', 'waiting', 'running', 'interrupted', 'pending', 'cancelled'] as const).find((status) =>
+          entries.some((entry) => entry.status === status)
+        ) ?? 'completed');
   const toggleOperation = (id: string) =>
     setOpenedOperations((current) => {
       const next = new Set(current);
@@ -20,40 +36,45 @@ export default function ConversationWorkProgress({ conversationId }: { conversat
       return next;
     });
   const row = (task: WorkTask): React.ReactNode => (
-    <div key={task.id} data-work-task={task.kind} data-status={task.status} className='flex flex-col gap-6px'>
-      <div className='flex items-start gap-8px text-13px'>
-        {task.status === 'completed' ? (
-          <CheckOne size={16} theme='filled' className='text-success shrink-0 mt-1px' />
-        ) : task.status === 'failed' ? (
-          <CloseOne size={16} className='text-danger shrink-0 mt-1px' />
-        ) : task.status === 'interrupted' || task.status === 'cancelled' ? (
-          <PauseOne size={16} className='text-t-secondary shrink-0 mt-1px' />
-        ) : (
-          <span
-            className={`size-14px rd-full b-2px b-solid shrink-0 mt-1px ${task.status === 'running' ? 'border-primary animate-pulse' : 'border-3'}`}
-            aria-hidden='true'
-          />
-        )}
+    <li key={task.id} data-work-task={task.kind} data-status={task.status} className={styles.task}>
+      <div className={styles.taskRow} aria-current={task.status === 'running' ? 'step' : undefined}>
+        <span
+          className={styles.statusIcon}
+          data-status={task.status}
+          role='img'
+          aria-label={t(`conversation.workProgress.statuses.${task.status}`)}
+        >
+          {task.status === 'completed' ? (
+            <Check size={12} strokeWidth={4} fill='var(--text-white)' />
+          ) : task.status === 'failed' ? (
+            <CloseOne size={18} fill='var(--danger)' />
+          ) : task.status === 'waiting' ? (
+            <Time size={18} fill='var(--warning)' />
+          ) : task.status === 'interrupted' || task.status === 'cancelled' ? (
+            <PauseOne size={18} fill='var(--text-secondary)' />
+          ) : (
+            <span className={task.status === 'running' ? styles.spinner : styles.pendingIcon} aria-hidden='true' />
+          )}
+        </span>
         <div className='min-w-0 flex-1'>
-          <div className='break-words text-t-primary'>
-            {task.title || t(`conversation.workProgress.kinds.${task.kind}`)}
+          <div className={styles.taskTitle}>
+            {task.summaryKey
+              ? t(`conversation.workProgress.summaries.${task.summaryKey}`)
+              : task.title || t(`conversation.workProgress.kinds.${task.kind}`)}
           </div>
-          <div className='text-11px text-t-secondary'>
-            {task.preparing
-              ? t('conversation.workProgress.detecting')
-              : t(`conversation.workProgress.statuses.${task.status}`)}
-          </div>
-          {task.diagnosis && (
-            <div className='text-12px text-t-secondary'>{t(`conversation.workProgress.${task.diagnosis}`)}</div>
+          {task.preparing && <div className={styles.detail}>{t('conversation.workProgress.detecting')}</div>}
+          {['failed', 'interrupted', 'waiting', 'cancelled'].includes(task.status) && (
+            <div className={styles.detail}>{t(`conversation.workProgress.statuses.${task.status}`)}</div>
           )}
-          {task.detail && (
-            <div className='text-12px text-t-secondary whitespace-pre-wrap break-words'>{task.detail}</div>
-          )}
+          {task.diagnosis && <div className={styles.detail}>{t(`conversation.workProgress.${task.diagnosis}`)}</div>}
+          {task.detail && <div className={styles.detail}>{task.detail}</div>}
           {task.operationId && (
             <Button
               size='mini'
               type='text'
+              className={styles.detailsButton}
               aria-expanded={openedOperations.has(task.operationId)}
+              icon={<Down size={12} className={openedOperations.has(task.operationId) ? styles.expanded : undefined} />}
               onClick={() => {
                 if (task.operationId) toggleOperation(task.operationId);
               }}
@@ -66,35 +87,57 @@ export default function ConversationWorkProgress({ conversationId }: { conversat
           )}
         </div>
       </div>
-      {task.children && <div className='pl-22px flex flex-col gap-10px'>{task.children.map(row)}</div>}
-    </div>
+      {!!task.children?.length && <ol className={styles.subtasks}>{task.children.map(row)}</ol>}
+    </li>
   );
   return (
-    <div data-testid='conversation-work-progress' className='h-full overflow-y-auto px-16px py-12px'>
-      <div className='flex items-center justify-between gap-8px mb-12px'>
-        <span className='text-14px font-semibold text-t-primary'>{t('conversation.workProgress.title')}</span>
-        {!!entries.length && (
-          <span className='text-12px text-t-secondary'>
-            {t('conversation.planBar.progress', { completed, total: entries.length })}
-          </span>
-        )}
-      </div>
+    <section data-testid='conversation-work-progress' className={styles.panel}>
+      <h3 className={styles.heading}>{t('conversation.workProgress.title')}</h3>
+      {!!entries.length && (
+        <div className={styles.overview}>
+          <div className={styles.summary}>
+            <span className={styles.count}>
+              {t('conversation.planBar.progress', { completed, total: entries.length })}
+            </span>
+            <span
+              role='status'
+              aria-live='polite'
+              aria-atomic='true'
+              className={styles.overallStatus}
+              data-status={overallStatus}
+            >
+              {t(`conversation.workProgress.statuses.${overallStatus}`)}
+            </span>
+          </div>
+          <div
+            className={styles.progressTrack}
+            role='progressbar'
+            aria-label={t('conversation.workProgress.title')}
+            aria-valuemin={0}
+            aria-valuemax={entries.length}
+            aria-valuenow={completed}
+            aria-valuetext={t('conversation.planBar.progress', { completed, total: entries.length })}
+          >
+            <div className={styles.progressFill} style={{ width: `${(completed / entries.length) * 100}%` }} />
+          </div>
+        </div>
+      )}
       {snapshot.pendingConfirmations > 0 && (
-        <p role='status' className='text-12px text-t-secondary'>
-          {t('conversation.workProgress.waitingHint')}
-        </p>
+        <p className={styles.waitingHint}>{t('conversation.workProgress.waitingHint')}</p>
       )}
       {!entries.length ? (
-        <div className='text-13px text-t-secondary'>{t('conversation.workProgress.empty')}</div>
+        <p className={styles.empty}>{t('conversation.workProgress.empty')}</p>
       ) : (
-        <div className='flex flex-col gap-16px'>{snapshot.tasks.map(row)}</div>
+        <ol className={styles.tasks} aria-label={t('conversation.workProgress.title')}>
+          {visibleTasks.map(row)}
+        </ol>
       )}
       {!snapshot.isProcessing &&
         snapshot.tasks.some(
           (task) => ['interrupted', 'failed'].includes(task.status) && task.kind !== 'generation' && !task.operationId
         ) && (
           <Button
-            className='mt-12px'
+            className={styles.resumeButton}
             size='small'
             onClick={() =>
               requestConversationSendBoxPrefill(conversationId, t('conversation.workProgress.resumePrompt'))
@@ -103,6 +146,6 @@ export default function ConversationWorkProgress({ conversationId }: { conversat
             {t('conversation.workProgress.prepareResume')}
           </Button>
         )}
-    </div>
+    </section>
   );
 }

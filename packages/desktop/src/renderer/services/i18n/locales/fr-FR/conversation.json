@@ -840,6 +840,14 @@
       "install": "Installation / réparation du modèle",
       "generation": "Génération"
     },
+    "summaries": {
+      "checkEnvironment": "Vérifier l’environnement ComfyUI local",
+      "confirmModel": "Confirmer la configuration du modèle",
+      "installModel": "Installer le modèle local",
+      "generateVideo": "Générer une vidéo",
+      "generateMedia": "Générer un média",
+      "waitForGeneration": "Attendre la fin de la génération"
+    },
     "detecting": "Détection du matériel et préparation de l’installation",
     "deviceInsufficient": "Le matériel ne remplit pas les conditions. Consultez les éléments manquants ci-dessous.",
     "detectionIncomplete": "La détection est incomplète. Cela ne signifie pas que le matériel est incompatible."

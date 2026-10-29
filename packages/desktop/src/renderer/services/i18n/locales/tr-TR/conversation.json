@@ -842,6 +842,14 @@
       "install": "Model kurulumu / onarımı",
       "generation": "Üretim"
     },
+    "summaries": {
+      "checkEnvironment": "Yerel ComfyUI ortamını denetle",
+      "confirmModel": "Model yapılandırmasını doğrula",
+      "installModel": "Yerel modeli yükle",
+      "generateVideo": "Video oluştur",
+      "generateMedia": "Medya oluştur",
+      "waitForGeneration": "Oluşturmanın bitmesini bekle"
+    },
     "detecting": "Cihaz algılanıyor ve kurulum hazırlanıyor",
     "deviceInsufficient": "Cihaz gereksinimleri karşılanmıyor. Eksikleri aşağıda inceleyin.",
     "detectionIncomplete": "Algılama tamamlanmadı. Bu, cihazın uyumsuz olduğu anlamına gelmez."
