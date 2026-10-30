@@ -1,19 +1,21 @@
 import React from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, waitFor } from '@testing-library/react';
 import H3ToolResults, {
   h3ToolJobIds,
   h3TurnResults,
   stripH3PlayerMarkup,
 } from '@/renderer/pages/conversation/Messages/components/H3ToolResults';
+import { resetH3JobsForTest, useH3Jobs } from '@/renderer/pages/conversation/runtime/Creation/useH3Jobs';
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 const mocks = vi.hoisted(() => ({ get: vi.fn(), close: vi.fn(), events: vi.fn(), cancel: vi.fn() }));
 vi.mock('@/common/chat/document/h3JobApi', () => ({
   h3JobApi: {
     get: mocks.get,
     events: (id: string, update: unknown) => {
-      mocks.events(id, update);
-      return { close: mocks.close };
+      const source = { close: mocks.close, onerror: undefined as (() => void) | undefined };
+      mocks.events(id, update, source);
+      return source;
     },
     cancel: mocks.cancel,
     resourceUrl: (p: string) => `http://127.0.0.1:33002${p}`,
@@ -21,6 +23,8 @@ vi.mock('@/common/chat/document/h3JobApi', () => ({
 }));
 afterEach(() => {
   cleanup();
+  resetH3JobsForTest();
+  vi.useRealTimers();
   vi.clearAllMocks();
 });
 const id = '8ca61811-cd38-4d15-b24b-44fb30175eaa';
@@ -44,6 +48,53 @@ it('deduplicates known H3 jobs and ignores malformed or unrelated tool output', 
       { type: 'tool_call', content: null },
       { type: 'tool_call', content: { name: 7, output: JSON.stringify({ id }) } },
       { type: 'tool_call', content: { name: 'aionui_h3_job_status', output: 'incomplete' } },
+    ])
+  ).toEqual([id]);
+});
+it('finds the initial generation job inside MCP text envelopes without another status request', async () => {
+  const queued = { id, status: 'queued', spec: { prompt: 'animate the photo' }, artifacts: [] };
+  const envelope = { content: [{ type: 'text', text: JSON.stringify(queued) }] };
+  const submitted = {
+    type: 'tool_call',
+    content: { name: 'aionui_h3_generate_video', status: 'completed', output: JSON.stringify(envelope) },
+  };
+  expect(h3ToolJobIds([submitted])).toEqual([id]);
+  expect(h3ToolJobIds([{ ...submitted, content: { ...submitted.content, output: envelope } }])).toEqual([id]);
+  mocks.get.mockResolvedValue(queued);
+  const view = render(<H3ToolResults messages={[submitted]} />);
+  await waitFor(() => expect(view.getByRole('status').textContent).toContain('queued'));
+  expect(mocks.events).toHaveBeenCalledOnce();
+  const update = mocks.events.mock.calls[0][1];
+  act(() => update({ ...queued, status: 'running' }));
+  expect(view.getByRole('status').textContent).toContain('running');
+  act(() =>
+    update({
+      ...queued,
+      status: 'succeeded',
+      artifacts: [{ filename: 'photo.mp4', mimeType: 'video/mp4', resourcePath: `/api/h3/jobs/${id}/artifacts/0` }],
+    })
+  );
+  expect(view.getByRole('status').textContent).toContain('succeeded');
+  expect(view.container.querySelector('video')?.src).toContain(`/api/h3/jobs/${id}/artifacts/0`);
+  expect(mocks.get).toHaveBeenCalledOnce();
+  expect(mocks.close).toHaveBeenCalledOnce();
+});
+it('ignores input identifiers and unrelated native jobs even when the input resembles an H3 result', () => {
+  const output = { id, spec: {}, status: 'queued', artifacts: [] };
+  expect(
+    h3ToolJobIds([
+      { type: 'tool_call', content: { name: 'aionui_h3_generate_video', args: output } },
+      { type: 'acp_tool_call', content: { rawInput: JSON.stringify(output) } },
+      { type: 'tool_call', content: { name: 'other', output } },
+      { type: 'tool_call', content: { name: 'aionui_h3_generate_video', output: { id: 'z'.repeat(36) } } },
+    ])
+  ).toEqual([]);
+  expect(
+    h3ToolJobIds([
+      {
+        type: 'acp_tool_call',
+        content: { update: { content: [{ type: 'text', text: JSON.stringify({ content: [output] }) }] } },
+      },
     ])
   ).toEqual([id]);
 });
@@ -121,6 +172,72 @@ it('reports unavailable status instead of silently disappearing', async () => {
   mocks.get.mockRejectedValue(new Error('offline'));
   const view = render(<H3ToolResults messages={[message]} />);
   await waitFor(() => expect(view.getByRole('status').textContent).toContain('disconnected'));
+});
+
+it('shares the live job connection between result cards and keeps it until the final observer leaves', async () => {
+  mocks.get.mockResolvedValue({ id, status: 'running', artifacts: [] });
+  const first = render(<H3ToolResults messages={[message]} />);
+  const second = render(<H3ToolResults messages={[message]} />);
+  await waitFor(() => expect(first.getAllByTestId('h3-live-progress')).toHaveLength(2));
+  expect(mocks.get).toHaveBeenCalledOnce();
+  expect(mocks.events).toHaveBeenCalledOnce();
+  first.unmount();
+  expect(mocks.close).not.toHaveBeenCalled();
+  second.unmount();
+  expect(mocks.close).toHaveBeenCalledOnce();
+});
+
+it('retains a canonical shared job when history eviction overlaps a changed observer list', async () => {
+  const ids = Array.from({ length: 101 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
+  mocks.get.mockImplementation(async (jobId: string) => ({ id: jobId, status: 'running', artifacts: [] }));
+  const first = renderHook(({ watched }) => useH3Jobs(watched), { initialProps: { watched: ids } });
+  await waitFor(() => expect(first.result.current[0].job?.status).toBe('running'));
+  first.rerender({ watched: [ids[0]] });
+  const before = mocks.events.mock.calls.filter(([jobId]) => jobId === ids[0]).length;
+  const second = renderHook(() => useH3Jobs([ids[0]]));
+  await waitFor(() => expect(second.result.current[0].job?.status).toBe('running'));
+  expect(mocks.events.mock.calls.filter(([jobId]) => jobId === ids[0])).toHaveLength(before);
+});
+
+it('does not regress live progress when the initial HTTP snapshot arrives after a terminal event', async () => {
+  let resolve: (job: unknown) => void = () => {};
+  mocks.get.mockReturnValue(new Promise((done) => (resolve = done)));
+  const view = render(<H3ToolResults messages={[message]} />);
+  const update = mocks.events.mock.calls[0][1];
+  act(() => update({ id, status: 'succeeded', artifacts: [] }));
+  await act(async () => resolve({ id, status: 'queued', artifacts: [] }));
+  expect(view.getByRole('status').textContent).toContain('succeeded');
+  expect(mocks.events).toHaveBeenCalledOnce();
+});
+
+it('refreshes immediately when the event stream disconnects and shows the completed video', async () => {
+  mocks.get.mockResolvedValueOnce({ id, status: 'running', artifacts: [] }).mockResolvedValueOnce({
+    id,
+    status: 'succeeded',
+    artifacts: [{ filename: 'photo.mp4', mimeType: 'video/mp4', resourcePath: `/api/h3/jobs/${id}/artifacts/0` }],
+  });
+  const view = render(<H3ToolResults messages={[message]} />);
+  await waitFor(() => expect(view.getByRole('status').textContent).toContain('running'));
+  act(() => mocks.events.mock.calls[0][2].onerror());
+  await waitFor(() => expect(view.container.querySelector('video')).not.toBeNull());
+  expect(mocks.get).toHaveBeenCalledTimes(2);
+  expect(mocks.close).toHaveBeenCalledOnce();
+});
+
+it('preserves cancellation acceptance when an older polling response arrives later', async () => {
+  let resolve: (job: unknown) => void = () => {};
+  mocks.get
+    .mockResolvedValueOnce({ id, status: 'running', artifacts: [] })
+    .mockReturnValueOnce(new Promise((done) => (resolve = done)));
+  mocks.cancel.mockResolvedValue({ id, status: 'running', cancelRequested: true, artifacts: [] });
+  const view = render(<H3ToolResults messages={[message]} />);
+  await view.findByRole('button', { name: 'conversation.h3Activity.cancel' });
+  act(() => mocks.events.mock.calls[0][2].onerror());
+  expect(mocks.get).toHaveBeenCalledTimes(2);
+  fireEvent.click(view.getByRole('button', { name: 'conversation.h3Activity.cancel' }));
+  expect(await view.findByRole('button', { name: 'conversation.h3Activity.cancelling' })).toBeDisabled();
+  await act(async () => resolve({ id, status: 'running', artifacts: [] }));
+  expect(view.getByRole('button', { name: 'conversation.h3Activity.cancelling' })).toBeDisabled();
 });
 
 it('cancels the actual running job and retains its terminal card', async () => {

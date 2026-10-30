@@ -4,12 +4,28 @@ import { SWRConfig } from 'swr';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TMessage } from '@/common/chat/chatLib';
 import type { ComfyGenerationJob, ComfyOperation } from '@/common/chat/document/creation/comfy';
+import { createH3Job, type H3Job } from '@/common/chat/document/h3Job';
+import type { CreationOperation } from '@/common/chat/document/creation/operation';
 
 const mocks = vi.hoisted(() => ({
   activity: vi.fn(),
   authorize: vi.fn(),
   prefill: vi.fn(),
+  h3Get: vi.fn(),
+  h3Events: vi.fn(),
+  h3Close: vi.fn(),
+  creationOperation: vi.fn(),
   runtime: { isProcessing: false, hydrated: true, view: { pendingConfirmations: 0 } },
+}));
+vi.mock('@/common/chat/document/h3JobApi', () => ({
+  h3JobApi: {
+    get: mocks.h3Get,
+    creationOperation: mocks.creationOperation,
+    events: (id: string, update: (job: H3Job) => void) => {
+      mocks.h3Events(id, update);
+      return { close: mocks.h3Close };
+    },
+  },
 }));
 vi.mock('@/common', () => ({ ipcBridge: {} }));
 vi.mock('@/common/chat/document/creation/comfyApi', () => ({
@@ -44,6 +60,7 @@ vi.mock('@/renderer/pages/conversation/runtime/Creation/ComfyOperationResult', (
 
 import { MessageListProvider } from '@/renderer/pages/conversation/Messages/hooks';
 import WorkProgressBridge from '@/renderer/pages/conversation/PlanBar/WorkProgressBridge';
+import { resetH3JobsForTest } from '@/renderer/pages/conversation/runtime/Creation/useH3Jobs';
 import ConversationWorkProgress from '@/renderer/pages/conversation/PlanBar/ConversationWorkProgress';
 import {
   projectWorkProgress,
@@ -112,12 +129,48 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  resetH3JobsForTest();
   resetWorkProgressForTest();
   resetCurrentProjectForTest();
   resetCurrentConversationForTest();
 });
 
 describe('unified work projection', () => {
+  it('tracks the submitted H3 job instead of marking GPU work complete with its tool call', () => {
+    const h3 = { ...createH3Job({ prompt: 'animate a photo' }, jobId), status: 'running' as const };
+    const messages = [
+      tool('submit', 'aionui_h3_generate_video', 'completed', {
+        output: JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(h3) }] }),
+      }),
+      tool('poll', 'aionui_h3_job_status', 'completed', { output: JSON.stringify(h3) }),
+    ];
+    expect(projectWorkProgress(messages, runtime).tasks).toEqual([
+      expect.objectContaining({
+        id: `h3:${jobId}`,
+        kind: 'generation',
+        summaryKey: 'generateVideo',
+        status: 'pending',
+      }),
+    ]);
+    expect(projectWorkProgress(messages, runtime, [], [], [], [], { jobs: [h3], unavailable: [] }).tasks).toEqual([
+      expect.objectContaining({ id: `h3:${jobId}`, status: 'running' }),
+    ]);
+    expect(
+      projectWorkProgress(messages, runtime, [], [], [], [], {
+        jobs: [{ ...h3, status: 'succeeded' }],
+        unavailable: [],
+      }).tasks[0].status
+    ).toBe('completed');
+    expect(
+      projectWorkProgress(messages, runtime, [], [], [], [], { jobs: [h3], unavailable: [jobId] }).tasks[0].status
+    ).toBe('interrupted');
+    expect(
+      projectWorkProgress(messages, runtime, [], [], [], [], {
+        jobs: [{ ...h3, remoteUncertain: true }],
+        unavailable: [],
+      }).tasks[0].status
+    ).toBe('interrupted');
+  });
   it('does not create progress for simple questions, a one-step plan, or one completed shell command', () => {
     expect(
       projectWorkProgress(
@@ -445,6 +498,78 @@ describe('unified work projection', () => {
 });
 
 describe('work progress right-panel integration', () => {
+  it('continues tracking a job submitted automatically after model installation without a new tool message', async () => {
+    setCurrentConversation('c1');
+    const installing: CreationOperation = {
+      id: operationId,
+      requestId: 'creation-request',
+      conversationId: 'c1',
+      state: 'installing',
+      spec: { prompt: 'animate a photo' },
+      updatedAt: '2026-10-30T00:00:00Z',
+    };
+    mocks.creationOperation.mockResolvedValue(installing);
+    mocks.h3Get.mockResolvedValue(createH3Job(installing.spec, jobId));
+    render(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+        <MessageListProvider
+          value={[
+            tool('install', 'openh3_h3_install_video_model', 'completed', {
+              output: JSON.stringify({
+                content: [{ type: 'text', text: JSON.stringify({ creationOperationId: operationId }) }],
+              }),
+            }),
+          ]}
+        >
+          <WorkProgressBridge conversationId='c1' />
+        </MessageListProvider>
+        <ConversationWorkProgress conversationId='c1' />
+      </SWRConfig>
+    );
+    await waitFor(() => expect(mocks.creationOperation).toHaveBeenCalledWith(operationId));
+    await waitFor(() =>
+      expect(document.querySelector('[data-work-task="install"]')).toHaveAttribute('data-status', 'running')
+    );
+    expect(mocks.h3Events).not.toHaveBeenCalled();
+    mocks.creationOperation.mockResolvedValue({ ...installing, state: 'submitted', jobId });
+    await waitFor(() => expect(mocks.h3Events).toHaveBeenCalledOnce(), { timeout: 3500 });
+    const update = mocks.h3Events.mock.calls[0][1];
+    act(() => update({ ...createH3Job(installing.spec, jobId), status: 'running' }));
+    await waitFor(() =>
+      expect(document.querySelector('[data-work-task="generation"]')).toHaveAttribute('data-status', 'running')
+    );
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '1');
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuemax', '2');
+  });
+  it('follows the initial H3 submission through completion after the assistant turn has ended', async () => {
+    setCurrentConversation('c1');
+    const queued = createH3Job({ prompt: 'animate a photo' }, jobId);
+    mocks.h3Get.mockResolvedValue(queued);
+    const submitted = tool('submit', 'aionui_h3_generate_video', 'completed', {
+      output: JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(queued) }] }),
+    });
+    render(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+        <MessageListProvider value={[submitted]}>
+          <WorkProgressBridge conversationId='c1' />
+        </MessageListProvider>
+        <ConversationWorkProgress conversationId='c1' />
+      </SWRConfig>
+    );
+    await waitFor(() => expect(mocks.h3Events).toHaveBeenCalledOnce());
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0');
+    const update = mocks.h3Events.mock.calls[0][1];
+    act(() => update({ ...queued, status: 'running' }));
+    await waitFor(() =>
+      expect(document.querySelector('[data-work-task="generation"]')).toHaveAttribute('data-status', 'running')
+    );
+    act(() => update({ ...queued, status: 'succeeded' }));
+    await waitFor(() => expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '1'));
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuemax', '1');
+    expect(mocks.h3Get).toHaveBeenCalledWith(jobId);
+    expect(mocks.prefill).not.toHaveBeenCalled();
+    expect(mocks.h3Close).toHaveBeenCalledOnce();
+  });
   it('bridges real message-provider data to a panel outside that provider and recovers API-only activities', async () => {
     setCurrentConversation('c1');
     mocks.activity.mockResolvedValue({ operations: [operation()], jobs: [job()] });

@@ -5,8 +5,8 @@
  */
 
 import React, { type PropsWithChildren } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IMessageAcpToolCall, IMessageText, IMessageToolGroup, TMessage } from '@/common/chat/chatLib';
 import type { MessageFileChangesProps } from '@/renderer/pages/conversation/Messages/MessageFileChanges';
 import {
@@ -16,10 +16,24 @@ import {
   useUpdateMessageList,
 } from '@/renderer/pages/conversation/Messages/hooks';
 import MessageList from '@/renderer/pages/conversation/Messages/MessageList';
+import { resetH3JobsForTest } from '@/renderer/pages/conversation/runtime/Creation/useH3Jobs';
 
-const { parseDiffMock, useTeamPermissionMock } = vi.hoisted(() => ({
+const { parseDiffMock, useTeamPermissionMock, h3Get, h3Events, h3Close } = vi.hoisted(() => ({
   parseDiffMock: vi.fn(),
   useTeamPermissionMock: vi.fn(),
+  h3Get: vi.fn(),
+  h3Events: vi.fn(),
+  h3Close: vi.fn(),
+}));
+vi.mock('@/common/chat/document/h3JobApi', () => ({
+  h3JobApi: {
+    get: h3Get,
+    events: (id: string, update: unknown) => {
+      h3Events(id, update);
+      return { close: h3Close };
+    },
+    resourceUrl: (path: string) => `http://127.0.0.1:33002${path}`,
+  },
 }));
 
 vi.mock('react-i18next', () => ({
@@ -36,6 +50,9 @@ vi.mock('react-router-dom', () => ({
 }));
 
 vi.mock('@arco-design/web-react', () => ({
+  Button: ({ children }: PropsWithChildren) => <button>{children}</button>,
+  Progress: () => <div />,
+  Spin: () => <span />,
   Image: {
     PreviewGroup: ({ children }: PropsWithChildren) => <>{children}</>,
   },
@@ -251,7 +268,11 @@ function ReplaceMessagesButton({ messages }: { messages: TMessage[] }): JSX.Elem
 }
 
 describe('MessageList', () => {
+  afterEach(() => resetH3JobsForTest());
   beforeEach(() => {
+    h3Get.mockReset();
+    h3Events.mockClear();
+    h3Close.mockClear();
     mockIsProcessing = false;
     parseDiffMock.mockReset();
     parseDiffMock.mockReturnValue({
@@ -262,6 +283,44 @@ describe('MessageList', () => {
       diff: 'diff',
     });
     useTeamPermissionMock.mockReturnValue(null);
+  });
+
+  it('shows the initial MCP generation job after the final reply and completes it without a follow-up question', async () => {
+    const id = '8ca61811-cd38-4d15-b24b-44fb30175eaa';
+    const queued = { id, status: 'queued', spec: { prompt: 'animate a photo' }, artifacts: [] };
+    h3Get.mockResolvedValue(queued);
+    const submitted: TMessage = {
+      id: 'submitted',
+      conversation_id: 'conversation-1',
+      type: 'tool_call',
+      content: {
+        call_id: 'generate-1',
+        name: 'aionui_h3_generate_video',
+        status: 'completed',
+        args: {},
+        output: JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(queued) }] }),
+      },
+    };
+    const final: IMessageText = { ...createTextMessage(), id: 'final', content: { content: 'Video submitted' } };
+    const view = render(<MessageList />, {
+      wrapper: ({ children }) => <Wrapper messages={[submitted, final]}>{children}</Wrapper>,
+    });
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('conversation.h3Activity.queued'));
+    expect(screen.getByTestId('msgtext-final').parentElement?.parentElement).toContainElement(
+      screen.getByTestId('h3-chat-result')
+    );
+    const update = h3Events.mock.calls[0][1];
+    act(() => update({ ...queued, status: 'running' }));
+    expect(screen.getByRole('status')).toHaveTextContent('conversation.h3Activity.running');
+    act(() =>
+      update({
+        ...queued,
+        status: 'succeeded',
+        artifacts: [{ filename: 'photo.mp4', mimeType: 'video/mp4', resourcePath: `/api/h3/jobs/${id}/artifacts/0` }],
+      })
+    );
+    expect(view.container.querySelector('video')?.src).toContain(`/api/h3/jobs/${id}/artifacts/0`);
+    expect(h3Events).toHaveBeenCalledOnce();
   });
 
   it('never renders a plan as a stream row (it belongs to ConversationPlanBar)', () => {

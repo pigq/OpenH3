@@ -1,41 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { Button, Progress, Spin } from '@arco-design/web-react';
 import { useTranslation } from 'react-i18next';
-import type { IMessageToolCall } from '@/common/chat/chatLib';
 import type { H3Job } from '@/common/chat/document/h3Job';
 import { h3JobApi } from '@/common/chat/document/h3JobApi';
-import { toolResultRecords } from '@/common/chat/document/creation/toolResults';
+import { h3ToolJobIds } from '@/common/chat/document/creation/toolResults';
+import { updateH3Job, useH3Jobs } from '@/renderer/pages/conversation/runtime/Creation/useH3Jobs';
 
-export function h3ToolJobIds(messages: Array<{ type: string; content: unknown }>): string[] {
-  const ids = new Set<string>();
-  for (const message of messages) {
-    if (message.type !== 'tool_call') {
-      for (const output of toolResultRecords(message)) {
-        if (
-          typeof output.id === 'string' &&
-          /^[a-f0-9-]{36}$/i.test(output.id) &&
-          output.spec &&
-          typeof output.status === 'string' &&
-          Array.isArray(output.artifacts)
-        )
-          ids.add(output.id);
-      }
-      continue;
-    }
-    const content = message.content as IMessageToolCall['content'];
-    if (!content || typeof content.name !== 'string') continue;
-    if (!['openh3_h3_generate_video', 'openh3_h3_job_status'].includes(content.name.replace(/^aionui_/, 'openh3_')))
-      continue;
-    try {
-      const output = typeof content.output === 'string' ? JSON.parse(content.output) : content.output;
-      // Tool output is untrusted: only use a job identifier; fetch authoritative resources locally.
-      if (output && typeof output.id === 'string' && /^[a-f0-9-]{36}$/i.test(output.id)) ids.add(output.id);
-    } catch {
-      /* An unfinished tool call has no JSON result yet. */
-    }
-  }
-  return [...ids];
-}
+export { h3ToolJobIds } from '@/common/chat/document/creation/toolResults';
 
 /** Anchor each unique result after its whole assistant turn. */
 export function h3TurnResults(
@@ -180,54 +151,15 @@ export function H3LiveProgress({ job, unavailable }: { job: H3Job; unavailable: 
 
 export function H3ToolResult({ id }: { id: string }) {
   const { t } = useTranslation();
-  const [unavailable, setUnavailable] = useState(false);
+  const { job, unavailable } = useH3Jobs([id])[0];
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState(false);
-  const [job, setJob] = useState<H3Job>();
-  const settled = job?.id === id && !['queued', 'running'].includes(job.status) && !job.remoteUncertain;
-  useEffect(() => {
-    if (settled) return;
-    let disposed = false;
-    let refreshing = false;
-    let terminal = false;
-    const update = (next: H3Job) => {
-      if (!disposed && !terminal && next.id === id) {
-        terminal = !['queued', 'running'].includes(next.status) && !next.remoteUncertain;
-        setJob(next);
-        setUnavailable(false);
-      }
-    };
-    const source = h3JobApi.events(id, update);
-    const refresh = (): void => {
-      if (refreshing || disposed || terminal) return;
-      refreshing = true;
-      void h3JobApi
-        .get(id)
-        .then(update)
-        .catch(() => {
-          if (!disposed && !terminal) setUnavailable(true);
-        })
-        .finally(() => {
-          refreshing = false;
-        });
-    };
-    source.onerror = (): void => {
-      if (!disposed && !terminal) setUnavailable(true);
-    };
-    refresh();
-    const timer = setInterval(refresh, 15000);
-    return () => {
-      disposed = true;
-      clearInterval(timer);
-      source.close();
-    };
-  }, [id, settled]);
   const active = job?.status === 'queued' || job?.status === 'running';
   const cancel = async () => {
     setCancelling(true);
     setCancelError(false);
     try {
-      setJob(await h3JobApi.cancel(id));
+      updateH3Job(await h3JobApi.cancel(id));
     } catch {
       setCancelError(true);
     } finally {

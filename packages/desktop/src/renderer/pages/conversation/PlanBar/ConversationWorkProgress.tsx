@@ -67,6 +67,9 @@ export default function ConversationWorkProgress({ conversationId }: { conversat
             <div className={styles.detail}>{t(`conversation.workProgress.statuses.${task.status}`)}</div>
           )}
           {task.diagnosis && <div className={styles.detail}>{t(`conversation.workProgress.${task.diagnosis}`)}</div>}
+          {task.generationWarning && (
+            <div className={styles.detail}>{t(`conversation.h3Activity.${task.generationWarning}`)}</div>
+          )}
           {task.detail && <div className={styles.detail}>{task.detail}</div>}
           {task.operationId && (
             <Button

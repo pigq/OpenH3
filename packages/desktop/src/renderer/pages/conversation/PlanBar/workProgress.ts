@@ -4,7 +4,9 @@ import type {
   ComfyInstallPreparation,
   ComfyOperation,
 } from '@/common/chat/document/creation/comfy';
-import { toolResultRecords } from '@/common/chat/document/creation/toolResults';
+import { creationOperationIds, h3ToolJobIds, toolResultRecords } from '@/common/chat/document/creation/toolResults';
+import type { H3Job } from '@/common/chat/document/h3Job';
+import type { CreationOperation } from '@/common/chat/document/creation/operation';
 import { useSyncExternalStore } from 'react';
 
 export type WorkStatus = 'pending' | 'running' | 'completed' | 'failed' | 'interrupted' | 'waiting' | 'cancelled';
@@ -28,6 +30,7 @@ export type WorkTask = {
   operationId?: string;
   preparing?: boolean;
   diagnosis?: 'deviceInsufficient' | 'detectionIncomplete';
+  generationWarning?: 'disconnected' | 'remoteUncertain';
 };
 export type WorkSnapshot = { tasks: WorkTask[]; isProcessing: boolean; pendingConfirmations: number };
 export type WorkRuntime = {
@@ -165,7 +168,13 @@ export function projectWorkProgress(
   operations: ComfyOperation[] = [],
   jobs: ComfyGenerationJob[] = [],
   unavailableIds: string[] = [],
-  preparations: ComfyInstallPreparation[] = []
+  preparations: ComfyInstallPreparation[] = [],
+  h3Activity: {
+    jobs: H3Job[];
+    unavailable: string[];
+    operations?: CreationOperation[];
+    unavailableOperations?: string[];
+  } = { jobs: [], unavailable: [] }
 ): WorkSnapshot {
   const tasks = new Map<string, WorkTask>();
   const latestPlan = messages.findLast((message) => message.type === 'plan');
@@ -202,6 +211,11 @@ export function projectWorkProgress(
     });
   }
   const ids = workComfyIds(messages);
+  const creationIds = creationOperationIds(messages);
+  const creationOperations = (h3Activity.operations ?? []).filter((operation) => creationIds.includes(operation.id));
+  const h3Ids = [
+    ...new Set([...h3ToolJobIds(messages), ...creationOperations.map((operation) => operation.jobId).filter(uuid)]),
+  ];
   let lastUser = -1;
   messages.forEach((message, index) => {
     if (message.position === 'right') lastUser = index;
@@ -211,16 +225,21 @@ export function projectWorkProgress(
     .filter((message) => ['tool_call', 'acp_tool_call'].includes(message.type));
   for (const [index, message] of messages.entries()) {
     if (message.type === 'tool_group') {
-      if (!message.content.length) continue;
+      const entries = message.content.filter(
+        (entry) =>
+          !h3ToolJobIds([{ type: 'tool_group', content: [entry] }]).length &&
+          !creationOperationIds([{ type: 'tool_group', content: [entry] }]).length
+      );
+      if (!entries.length) continue;
       // Workflow roster entries are namespaced by their container call id in
       // core workflow_progress.rs. A single finished ordinary tool is not a plan.
       if (
-        message.content.length === 1 &&
-        !message.content[0].call_id.includes(':') &&
-        ['Success', 'Canceled'].includes(message.content[0].status)
+        entries.length === 1 &&
+        !entries[0].call_id.includes(':') &&
+        ['Success', 'Canceled'].includes(entries[0].status)
       )
         continue;
-      const children = message.content.map((entry) => ({
+      const children = entries.map((entry) => ({
         id: entry.call_id,
         ...(summaryKeyForTool(entry.name)
           ? { title: '', summaryKey: summaryKeyForTool(entry.name) }
@@ -251,6 +270,7 @@ export function projectWorkProgress(
       continue;
     }
     if (message.type !== 'tool_call' && message.type !== 'acp_tool_call') continue;
+    if (h3ToolJobIds([message]).length || creationOperationIds([message]).length) continue;
     if (toolResultRecords(message).some((record) => uuid(record.comfyOperationId) || uuid(record.comfyJobId))) continue;
     const native = message.type === 'tool_call' ? message.content : undefined;
     const acp = message.type === 'acp_tool_call' ? message.content.update : undefined;
@@ -267,6 +287,8 @@ export function projectWorkProgress(
     if (index <= lastUser && !detached) continue;
     const toolStatus = status(native?.status ?? acp?.status);
     const summary = resolveToolSummary(name, description, input);
+    if (summary.summaryKey === 'waitForGeneration' && h3Ids.includes(text(input.jobId) ?? text(input.job_id) ?? ''))
+      continue;
     if ([...tasks.values()].some((task) => task.kind === 'plan') && toolKind === 'task') continue;
     const terminal = ['completed', 'failed', 'cancelled'].includes(toolStatus);
     const hasMeaningfulSummary = Boolean(summary.summaryKey || summary.title);
@@ -345,6 +367,39 @@ export function projectWorkProgress(
         : preparation.error?.includes('DETECTION_INCOMPLETE')
           ? 'detectionIncomplete'
           : undefined,
+    });
+  }
+  for (const id of creationIds) {
+    const operation = creationOperations.find((item) => item.id === id);
+    tasks.set(`creation:${id}`, {
+      id: `creation:${id}`,
+      title: '',
+      summaryKey: 'installModel',
+      kind: 'install',
+      status:
+        h3Activity.unavailableOperations?.includes(id) || operation?.state === 'paused'
+          ? 'interrupted'
+          : operation?.state === 'submitted'
+            ? 'completed'
+            : operation?.state === 'installing' || operation?.state === 'cancelling'
+              ? 'running'
+              : status(operation?.state),
+      detail: operation?.error,
+    });
+  }
+  for (const id of h3Ids) {
+    const job = h3Activity.jobs.find((item) => item.id === id);
+    const unavailable = h3Activity.unavailable.includes(id);
+    tasks.set(`h3:${id}`, {
+      id: `h3:${id}`,
+      title: '',
+      summaryKey: 'generateVideo',
+      kind: 'generation',
+      // Completing the submit tool is not completing the remote GPU job. Only
+      // the authoritative job API may transition this task to a terminal state.
+      status: unavailable || job?.remoteUncertain ? 'interrupted' : status(job?.status),
+      generationWarning: job?.remoteUncertain ? 'remoteUncertain' : unavailable ? 'disconnected' : undefined,
+      detail: [job?.error, job?.diagnosis?.action].filter(Boolean).join('\n') || undefined,
     });
   }
   return {

@@ -37,3 +37,31 @@ export function creationOperationIds(messages: Array<{ type: string; content: un
     ),
   ];
 }
+
+/** Extract submitted H3 jobs from MCP/native/ACP results, never from tool arguments. */
+export function h3ToolJobIds(messages: Array<{ type: string; content: unknown }>): string[] {
+  const ids = new Set<string>();
+  for (const message of messages) {
+    const native = message.type === 'tool_call';
+    const content = message.content as { name?: unknown; output?: unknown } | null;
+    if (
+      native &&
+      (typeof content?.name !== 'string' ||
+        !['openh3_h3_generate_video', 'openh3_h3_job_status'].includes(content.name.replace(/^aionui_/, 'openh3_')))
+    )
+      continue;
+    const outputs = toolResultRecords(native ? { type: 'tool_call', content: content?.output } : message);
+    for (const output of outputs) {
+      if (
+        typeof output.id === 'string' &&
+        /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(output.id) &&
+        (native ||
+          (output.spec &&
+            ['queued', 'running', 'succeeded', 'failed', 'cancelled'].includes(String(output.status)) &&
+            Array.isArray(output.artifacts)))
+      )
+        ids.add(output.id);
+    }
+  }
+  return [...ids];
+}

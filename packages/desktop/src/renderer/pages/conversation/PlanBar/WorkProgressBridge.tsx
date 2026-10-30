@@ -4,9 +4,13 @@ import type {
   ComfyOperation,
 } from '@/common/chat/document/creation/comfy';
 import { comfyApi } from '@/common/chat/document/creation/comfyApi';
+import { creationOperationIds, h3ToolJobIds } from '@/common/chat/document/creation/toolResults';
+import { h3JobApi } from '@/common/chat/document/h3JobApi';
+import type { CreationOperation } from '@/common/chat/document/creation/operation';
 import { useMessageList } from '@/renderer/pages/conversation/Messages/hooks';
 import { useConversationRuntimeView } from '@/renderer/pages/conversation/runtime/useConversationRuntimeView';
 import { useCurrentConversation } from '@/renderer/pages/conversation/explorer/currentConversationStore';
+import { useH3Jobs } from '@/renderer/pages/conversation/runtime/Creation/useH3Jobs';
 import { useEffect, useMemo } from 'react';
 import useSWR from 'swr';
 import { projectWorkProgress, publishWorkProgress, workComfyIds } from './workProgress';
@@ -17,6 +21,46 @@ export default function WorkProgressBridge({ conversationId }: { conversationId:
   const runtime = useConversationRuntimeView(conversationId);
   const activeConversation = useCurrentConversation();
   const ids = useMemo(() => workComfyIds(messages), [messages]);
+  const creationIds = useMemo(() => creationOperationIds(messages), [messages]);
+  const { data: creationData } = useSWR(
+    activeConversation === conversationId && creationIds.length ? ['work.creation', conversationId, creationIds] : null,
+    async () => {
+      const operations: CreationOperation[] = [];
+      const unavailable: string[] = [];
+      await Promise.all(
+        creationIds.map(async (id) => {
+          try {
+            const operation = await h3JobApi.creationOperation(id);
+            if (operation.id === id && operation.conversationId === conversationId) operations.push(operation);
+            else unavailable.push(id);
+          } catch {
+            unavailable.push(id);
+          }
+        })
+      );
+      return { operations, unavailable };
+    },
+    {
+      refreshInterval: (current) =>
+        !current ||
+        current.unavailable.length ||
+        current.operations.some(
+          (operation) => !['submitted', 'failed', 'paused', 'cancelled'].includes(operation.state)
+        )
+          ? 1500
+          : 5000,
+    }
+  );
+  const h3Ids = useMemo(
+    () => [
+      ...new Set([
+        ...h3ToolJobIds(messages),
+        ...(creationData?.operations ?? []).flatMap((operation) => (operation.jobId ? [operation.jobId] : [])),
+      ]),
+    ],
+    [messages, creationData]
+  );
+  const h3Snapshots = useH3Jobs(activeConversation === conversationId ? h3Ids : []);
   const { data } = useSWR(
     activeConversation === conversationId ? ['comfy.activity', conversationId] : null,
     async () => {
@@ -81,7 +125,13 @@ export default function WorkProgressBridge({ conversationId }: { conversationId:
         data?.operations,
         data?.jobs,
         data?.unavailable,
-        data?.preparations
+        data?.preparations,
+        {
+          jobs: h3Snapshots.flatMap((snapshot) => (snapshot.job ? [snapshot.job] : [])),
+          unavailable: h3Ids.filter((_id, index) => h3Snapshots[index]?.unavailable),
+          operations: creationData?.operations,
+          unavailableOperations: creationData?.unavailable,
+        }
       )
     );
   }, [
@@ -92,6 +142,9 @@ export default function WorkProgressBridge({ conversationId }: { conversationId:
     runtime.hydrated,
     runtime.activeTurnId,
     data,
+    h3Snapshots,
+    h3Ids,
+    creationData,
   ]);
   return null;
 }
