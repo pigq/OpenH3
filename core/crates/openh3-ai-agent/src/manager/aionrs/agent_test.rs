@@ -15,6 +15,115 @@ use crate::protocol::events::FinishEventData;
 
 static NEXT_TEST_SESSION_DIR: AtomicU64 = AtomicU64::new(0);
 
+// Exercise the real provider parser and engine across two user messages.
+#[tokio::test]
+async fn continuation_recovers_empty_gateway_stream_without_replaying_history() {
+    assert_continuation_stream_recovery(false, false, "upstream stream failed after response started", 3).await;
+    assert_continuation_stream_recovery(true, false, "upstream stream failed after response started", 3).await;
+}
+
+#[tokio::test]
+async fn continuation_does_not_retry_partial_output_or_auth_errors() {
+    for responses in [false, true] {
+        assert_continuation_stream_recovery(responses, true, "upstream stream failed after response started", 2).await;
+        assert_continuation_stream_recovery(responses, false, "invalid_api_key", 2).await;
+    }
+}
+
+async fn assert_continuation_stream_recovery(
+    responses: bool,
+    partial: bool,
+    failure: &'static str,
+    expected_calls: usize,
+) {
+    use axum::{Json, Router, routing::post};
+    use std::sync::atomic::AtomicUsize;
+    let requests = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let route = if responses {
+        "/v1/responses"
+    } else {
+        "/v1/chat/completions"
+    };
+    let app = Router::new().route(route, post({
+        let requests = requests.clone();
+        let calls = calls.clone();
+        move |Json(body): Json<Value>| {
+            requests.lock().unwrap().push(body);
+            let call = calls.fetch_add(1, Ordering::SeqCst);
+            async move {
+                let text = if responses {
+                    "data: {\"type\":\"response.output_text.delta\",\"delta\":\"OK\"}\n\n"
+                } else {
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"},\"finish_reason\":null}]}\n\n"
+                };
+                let body = if call == 1 {
+                    let mut error = serde_json::json!({"error":{"message":failure}});
+                    if responses { error["type"] = "error".into(); }
+                    format!("{}data: {}\n\n", if partial { text } else { "" }, error)
+                } else if responses {
+                    format!("{text}data: {{\"type\":\"response.completed\",\"response\":{{\"status\":\"completed\",\"output\":[],\"usage\":{{\"input_tokens\":10,\"output_tokens\":1}}}}}}\n\n")
+                } else {
+                    format!("{text}data: {{\"choices\":[{{\"delta\":{{}},\"finish_reason\":\"stop\"}}]}}\n\ndata: [DONE]\n\n")
+                };
+                ([("content-type", "text/event-stream")], body)
+            }
+        }
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let mut config = make_test_config();
+    config.provider = "openai".into();
+    config.model = "test-model".into();
+    config.base_url = Some(format!("http://{address}/v1"));
+    config.compat_overrides.openai_api_mode = Some(if responses {
+        aion_config::compat::OpenAiApiMode::Responses
+    } else {
+        aion_config::compat::OpenAiApiMode::ChatCompletions
+    });
+    let manager = AionrsAgentManager::new(
+        format!("stream-{}", generate_short_id()),
+        "/project".into(),
+        config,
+        None,
+    )
+    .await
+    .unwrap();
+    for (index, content) in ["First message", "Continue this conversation"].into_iter().enumerate() {
+        let result = timeout(
+            Duration::from_secs(15),
+            manager.send_message(SendMessageData {
+                content: content.into(),
+                msg_id: format!("message-{index}"),
+                turn_id: None,
+                files: vec![],
+                inject_skills: vec![],
+            }),
+        )
+        .await
+        .unwrap();
+        if index == 0 || expected_calls == 3 {
+            result.unwrap();
+        } else {
+            let error = result.unwrap_err();
+            assert_eq!(
+                error.ownership(),
+                Some(openh3_api_types::AgentErrorOwnership::UserLlmProvider)
+            );
+        }
+    }
+    server.abort();
+    assert_eq!(calls.load(Ordering::SeqCst), expected_calls);
+    let requests = requests.lock().unwrap();
+    if expected_calls == 3 {
+        assert_eq!(requests[1], requests[2], "retry only the failed provider request");
+    }
+    let history = &requests[1][if responses { "input" } else { "messages" }];
+    assert!(history.to_string().contains("First message"));
+    assert_eq!(history.to_string().matches("Continue this conversation").count(), 1);
+}
+
 #[tokio::test]
 async fn native_reasoning_effort_reaches_responses_request() {
     use axum::{Json, Router, http::StatusCode, routing::post};

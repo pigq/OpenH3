@@ -519,7 +519,7 @@ fn is_uninformative_acp_message(message: &str) -> bool {
         .any(|default| default.eq_ignore_ascii_case(message))
 }
 
-fn classify_upstream_detail(detail: &str) -> AgentSendError {
+pub(crate) fn classify_upstream_detail(detail: &str) -> AgentSendError {
     let lower = detail.to_ascii_lowercase();
     let classified = classify_agent_lifecycle(&lower)
         .or_else(|| classify_provider_text(&lower))
@@ -913,7 +913,15 @@ fn classify_provider_text(lower: &str) -> Option<ClassifiedError> {
             None,
         ));
     }
-    if lower.contains("provider error") {
+    if contains_any(
+        lower,
+        &[
+            "provider error",
+            "sse parse error",
+            "upstream stream failed",
+            "stream disconnected before completion",
+        ],
+    ) {
         return Some(provider_error(
             "The model provider returned an error",
             AgentErrorCode::UserLlmProviderGatewayError,

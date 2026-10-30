@@ -4,7 +4,7 @@ use openh3_api_types::{
     AgentErrorCode, AgentErrorOwnership, AgentErrorResolution, AgentErrorResolutionKind, AgentErrorResolutionTarget,
 };
 
-use crate::protocol::send_error::AgentSendError;
+use crate::protocol::send_error::{AgentSendError, classify_upstream_detail};
 
 pub(super) fn aionrs_engine_error_to_send_error(error: &AionrsAgentError) -> AgentSendError {
     let detail = format!("Aionrs agent error: {error}");
@@ -27,7 +27,7 @@ pub(super) fn aionrs_engine_error_to_send_error(error: &AionrsAgentError) -> Age
             AgentErrorResolutionKind::ReduceContext,
             None,
         ),
-        AionrsAgentError::ApiError(_) => unknown_upstream_send_error(detail),
+        AionrsAgentError::ApiError(_) => classify_upstream_detail(&detail),
         AionrsAgentError::UserAborted => unknown_upstream_send_error(detail),
     }
 }
@@ -89,7 +89,13 @@ pub(super) fn aionrs_runtime_error_summary(error: &AionrsAgentError) -> AionrsRu
         AionrsAgentError::ContextTooLong { .. } => {
             AionrsRuntimeErrorSummary::new("context_too_large", Some("context_too_large"))
         }
-        AionrsAgentError::ApiError(_) => AionrsRuntimeErrorSummary::new("api_error", None),
+        AionrsAgentError::ApiError(message) => AionrsRuntimeErrorSummary::new(
+            "api_error",
+            message
+                .to_ascii_lowercase()
+                .contains("sse parse error")
+                .then_some("stream"),
+        ),
         AionrsAgentError::UserAborted => AionrsRuntimeErrorSummary::new("user_aborted", None),
     }
 }
@@ -121,14 +127,7 @@ fn aionrs_provider_error_to_send_error(error: &ProviderError, detail: String) ->
             AgentErrorResolutionKind::CheckProviderBaseUrl,
             Some(AgentErrorResolutionTarget::ProviderSettings),
         ),
-        ProviderError::Parse(_) => provider_send_error(
-            "The model provider returned a server error",
-            AgentErrorCode::UserLlmProviderGatewayError,
-            detail,
-            true,
-            AgentErrorResolutionKind::Retry,
-            None,
-        ),
+        ProviderError::Parse(_) => classify_upstream_detail(&detail),
     }
 }
 

@@ -3,6 +3,32 @@ use openh3_api_types::{AgentErrorCode, AgentErrorOwnership};
 use super::*;
 
 #[test]
+fn aionrs_stream_json_error_retains_provider_ownership() {
+    let error = AionrsAgentError::ApiError(
+        "SSE parse error: Provider returned a JSON error response without an HTTP status: upstream stream failed after response started".into(),
+    );
+    let classified = aionrs_engine_error_to_send_error(&error);
+    assert_eq!(classified.code(), Some(AgentErrorCode::UserLlmProviderGatewayError));
+    assert_eq!(classified.ownership(), Some(AgentErrorOwnership::UserLlmProvider));
+    assert_eq!(classified.stream_error().retryable, Some(true));
+    assert_eq!(classified.stream_error().feedback_recommended, Some(false));
+    assert_eq!(
+        aionrs_runtime_error_summary(&error).provider_error_class,
+        Some("stream")
+    );
+}
+
+#[test]
+fn aionrs_stream_json_error_preserves_actionable_auth_failure() {
+    let error = AionrsAgentError::ApiError(
+        "SSE parse error: Provider returned a JSON error response without an HTTP status: invalid_api_key".into(),
+    );
+    let classified = aionrs_engine_error_to_send_error(&error);
+    assert_eq!(classified.code(), Some(AgentErrorCode::UserLlmProviderAuthFailed));
+    assert_eq!(classified.stream_error().retryable, Some(false));
+}
+
+#[test]
 fn aionrs_structured_malformed_tool_call_error_is_provider_error() {
     let error = AionrsAgentError::ToolCallMalformed { count: 3, limit: 3 };
     let send_error = aionrs_engine_error_to_send_error(&error);

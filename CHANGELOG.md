@@ -4,6 +4,12 @@ This file records OpenH3-specific changes. The project is currently in Alpha.
 
 ## Unreleased
 
+## 3.0.7
+
+- Recover transient gateway errors delivered inside otherwise empty model streams, with at most two retries of the same provider request. Streams that already emitted text, reasoning or tool events are never replayed automatically.
+- Classify SSE provider failures with actionable retry or credential guidance instead of unknown upstream errors. Log structured failure categories at the application boundary instead of raw provider errors.
+- Include the video model previews, FastH3-Omni installation guidance, coordinated ComfyUI memory cleanup, live generation progress and idle-only automatic updates from the preceding source updates.
+
 ## 3.0.2
 
 - Model cards submit a short installation request to the application-owned planner; installation uses the active permission policy and a single saved operation instead of repeated chat confirmations.

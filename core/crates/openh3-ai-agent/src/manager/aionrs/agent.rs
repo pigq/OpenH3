@@ -37,6 +37,7 @@ use crate::dev_prompt_dump::{AgentFinalInputDump, dump_agent_final_input};
 use crate::error::AgentError;
 use crate::protocol::events::AgentStreamEvent;
 use crate::protocol::send_error::AgentSendError;
+use crate::services::provider_stream::RecoveringProvider;
 use crate::types::{AionrsResolvedConfig, SendMessageData};
 
 use super::content::build_content_blocks;
@@ -235,7 +236,9 @@ impl AionrsAgentManager {
         let is_resume = resume_session.is_some();
         let provider_label = config.provider_label.clone();
 
+        let provider = Arc::new(RecoveringProvider(aion_providers::create_provider(&config)));
         let mut bootstrap = AgentBootstrap::new(config, &workspace, sink)
+            .provider(provider)
             .runtime_env(runtime_env)
             .extra_skill_dirs(_skill_dirs);
         if let Some(session) = resume_session {
@@ -507,7 +510,9 @@ impl IAgentTask for AionrsAgentManager {
                 error!(
                     conversation_id = %self.runtime.conversation_id(),
                     elapsed_ms,
-                    error = %ErrorChain(&e),
+                    error_kind = summary.kind,
+                    provider_error_class = summary.provider_error_class,
+                    http_status = summary.http_status,
                     "Aionrs engine.run() failed, emitting Error"
                 );
                 error!(
