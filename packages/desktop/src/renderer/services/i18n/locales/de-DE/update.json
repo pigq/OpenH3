@@ -138,5 +138,6 @@
   "sidebarRetry": "Update wiederholen",
   "openInstaller": "Manuell installieren (Ersatz)",
   "confirmInstall": "Installation bestätigen",
-  "confirmInstallDescription": "Die App wird für das Update geschlossen. Laufende Aufgaben können unterbrochen werden. Beenden Sie Ihre Arbeit, bevor Sie fortfahren."
+  "confirmInstallDescription": "Die App wird für das Update geschlossen. Laufende Aufgaben können unterbrochen werden. Beenden Sie Ihre Arbeit, bevor Sie fortfahren.",
+  "sidebarWaitingForIdle": "Update heruntergeladen. Automatischer Neustart nach Abschluss aller Aufgaben"
 }

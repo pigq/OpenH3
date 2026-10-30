@@ -36,6 +36,11 @@ export class MediaServiceProcess {
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
+  /** Unknown/crashed services cannot authorize an update. */
+  get updateEndpoint(): string | null {
+    return this.child ? `http://127.0.0.1:${this.port}` : null;
+  }
+
   async start(): Promise<void> {
     if (this.child) return;
     if (!fs.existsSync(this.options.scriptPath)) throw new Error('MEDIA_SERVICE_SCRIPT_NOT_FOUND');

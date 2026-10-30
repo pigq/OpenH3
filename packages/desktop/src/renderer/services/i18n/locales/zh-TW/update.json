@@ -132,11 +132,12 @@
     "removed": "下架",
     "linkUnavailable": "關聯範本已下架、修訂不符或需要升級用戶端；此作品僅供展示。"
   },
-  "sidebarAvailable": "有新版本 · 更新",
+  "sidebarAvailable": "有可用更新",
   "sidebarDownloading": "下載中 {{percent}}%",
   "sidebarRestart": "重新啟動並更新",
   "sidebarRetry": "更新失敗 · 重試",
   "openInstaller": "手動安裝（備用）",
   "confirmInstall": "確認安裝",
-  "confirmInstallDescription": "應用程式將關閉以安裝更新，執行中的工作可能中斷。請先完成目前工作，再確認更新。"
+  "confirmInstallDescription": "應用程式將關閉以安裝更新，執行中的工作可能中斷。請先完成目前工作，再確認更新。",
+  "sidebarWaitingForIdle": "更新已下載，等待所有任務完成後自動重新啟動"
 }

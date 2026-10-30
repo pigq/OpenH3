@@ -314,6 +314,7 @@ describe('autoUpdate quitAndInstall lifecycle', () => {
     const { autoUpdater } = await import('electron-updater');
 
     autoUpdaterService.resetForTest();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
     autoUpdaterService.setBeforeQuitAndInstall(async () => cleanup.promise);
 
     const installPromise = autoUpdaterService.quitAndInstall();
@@ -333,6 +334,7 @@ describe('autoUpdate quitAndInstall lifecycle', () => {
     const { autoUpdater } = await import('electron-updater');
 
     autoUpdaterService.resetForTest();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
     autoUpdaterService.setBeforeQuitAndInstall(async () => {
       throw cleanupError;
     });
@@ -346,6 +348,7 @@ describe('autoUpdate quitAndInstall lifecycle', () => {
     const { autoUpdaterService } = await import('@process/services/autoUpdaterService');
 
     autoUpdaterService.resetForTest();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
     autoUpdaterService.setBeforeQuitAndInstall(async () => cleanup.promise);
 
     const handler = await getAutoUpdateQuitAndInstallHandler();
@@ -369,6 +372,7 @@ describe('autoUpdate quitAndInstall lifecycle', () => {
     const { autoUpdaterService } = await import('@process/services/autoUpdaterService');
 
     autoUpdaterService.resetForTest();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
     autoUpdaterService.setBeforeQuitAndInstall(async () => {
       throw cleanupError;
     });

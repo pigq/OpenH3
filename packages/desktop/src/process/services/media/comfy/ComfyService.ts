@@ -192,6 +192,7 @@ export class ComfyService {
   private validating = false;
   private closing = false;
   private refreshing?: Promise<ComfyProfile[]>;
+  private activityKnown = true;
   constructor(private options: ComfyServiceOptions) {
     fs.mkdirSync(path.dirname(options.filename), { recursive: true });
     if (!fs.existsSync(options.filename)) return;
@@ -250,6 +251,7 @@ export class ComfyService {
       this.failures = new Map(saved.failures ?? []);
     } catch (error) {
       // Keep the original manifest intact: corrupt consent must never start an operation.
+      this.activityKnown = false;
       fs.copyFileSync(options.filename, `${options.filename}.corrupt-${Date.now()}`, fs.constants.COPYFILE_EXCL);
       this.catalog.clear();
       this.bindings.clear();
@@ -1214,6 +1216,23 @@ export class ComfyService {
   }
   async idle(): Promise<void> {
     await Promise.allSettled(this.pending);
+  }
+  /** Fail closed for submitted work whose remote completion is not confirmed. */
+  updateIdle(): boolean {
+    return (
+      this.activityKnown &&
+      !this.closing &&
+      !this.validating &&
+      !this.refreshing &&
+      !this.pending.size &&
+      !this.controllers.size &&
+      !this.requesting.size &&
+      ![...this.preparations.values()].some((value) => value.status === 'detecting') &&
+      ![...this.operations.values()].some((value) => ['authorized', 'running'].includes(value.state)) &&
+      ![...this.jobs.values()].some(
+        (value) => ['queued', 'running'].includes(value.status) || value.submissionPending || value.submissionUncertain
+      )
+    );
   }
   async close(): Promise<void> {
     this.closing = true;

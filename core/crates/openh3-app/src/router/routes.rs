@@ -208,6 +208,7 @@ pub fn create_router_with_states(services: &AppServices, states: ModuleStates) -
 pub fn create_router_with_all_state(services: &AppServices, states: ModuleStates, ws_state: WsHandlerState) -> Router {
     let boot = Instant::now();
     tracing::info!("startup: route tree build with states started");
+    let update_activity = Arc::new(crate::services::UpdateActivityService::new(services));
 
     let auth_state = AuthRouterState {
         jwt_service: services.jwt_service.clone(),
@@ -450,6 +451,11 @@ pub fn create_router_with_all_state(services: &AppServices, states: ModuleStates
     .merge(conversation_runtime)
     .merge(office_proxy)
     .merge(public_assets)
+    .merge(super::health::update_control_routes(update_activity.clone()))
+    .layer(middleware::from_fn_with_state(
+        update_activity,
+        super::health::update_admission,
+    ))
     .layer(middleware::from_fn(security_headers_middleware));
 
     // Raise the default request body limit from axum's 2MB default to

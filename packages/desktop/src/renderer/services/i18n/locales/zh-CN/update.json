@@ -132,11 +132,12 @@
     "removed": "撤下",
     "linkUnavailable": "关联模板已撤下、修订不匹配或需要升级客户端；此作品仅供展示。"
   },
-  "sidebarAvailable": "有新版本 · 更新",
+  "sidebarAvailable": "有可用更新",
   "sidebarDownloading": "下载中 {{percent}}%",
   "sidebarRestart": "重启并更新",
   "sidebarRetry": "更新失败 · 重试",
   "openInstaller": "手动安装（备用）",
   "confirmInstall": "确认安装",
-  "confirmInstallDescription": "应用将关闭以安装更新，运行中的任务可能中断。请先完成当前工作，再确认更新。"
+  "confirmInstallDescription": "应用将关闭以安装更新，运行中的任务可能中断。请先完成当前工作，再确认更新。",
+  "sidebarWaitingForIdle": "更新已下载，等待所有任务完成后自动重启"
 }

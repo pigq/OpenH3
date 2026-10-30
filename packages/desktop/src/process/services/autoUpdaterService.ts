@@ -8,10 +8,11 @@ import { autoUpdater } from 'electron-updater';
 import type { ProgressInfo, ResolvedUpdateFileInfo, UpdateInfo } from 'electron-updater';
 import type { UpdateInfoAndProvider } from 'electron-updater/out/AppUpdater';
 import type { DownloadedUpdateHelper } from 'electron-updater/out/DownloadedUpdateHelper';
+import type { StdioOptions } from 'node:child_process';
 import { findFile } from 'electron-updater/out/providers/Provider';
 import { CancellationError, CancellationToken } from 'builder-util-runtime';
 import type { AutoUpdateReadyResult } from '@/common/update/updateTypes';
-import { app, autoUpdater as nativeAutoUpdater } from 'electron';
+import { app, autoUpdater as nativeAutoUpdater, shell } from 'electron';
 import log from 'electron-log';
 import { EventEmitter } from 'events';
 import fs from 'fs';
@@ -29,6 +30,7 @@ import { buildGitHubFeedOptions } from './updateFeed';
 const FORCE_DEV_AUTO_UPDATE_ENV = 'AIONUI_FORCE_DEV_AUTO_UPDATE';
 const DEBUG_AUTO_UPDATE_CURRENT_VERSION_ENV = 'AIONUI_DEBUG_AUTO_UPDATE_CURRENT_VERSION';
 const MAC_NATIVE_INSTALL_READY_TIMEOUT_MS = 60_000;
+const INSTALL_IDLE_POLL_MS = 5000;
 
 /**
  * Returns the appropriate update channel name based on the current platform and architecture.
@@ -87,11 +89,21 @@ export interface AutoUpdateStatus {
 /** Callback type for broadcasting update status */
 export type StatusBroadcastCallback = (status: AutoUpdateStatus) => void;
 export type BeforeQuitAndInstallCallback = () => void | Promise<void>;
+/** Acquired atomically by authoritative workers after draining all work. */
+export type UpdateInstallLease = { release: () => void | Promise<void> };
+export type UpdateInstallGuard = () => Promise<UpdateInstallLease | null>;
 
 type AutoUpdaterCacheAccess = {
   updateInfoAndProvider?: UpdateInfoAndProvider | null;
   getOrCreateDownloadHelper?: () => Promise<DownloadedUpdateHelper>;
   constructor?: { name?: string };
+};
+
+type AutoUpdaterInstallAccess = {
+  quitAndInstallCalled?: boolean;
+  installerPath?: string | null;
+  app?: { quit: () => void };
+  spawnLog?: (command: string, args?: string[], env?: NodeJS.ProcessEnv, stdio?: StdioOptions) => Promise<boolean>;
 };
 
 /** Events emitted by AutoUpdaterService */
@@ -105,6 +117,19 @@ class AutoUpdaterService extends EventEmitter {
   private _allowPrerelease = false;
   private _statusBroadcastCallback: StatusBroadcastCallback | null = null;
   private _beforeQuitAndInstallCallback: BeforeQuitAndInstallCallback | null = null;
+  private _installGuard: UpdateInstallGuard | null = null;
+  private _installTimer: ReturnType<typeof setTimeout> | undefined;
+  private _installPromise: Promise<void> | null = null;
+  private _automaticCheckPromise: Promise<void> | null = null;
+  private _installHandedOff = false;
+  private _installHandoffPending = false;
+  private _installHandoffError: Error | null = null;
+  private _installHandoffAttempt: { failed: boolean } | null = null;
+  private _restoreWindowsHandoff: (() => void) | null = null;
+  private _installLease: UpdateInstallLease | null = null;
+  private _installRecoveryPromise: Promise<void> | null = null;
+  private _macExitTimer: ReturnType<typeof setTimeout> | undefined;
+  private _attemptedInstallVersion: string | undefined;
   private _activeDownloadPromise: Promise<{ success: boolean; error?: string }> | null = null;
   private _activeDownloadCancellationToken: CancellationToken | null = null;
   private _ignoreActiveDownloadEvents = false;
@@ -117,6 +142,7 @@ class AutoUpdaterService extends EventEmitter {
     timer: ReturnType<typeof setTimeout>;
   } | null = null;
   private _downloadedUpdateVersion: string | undefined;
+  private _hasDownloadedUpdate = false;
   /** Stores registered autoUpdater event handlers for cleanup and test access */
   private readonly _autoUpdaterHandlers = new Map<string, (...args: unknown[]) => void>();
   private readonly _nativeAutoUpdaterHandlers = new Map<string, (...args: unknown[]) => void>();
@@ -127,7 +153,8 @@ class AutoUpdaterService extends EventEmitter {
     autoUpdater.logger = log;
     (autoUpdater.logger as typeof log).transports.file.level = 'debug';
 
-    // Disable auto-download for manual control
+    // Downloads are started by the main-process policy after strict stable-version
+    // validation. Never let electron-updater install implicitly on app quit.
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = false;
     this.configureDevAutoUpdateDebug();
@@ -252,6 +279,93 @@ class AutoUpdaterService extends EventEmitter {
     this._beforeQuitAndInstallCallback = callback;
   }
 
+  /** The guard must reserve Core and media workers, including background work. */
+  setInstallGuard(guard: UpdateInstallGuard | null): void {
+    this._installGuard = guard;
+    this.scheduleAutomaticInstall();
+  }
+
+  /** Background stable checks run in main even when the renderer is unavailable. */
+  async runAutomaticUpdateCheck(): Promise<void> {
+    if (!app.isPackaged || !this._isInitialized || this._installHandedOff) return;
+    if (this._automaticCheckPromise) return this._automaticCheckPromise;
+    this._automaticCheckPromise = (async () => {
+      if (this._hasDownloadedUpdate && !this.wasInstallAttempted(this._downloadedUpdateVersion!)) {
+        this.scheduleAutomaticInstall();
+        return;
+      }
+      if (this._activeDownloadPromise) return;
+      this.setAllowPrerelease(false);
+      await this.checkForUpdates();
+    })();
+    try {
+      await this._automaticCheckPromise;
+    } finally {
+      this._automaticCheckPromise = null;
+    }
+  }
+
+  private automaticAttemptPath(): string {
+    return path.join(app.getPath('userData'), 'automatic-update-attempt.json');
+  }
+
+  private rememberInstallAttempt(): void {
+    const version = this._downloadedUpdateVersion;
+    if (!version) return;
+    this._attemptedInstallVersion = version;
+    fs.writeFileSync(
+      this.automaticAttemptPath(),
+      JSON.stringify({
+        currentVersion: app.getVersion(),
+        targetVersion: version,
+      })
+    );
+  }
+
+  private wasInstallAttempted(version: string): boolean {
+    if (this._attemptedInstallVersion === version) return true;
+    try {
+      const attempt = JSON.parse(fs.readFileSync(this.automaticAttemptPath(), 'utf8')) as {
+        currentVersion?: string;
+        targetVersion?: string;
+      };
+      return attempt.currentVersion === app.getVersion() && attempt.targetVersion === version;
+    } catch (error) {
+      // A corrupted marker is not evidence that a previous handoff is safe to repeat.
+      return (error as NodeJS.ErrnoException).code !== 'ENOENT';
+    }
+  }
+
+  private scheduleAutomaticInstall(): void {
+    const version = this._downloadedUpdateVersion;
+    const parsed = version ? parse(version) : null;
+    const installed = parse(app.getVersion());
+    if (
+      !app.isPackaged ||
+      !this._isInitialized ||
+      !this._hasDownloadedUpdate ||
+      !parsed ||
+      parsed.prerelease.length ||
+      !installed ||
+      !gt(parsed, installed) ||
+      !this._installGuard ||
+      this._installTimer ||
+      this._installPromise ||
+      this._installHandedOff ||
+      this.wasInstallAttempted(version!)
+    )
+      return;
+    this._installTimer = setTimeout(() => {
+      this._installTimer = undefined;
+      void this.quitAndInstall()
+        .catch((error: unknown) => {
+          log.warn('[auto-update] Automatic install deferred or failed', { error: String(error) });
+        })
+        .finally(() => this.scheduleAutomaticInstall());
+    }, INSTALL_IDLE_POLL_MS);
+    this._installTimer.unref?.();
+  }
+
   /**
    * Check if the service has been initialized
    */
@@ -268,12 +382,27 @@ class AutoUpdaterService extends EventEmitter {
     this._allowPrerelease = false;
     this._statusBroadcastCallback = null;
     this._beforeQuitAndInstallCallback = null;
+    this._installGuard = null;
+    clearTimeout(this._installTimer);
+    this._installTimer = undefined;
+    this._installPromise = null;
+    this._automaticCheckPromise = null;
+    this._installHandedOff = false;
+    this._installHandoffPending = false;
+    this._installHandoffError = null;
+    this._installHandoffAttempt = null;
+    this._restoreWindowsHandoff?.();
+    this._installLease = null;
+    clearTimeout(this._macExitTimer);
+    this._macExitTimer = undefined;
+    this._attemptedInstallVersion = undefined;
     this._activeDownloadPromise = null;
     this._activeDownloadCancellationToken = null;
     this._ignoreActiveDownloadEvents = false;
     this.clearNativeInstallReadyWait();
     this._nativeInstallReady = process.platform !== 'darwin';
     this._downloadedUpdateVersion = undefined;
+    this._hasDownloadedUpdate = false;
   }
 
   /**
@@ -286,12 +415,27 @@ class AutoUpdaterService extends EventEmitter {
     this._allowPrerelease = false;
     this._statusBroadcastCallback = null;
     this._beforeQuitAndInstallCallback = null;
+    this._installGuard = null;
+    clearTimeout(this._installTimer);
+    this._installTimer = undefined;
+    this._installPromise = null;
+    this._automaticCheckPromise = null;
+    this._installHandedOff = false;
+    this._installHandoffPending = false;
+    this._installHandoffError = null;
+    this._installHandoffAttempt = null;
+    this._restoreWindowsHandoff?.();
+    this._installLease = null;
+    clearTimeout(this._macExitTimer);
+    this._macExitTimer = undefined;
+    this._attemptedInstallVersion = undefined;
     this._activeDownloadPromise = null;
     this._activeDownloadCancellationToken = null;
     this._ignoreActiveDownloadEvents = false;
     this.clearNativeInstallReadyWait();
     this._nativeInstallReady = process.platform !== 'darwin';
     this._downloadedUpdateVersion = undefined;
+    this._hasDownloadedUpdate = false;
     // Remove listeners from this EventEmitter instance
     this.removeAllListeners();
     // Remove each registered handler from autoUpdater to prevent
@@ -368,6 +512,7 @@ class AutoUpdaterService extends EventEmitter {
         this.handleNativeInstallReady();
       });
       registerNative('error', (error: Error) => {
+        this.handleInstallHandoffError(error);
         void this.handleNativeInstallError(error);
       });
     }
@@ -423,6 +568,7 @@ class AutoUpdaterService extends EventEmitter {
       this._activeDownloadPromise = null;
       this._activeDownloadCancellationToken = null;
       this._downloadedUpdateVersion = info.version;
+      this._hasDownloadedUpdate = true;
       if (process.platform === 'darwin' && !this._nativeInstallReady) {
         log.debug('[auto-update] macOS service-level update-downloaded received before native install readiness', {
           version: info.version,
@@ -432,6 +578,7 @@ class AutoUpdaterService extends EventEmitter {
         status: 'downloaded',
         version: info.version,
       });
+      this.scheduleAutomaticInstall();
     });
 
     register('update-cancelled', () => {
@@ -448,6 +595,7 @@ class AutoUpdaterService extends EventEmitter {
         return;
       }
       log.error('Auto-updater error:', error);
+      this.handleInstallHandoffError(error);
       this._activeDownloadPromise = null;
       this._activeDownloadCancellationToken = null;
       this.broadcastStatus({
@@ -476,6 +624,7 @@ class AutoUpdaterService extends EventEmitter {
     void this.rejectNativeInstallReadyWaitWithLocalizedError('update.errors.prepareInstallFailed');
     this._nativeInstallReady = process.platform !== 'darwin';
     this._downloadedUpdateVersion = version;
+    this._hasDownloadedUpdate = false;
   }
 
   private getAutoUpdateDiagnosticOptions() {
@@ -663,6 +812,19 @@ class AutoUpdaterService extends EventEmitter {
         version: result.updateInfo.version,
         releaseDate: result.updateInfo.releaseDate,
       });
+      if (
+        app.isPackaged &&
+        feedVersion &&
+        installedVersion &&
+        !feedVersion.prerelease.length &&
+        !this.wasInstallAttempted(feedVersion.version)
+      ) {
+        void this.downloadUpdate().then((result) => {
+          if (!result.success) {
+            this.broadcastStatus({ status: 'error', version: feedVersion.version, error: result.error });
+          }
+        });
+      }
       return {
         success: true,
         updateInfo: result.updateInfo,
@@ -818,6 +980,12 @@ class AutoUpdaterService extends EventEmitter {
 
         log.debug('[auto-update] downloadUpdate requested');
         this._ignoreActiveDownloadEvents = false;
+        const updateInfo = (autoUpdater as unknown as AutoUpdaterCacheAccess).updateInfoAndProvider?.info;
+        this.broadcastStatus({
+          status: 'downloading',
+          version: updateInfo?.version,
+          progress: { bytesPerSecond: 0, percent: 0, transferred: 0, total: 0 },
+        });
         await autoUpdater.downloadUpdate(cancellationToken);
         log.debug('[auto-update] downloadUpdate started');
         return { success: true };
@@ -835,8 +1003,11 @@ class AutoUpdaterService extends EventEmitter {
       }
     };
 
-    this._activeDownloadPromise = runDownload();
-    return this._activeDownloadPromise;
+    const promise = runDownload();
+    this._activeDownloadPromise = promise;
+    const result = await promise;
+    if (!result.success && this._activeDownloadPromise === promise) this._activeDownloadPromise = null;
+    return result;
   }
 
   async cancelDownload(): Promise<{ success: boolean; error?: string }> {
@@ -855,7 +1026,155 @@ class AutoUpdaterService extends EventEmitter {
   }
 
   async quitAndInstall(): Promise<void> {
-    await this.waitForNativeInstallReady();
+    if (this._installRecoveryPromise) await this._installRecoveryPromise;
+    if (this._installHandedOff) return;
+    if (this._installPromise) return this._installPromise;
+    clearTimeout(this._installTimer);
+    this._installTimer = undefined;
+    this._installPromise = this.installWhenIdle();
+    try {
+      await this._installPromise;
+    } finally {
+      this._installPromise = null;
+      this.scheduleAutomaticInstall();
+    }
+  }
+
+  private async releaseInstallLease(): Promise<void> {
+    if (this._installRecoveryPromise) return this._installRecoveryPromise;
+    const lease = this._installLease;
+    this._installLease = null;
+    if (!lease) return;
+    const recovery = Promise.resolve().then(() => lease.release());
+    this._installRecoveryPromise = recovery;
+    try {
+      await recovery;
+    } finally {
+      if (this._installRecoveryPromise === recovery) this._installRecoveryPromise = null;
+    }
+  }
+
+  private handleInstallHandoffError(error: unknown): void {
+    if (!this._installHandoffPending && !this._installHandedOff) return;
+    this._installHandoffError = error instanceof Error ? error : new Error('Auto-updater rejected the install handoff');
+    if (this._installHandoffAttempt) this._installHandoffAttempt.failed = true;
+    this._installHandoffPending = false;
+    this._installHandedOff = false;
+    clearTimeout(this._installTimer);
+    this._installTimer = undefined;
+    clearTimeout(this._macExitTimer);
+    this._macExitTimer = undefined;
+    // BaseUpdater resets this flag only for synchronous failures. NSIS may
+    // dispatch a spawn error later, after doInstall already returned true.
+    const updater = autoUpdater as unknown as AutoUpdaterInstallAccess;
+    if (typeof updater.quitAndInstallCalled === 'boolean') updater.quitAndInstallCalled = false;
+    void this.releaseInstallLease().catch((recoveryError: unknown) => {
+      log.error('[auto-update] Could not recover workers after install failure', recoveryError);
+    });
+  }
+
+  private guardWindowsInstallerQuit(attempt: { failed: boolean }): () => void {
+    const updater = autoUpdater as unknown as AutoUpdaterInstallAccess;
+    const adapter = updater.app;
+    const spawnLog = updater.spawnLog;
+    if (process.platform !== 'win32' || !adapter || !spawnLog) return () => undefined;
+    this._restoreWindowsHandoff?.();
+    const quit = adapter.quit;
+    const installerPath = updater.installerPath;
+    const openPath = shell.openPath;
+    const pending = new Set<Promise<unknown>>();
+    let quitRequested = false;
+    const track = <T>(promise: Promise<T>): Promise<T> => {
+      pending.add(promise);
+      void promise.then(
+        () => pending.delete(promise),
+        () => pending.delete(promise)
+      );
+      return promise;
+    };
+    const trackedSpawn: NonNullable<AutoUpdaterInstallAccess['spawnLog']> = (...args) =>
+      track(spawnLog.apply(updater, args));
+    const trackedOpenPath: typeof shell.openPath = (filePath) => {
+      if (filePath !== installerPath) return openPath.call(shell, filePath);
+      // NSIS retries ENOENT through openPath. Electron resolves launch failures
+      // with an error string, which NSIS's rejection-only handler otherwise misses.
+      return track(
+        openPath.call(shell, filePath).then((error: string) => {
+          if (error) throw new Error(error);
+          return error;
+        })
+      );
+    };
+    const restore = () => {
+      if (updater.spawnLog === trackedSpawn) updater.spawnLog = spawnLog;
+      if (adapter.quit === gatedQuit) adapter.quit = quit;
+      if (shell.openPath === trackedOpenPath) shell.openPath = openPath;
+      if (this._restoreWindowsHandoff === restore) this._restoreWindowsHandoff = null;
+    };
+    const gatedQuit = () => {
+      if (quitRequested) return;
+      quitRequested = true;
+      // NSIS returns true before spawnLog settles; BaseUpdater then queues quit.
+      // Preserve its elevation/openPath fallbacks, but wait for every launch
+      // promise before letting that queued quit reach Electron's cleanup hooks.
+      void (async () => {
+        while (pending.size) await Promise.allSettled(pending);
+        restore();
+        if (!attempt.failed) quit.call(adapter);
+      })().catch((error: unknown) => {
+        restore();
+        this.handleInstallHandoffError(error);
+      });
+    };
+    updater.spawnLog = trackedSpawn;
+    adapter.quit = gatedQuit;
+    shell.openPath = trackedOpenPath;
+    this._restoreWindowsHandoff = restore;
+    return restore;
+  }
+
+  private async installWhenIdle(): Promise<void> {
+    if (!this._installGuard) throw new Error('UPDATE_ACTIVITY_GUARD_UNAVAILABLE');
+    // Wait for native readiness before reserving workers; the readiness handshake
+    // can take a minute and must not prevent users starting unrelated work.
+    try {
+      await this.waitForNativeInstallReady();
+    } catch (error) {
+      // Native staging errors are terminal for this target until an explicit
+      // retry. Unknown worker activity, by contrast, is safely polled again.
+      try {
+        this.rememberInstallAttempt();
+      } catch (markerError) {
+        log.error('[auto-update] Could not persist failed install attempt', markerError);
+      }
+      throw error;
+    }
+    const lease = await this._installGuard();
+    if (!lease) {
+      this.scheduleAutomaticInstall();
+      return;
+    }
+    this._installLease = lease;
+    this._installHandoffError = null;
+    this._installHandoffAttempt = { failed: false };
+    try {
+      // Persist before stopping workers so a failed installer cannot restart-loop.
+      this.rememberInstallAttempt();
+      await this.performQuitAndInstall();
+      if (this._installHandoffError) {
+        const { default: i18n } = await import('./i18n');
+        throw new Error(i18n.t('update.errors.prepareInstallFailed'), { cause: this._installHandoffError });
+      }
+      this._installHandedOff = true;
+    } catch (error) {
+      this.handleInstallHandoffError(error);
+      await this.releaseInstallLease();
+      throw error;
+    }
+  }
+
+  private async performQuitAndInstall(): Promise<void> {
+    this.broadcastStatus({ status: 'preparing-install', version: this._downloadedUpdateVersion });
 
     if (this._beforeQuitAndInstallCallback) {
       log.info('Running pre-install cleanup before quitAndInstall...');
@@ -868,13 +1187,11 @@ class AutoUpdaterService extends EventEmitter {
           platform: process.platform,
           version: this._downloadedUpdateVersion,
         });
-        if (process.platform === 'darwin') {
-          const { default: i18n } = await import('./i18n');
-          this.broadcastStatus({
-            status: 'error',
-            error: i18n.t('update.errors.prepareInstallFailed'),
-          });
-        }
+        const { default: i18n } = await import('./i18n');
+        this.broadcastStatus({
+          status: 'error',
+          error: i18n.t('update.errors.prepareInstallFailed'),
+        });
         throw error;
       }
     }
@@ -882,21 +1199,28 @@ class AutoUpdaterService extends EventEmitter {
     log.info('Quitting and installing update...');
     try {
       this.moveCwdOutOfInstallDirForWindowsHandoff();
-      // Confirmation is handled by the renderer. Apply in place without an installer
-      // wizard, then restart. NSIS receives --updated /S --force-run; no data reset.
+      // Workers are reserved and idle. Apply silently in place and restart.
+      // NSIS receives --updated /S --force-run; no data reset.
       // BaseUpdater can reject synchronously via an error event without throwing.
-      // Only observe this call; asynchronous installer failures remain updater-owned.
+      // The retained lease is also recovered by the permanent error listener if
+      // installer startup fails after this synchronous method has returned.
       let handoffError: Error | undefined;
+      const restoreWindowsHandoff = this.guardWindowsInstallerQuit(this._installHandoffAttempt!);
       const captureHandoffError = (error: unknown): void => {
         handoffError ??= error instanceof Error ? error : new Error('Auto-updater rejected the install handoff');
       };
       autoUpdater.on('error', captureHandoffError);
       try {
+        this._installHandoffPending = true;
         autoUpdater.quitAndInstall(true, true);
+      } catch (error) {
+        restoreWindowsHandoff();
+        throw error;
       } finally {
         autoUpdater.removeListener('error', captureHandoffError);
       }
       if (handoffError) {
+        restoreWindowsHandoff();
         throw handoffError;
       }
       recordAutoUpdateQuitAndInstall(this.getAutoUpdateDiagnosticOptions());
@@ -921,7 +1245,8 @@ class AutoUpdaterService extends EventEmitter {
     // cannot finish replacing the app bundle. Force-exit after a short delay
     // to let Squirrel receive the install signal.
     if (process.platform === 'darwin') {
-      setTimeout(() => {
+      this._macExitTimer = setTimeout(() => {
+        this._macExitTimer = undefined;
         app.exit(0);
       }, 1000);
     }

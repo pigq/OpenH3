@@ -20,6 +20,8 @@ import { app, BrowserWindow, ipcMain, nativeImage, powerMonitor, session } from 
 import fixPath from 'fix-path';
 import * as fs from 'fs';
 import * as path from 'path';
+import { randomBytes } from 'node:crypto';
+import { acquireUpdateInstallLease } from './process/startup/updateInstallGuard';
 import { initMainAdapterWithWindow } from './common/adapter/main';
 import { ipcBridge } from './common';
 import { initializeProcess } from './process';
@@ -214,6 +216,9 @@ let isExplicitQuit = false;
 let appReadyDone = false;
 
 let mainWindow: BrowserWindow;
+// Inherited only by owned child services, never sent to the renderer.
+const updateControlToken = randomBytes(32).toString('hex');
+process.env.OPENH3_UPDATE_CONTROL_TOKEN = updateControlToken;
 const backendManager = new BackendLifecycleManager(
   {
     version: app.getVersion(),
@@ -577,13 +582,72 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
         // Create status broadcast callback that emits via ipcBridge (pure emitter, no window binding)
         const statusBroadcast = createAutoUpdateStatusBroadcast();
         autoUpdaterService.initialize(statusBroadcast);
+        let updateCleanupStarted = false;
+        let retireStoppedCore: (() => void) | undefined;
+        autoUpdaterService.setInstallGuard(async () => {
+          const mediaEndpoint = mediaServiceProcess?.updateEndpoint;
+          if (backendManager.status !== 'running' || !mediaEndpoint) return null;
+          const coreEndpoint = `http://127.0.0.1:${backendManager.port}`;
+          const lease = await acquireUpdateInstallLease([coreEndpoint, mediaEndpoint], updateControlToken);
+          if (!lease) return null;
+          const contentLease = contentRuntime?.service.tryAcquireUpdateLease();
+          if (!contentLease) {
+            await lease.release();
+            return null;
+          }
+          retireStoppedCore = () => lease.retireEndpoint(coreEndpoint);
+          return {
+            release: async () => {
+              try {
+                if (updateCleanupStarted) {
+                  const { getDataPath } = await import('./process/utils/utils');
+                  const { getSystemDir } = await import('./process/utils/initStorage');
+                  const sysDir = getSystemDir();
+                  await backendManager.stop();
+                  retireStoppedCore?.();
+                  await contentRuntime?.stop();
+                  contentRuntime = await createContentRuntime(
+                    app.isPackaged
+                      ? path.join(process.resourcesPath, 'content-catalog')
+                      : path.resolve(__dirname, '../content-catalog'),
+                    getDataPath(),
+                    app.getVersion()
+                  );
+                  backendManager.configureContentHost(contentRuntime.host);
+                  const port = await backendManager.start(
+                    getDataPath(),
+                    sysDir.logDir,
+                    {
+                      cacheDir: sysDir.cacheDir,
+                      workDir: sysDir.workDir,
+                      logDir: sysDir.logDir,
+                    },
+                    { allowPendingOnHealthTimeout: false }
+                  );
+                  markBackendReady(port, 'backendManager.updateInstallRecovery');
+                  await mediaServiceProcess?.setBackendPort(port);
+                  updateCleanupStarted = false;
+                }
+              } catch (error) {
+                markBackendStartupFailed(error);
+                console.error('[OpenH3] Failed to restore services after update handoff failure');
+              } finally {
+                retireStoppedCore = undefined;
+                contentLease.release();
+                await lease.release();
+              }
+            },
+          };
+        });
         autoUpdaterService.setBeforeQuitAndInstall(async () => {
+          updateCleanupStarted = true;
           await backendManager.stop();
+          retireStoppedCore?.();
           await contentRuntime?.stop();
         });
         if (!process.env.IS_DISCONTINUED_BUILD) {
           const stopUpdateChecks = scheduleUpdateChecks(() => {
-            ipcBridge.update.open.emit({ source: 'startup' });
+            void autoUpdaterService.runAutomaticUpdateCheck();
           });
           mainWindow.once('closed', stopUpdateChecks);
         }

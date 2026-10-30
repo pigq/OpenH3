@@ -13,6 +13,75 @@ afterEach(async () => {
   for (const p of roots.splice(0)) await rm(p, { recursive: true, force: true });
 });
 describe('content orchestration', () => {
+  it('finishes an existing sync before fencing new work for app replacement and resumes after rollback', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'catalog-update-'));
+    roots.push(root);
+    let finish!: () => void;
+    const source = {
+      keys,
+      check: vi.fn(async () => {
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        return candidate(1);
+      }),
+      asset: vi.fn(async () => image),
+    };
+    const s = new ContentCatalogService({
+      store: new ContentStore(root, keys),
+      source,
+      builtin: candidate(0).catalog,
+      version: '2.0.0',
+    });
+    await s.initialize();
+    s.start();
+    const work = s.check();
+    expect(s.tryAcquireUpdateLease()).toBeNull();
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    finish();
+    await work;
+    const lease = s.tryAcquireUpdateLease();
+    expect(lease).not.toBeNull();
+    await expect(s.check()).rejects.toThrow('APP_UPDATE_PENDING');
+    await expect(s.restore()).rejects.toThrow('APP_UPDATE_PENDING');
+    await expect(s.asset(1, digest, new AbortController().signal)).rejects.toThrow('APP_UPDATE_PENDING');
+    await expect(s.setAutoSync(false)).rejects.toThrow('APP_UPDATE_PENDING');
+    lease!.release();
+    await expect(s.lease(1)).resolves.toBeUndefined();
+    await s.stop();
+  });
+
+  it('keeps a preview admitted before its first await protected through download completion', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'catalog-update-asset-'));
+    roots.push(root);
+    const store = new ContentStore(root, keys);
+    await store.initialize();
+    await store.activate(candidate(1));
+    let finish!: () => void;
+    const source = {
+      keys,
+      check: vi.fn(),
+      asset: vi.fn(async () => {
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        return image;
+      }),
+    };
+    const s = new ContentCatalogService({ store, source, builtin: candidate(0).catalog, version: '2.0.0' });
+    await s.initialize();
+    s.start();
+    const work = s.asset(1, digest, new AbortController().signal);
+    expect(s.tryAcquireUpdateLease()).toBeNull();
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    expect(s.tryAcquireUpdateLease()).toBeNull();
+    finish();
+    expect((await work).bytes).toEqual(image);
+    const lease = s.tryAcquireUpdateLease();
+    expect(lease).not.toBeNull();
+    lease!.release();
+    await s.stop();
+  });
   it('waits out a temporary foreign pin lock instead of failing application startup', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'catalog-service-'));
     roots.push(root);

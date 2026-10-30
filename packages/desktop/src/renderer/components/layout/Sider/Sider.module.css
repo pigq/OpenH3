@@ -51,3 +51,41 @@
 :global(.group):hover .pinnedTextSlot {
   padding-inline-end: 18px;
 }
+/* Semantic theme colors preserve contrast in both light and dark sidebars. */
+.updateButton[data-update-status]:global(.arco-btn.arco-btn-text) {
+  color: rgb(var(--primary-6));
+  background: rgba(var(--primary-6), 0.13);
+  border: 1px solid rgba(var(--primary-6), 0.28);
+  box-shadow: 0 2px 8px rgba(var(--primary-6), 0.12);
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.updateButton[data-update-status]:global(.arco-btn.arco-btn-text):hover {
+  color: rgb(var(--primary-7));
+  background: rgba(var(--primary-6), 0.22);
+  border-color: rgba(var(--primary-6), 0.5);
+}
+
+.updateButton[data-update-status]:global(.arco-btn.arco-btn-text):focus-visible {
+  outline: 2px solid rgb(var(--primary-6));
+  outline-offset: 3px;
+}
+
+.updateButton[data-update-status='error']:global(.arco-btn.arco-btn-text) {
+  color: rgb(var(--danger-6));
+  background: rgba(var(--danger-6), 0.12);
+  border-color: rgba(var(--danger-6), 0.3);
+}
+
+.updateDot {
+  position: absolute;
+  inset-block-start: -2px;
+  inset-inline-end: -2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}

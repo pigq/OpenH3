@@ -50,6 +50,29 @@ function fixture() {
 afterEach(() => directories.splice(0).forEach((directory) => fs.rmSync(directory, { recursive: true, force: true })));
 
 describe('creation installation continuation', () => {
+  it('defers app replacement when persisted continuations are unreadable', () => {
+    const f = fixture();
+    fs.writeFileSync(f.filename, '{broken');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(new CreationOperations(f.filename, f.ports).updateIdle()).toBe(false);
+    } finally {
+      log.mockRestore();
+    }
+  });
+  it('blocks app replacement while a consented install continuation can still enqueue work', async () => {
+    const f = fixture();
+    expect(f.operations.updateIdle()).toBe(true);
+    const operation = f.operations.request(requestId, { prompt: 'Original' });
+    expect(f.operations.updateIdle()).toBe(true);
+    f.operations.authorize(operation.id, 'conversation-1', consent);
+    expect(f.operations.updateIdle()).toBe(false);
+    await f.operations.start(operation.id, requestId);
+    expect(f.operations.updateIdle()).toBe(false);
+    f.ready();
+    await f.operations.pump();
+    expect(f.operations.updateIdle()).toBe(true);
+  });
   it('still cancels a submitted job after a transient job-ID persistence failure', async () => {
     const f = fixture();
     f.ready();

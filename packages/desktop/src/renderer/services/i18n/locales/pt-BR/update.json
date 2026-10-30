@@ -138,5 +138,6 @@
   "sidebarRetry": "Tentar novamente",
   "openInstaller": "Instalação manual (alternativa)",
   "confirmInstall": "Confirmar instalação",
-  "confirmInstallDescription": "O aplicativo será fechado para instalar a atualização. As tarefas em andamento podem ser interrompidas. Conclua seu trabalho antes de continuar."
+  "confirmInstallDescription": "O aplicativo será fechado para instalar a atualização. As tarefas em andamento podem ser interrompidas. Conclua seu trabalho antes de continuar.",
+  "sidebarWaitingForIdle": "Atualização baixada. Reinício automático após concluir todas as tarefas"
 }

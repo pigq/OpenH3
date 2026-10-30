@@ -7,6 +7,7 @@
 import path from 'path';
 import fs, { mkdtempSync, rmSync } from 'fs';
 import os from 'os';
+import { createRequire } from 'node:module';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -52,6 +53,8 @@ const appMock = vi.hoisted(() => ({
   exit: vi.fn(),
 }));
 
+const shellMock = vi.hoisted(() => ({ openPath: vi.fn() }));
+
 vi.mock('electron-updater', () => ({
   autoUpdater: autoUpdaterMock,
 }));
@@ -59,6 +62,7 @@ vi.mock('electron-updater', () => ({
 vi.mock('electron', () => ({
   app: appMock,
   autoUpdater: nativeAutoUpdaterMock,
+  shell: shellMock,
 }));
 
 vi.mock('@/process/services/i18n', () => ({
@@ -105,12 +109,16 @@ describe('AutoUpdaterService', () => {
     autoUpdaterMock.channel = undefined;
     appMock.getPath.mockReturnValue(testTempRoot);
     delete (autoUpdaterMock as { updateInfoAndProvider?: unknown }).updateInfoAndProvider;
+    delete (autoUpdaterMock as { app?: unknown }).app;
+    delete (autoUpdaterMock as { spawnLog?: unknown }).spawnLog;
+    delete (autoUpdaterMock as { quitAndInstallCalled?: unknown }).quitAndInstallCalled;
     appMock.isPackaged = false;
     delete process.env.AIONUI_FORCE_DEV_AUTO_UPDATE;
     delete process.env.AIONUI_DEBUG_AUTO_UPDATE_CURRENT_VERSION;
     nativeAutoUpdaterMock.on.mockReset();
     nativeAutoUpdaterMock.removeListener.mockReset();
     nativeAutoUpdaterMock.checkForUpdates.mockReset();
+    shellMock.openPath.mockReset();
     Object.defineProperty(autoUpdaterMock, 'currentVersion', {
       configurable: true,
       value: { version: '2.1.13' },
@@ -130,6 +138,119 @@ describe('AutoUpdaterService', () => {
     }
   });
 
+  it('automatically downloads a newer stable release without renderer interaction', async () => {
+    appMock.isPackaged = true;
+    autoUpdaterMock.checkForUpdates.mockResolvedValue({
+      isUpdateAvailable: true,
+      updateInfo: { version: '2.2.0', files: [], releaseDate: '' },
+    });
+    autoUpdaterMock.downloadUpdate.mockResolvedValue([]);
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    autoUpdaterService.initialize();
+    await autoUpdaterService.runAutomaticUpdateCheck();
+    expect(autoUpdaterMock.downloadUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for a main-process idle lease and never installs while busy or unknown', async () => {
+    vi.useFakeTimers();
+    appMock.isPackaged = true;
+    const release = vi.fn();
+    const guard = vi.fn().mockResolvedValue(null);
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(guard);
+    autoUpdaterService.triggerEventForTest('update-downloaded', { version: '2.2.0' });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled();
+    guard.mockRejectedValueOnce(new Error('activity service unavailable'));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled();
+    guard.mockResolvedValue({ release });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledExactlyOnceWith(true, true);
+    expect(release).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed without a guard even for an explicit install request', async () => {
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    autoUpdaterService.initialize();
+    await expect(autoUpdaterService.quitAndInstall()).rejects.toThrow('UPDATE_ACTIVITY_GUARD_UNAVAILABLE');
+    expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled();
+  });
+
+  it('does not treat an available release as an already downloaded installer', async () => {
+    vi.useFakeTimers();
+    appMock.isPackaged = true;
+    const guard = vi.fn().mockResolvedValue({ release: vi.fn() });
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    autoUpdaterService.initialize();
+    autoUpdaterService.triggerEventForTest('update-available', { version: '2.2.0' });
+    autoUpdaterService.setInstallGuard(guard);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(guard).not.toHaveBeenCalled();
+    expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled();
+  });
+
+  it.each(['2.1.13', '2.1.12', '2.2.0-beta.1', 'invalid'])('does not automatically download %s', async (version) => {
+    appMock.isPackaged = true;
+    autoUpdaterMock.checkForUpdates.mockResolvedValue({
+      isUpdateAvailable: true,
+      updateInfo: { version, files: [], releaseDate: '' },
+    });
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    autoUpdaterService.initialize();
+    await autoUpdaterService.runAutomaticUpdateCheck();
+    expect(autoUpdaterMock.downloadUpdate).not.toHaveBeenCalled();
+  });
+
+  it('releases the idle lease on failed cleanup and does not retry a failed version automatically', async () => {
+    vi.useFakeTimers();
+    appMock.isPackaged = true;
+    const release = vi.fn();
+    const guard = vi.fn().mockResolvedValue({ release });
+    const cleanup = vi.fn().mockRejectedValue(new Error('backend did not stop'));
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(guard);
+    autoUpdaterService.setBeforeQuitAndInstall(cleanup);
+    autoUpdaterService.triggerEventForTest('update-downloaded', { version: '2.2.0' });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(15000);
+    autoUpdaterService.triggerEventForTest('update-downloaded', { version: '2.2.0' });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    vi.resetModules();
+    const { autoUpdaterService: restarted } = await import('@/process/services/autoUpdaterService');
+    restarted.initialize();
+    restarted.setInstallGuard(guard);
+    restarted.setBeforeQuitAndInstall(cleanup);
+    restarted.triggerEventForTest('update-downloaded', { version: '2.2.0' });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it('bounds automatic native-staging failures instead of retrying every idle poll', async () => {
+    vi.useFakeTimers();
+    setPlatform('darwin');
+    appMock.isPackaged = true;
+    nativeAutoUpdaterMock.checkForUpdates.mockImplementation(() => {
+      throw new Error('staging failed');
+    });
+    const guard = vi.fn().mockResolvedValue({ release: vi.fn() });
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(guard);
+    autoUpdaterService.triggerEventForTest('update-downloaded', { version: '2.2.0' });
+    await vi.advanceTimersByTimeAsync(130_000);
+    expect(nativeAutoUpdaterMock.checkForUpdates).toHaveBeenCalledTimes(1);
+    expect(guard).not.toHaveBeenCalled();
+    expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled();
+  });
+
   it('does not use the stable CDN updater when prerelease manual mode is enabled', async () => {
     autoUpdaterMock.checkForUpdates.mockResolvedValue({
       isUpdateAvailable: true,
@@ -145,6 +266,7 @@ describe('AutoUpdaterService', () => {
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
 
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
     autoUpdaterService.setAllowPrerelease(true);
 
     const result = await autoUpdaterService.checkForUpdates();
@@ -168,6 +290,7 @@ describe('AutoUpdaterService', () => {
 
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
 
     const result = await autoUpdaterService.checkForUpdates();
 
@@ -188,6 +311,7 @@ describe('AutoUpdaterService', () => {
 
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
 
     const result = await autoUpdaterService.checkForUpdates();
 
@@ -259,6 +383,166 @@ describe('AutoUpdaterService', () => {
     expect(getActiveErrorHandlers()).toEqual([getErrorHandler()]);
   };
 
+  it.each(['win32', 'linux', 'darwin'] as const)(
+    'recovers the retained idle lease after an asynchronous %s handoff error and permits explicit retry',
+    async (platform) => {
+      setPlatform(platform);
+      vi.useFakeTimers();
+      appMock.isPackaged = true;
+      const release = vi.fn().mockResolvedValue(undefined);
+      const guard = vi.fn().mockResolvedValue({ release });
+      const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+      autoUpdaterService.initialize();
+      autoUpdaterService.setInstallGuard(guard);
+      autoUpdaterService.triggerEventForTest('update-downloaded', { version: '2.2.0' });
+      if (platform === 'darwin') getNativeUpdateDownloadedHandler()();
+      await autoUpdaterService.quitAndInstall();
+      expect(release).not.toHaveBeenCalled();
+      const launchError = new Error('asynchronous installer launch failure');
+      if (platform === 'darwin') getNativeErrorHandler()(launchError);
+      else autoUpdaterService.triggerEventForTest('error', launchError);
+      await vi.advanceTimersByTimeAsync(1001);
+      expect(release).toHaveBeenCalledTimes(1);
+      expect(appMock.exit).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(15000);
+      expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledTimes(1);
+      await autoUpdaterService.quitAndInstall();
+      expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledTimes(2);
+      expect(guard).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it.each(['rejects', 'resolves'] as const)(
+    'gates the queued Windows quit until real NSIS async spawn %s',
+    async (outcome) => {
+      setPlatform('win32');
+      vi.useFakeTimers();
+      const { NsisUpdater } = await import('electron-updater/out/NsisUpdater');
+      let rejectSpawn!: (error: Error) => void;
+      let resolveSpawn!: (value: boolean) => void;
+      const spawnLog = vi.fn(
+        () =>
+          new Promise<boolean>((resolve, reject) => {
+            resolveSpawn = resolve;
+            rejectSpawn = reject;
+          })
+      );
+      const quit = vi.fn();
+      const release = vi.fn().mockResolvedValue(undefined);
+      const vendor = Object.assign(autoUpdaterMock, {
+        app: { quit },
+        spawnLog,
+        quitAndInstallCalled: false,
+        installerPath: 'C:/cached/OpenH3-update.exe',
+        downloadedUpdateHelper: null,
+        _logger: { info: vi.fn() },
+        dispatchError: (error: Error) => {
+          getErrorHandler()(error);
+        },
+      });
+      autoUpdaterMock.quitAndInstall.mockImplementationOnce(() => {
+        vendor.quitAndInstallCalled = true;
+        const started = NsisUpdater.prototype.doInstall.call(vendor as unknown as InstanceType<typeof NsisUpdater>, {
+          isSilent: true,
+          isForceRunAfter: true,
+          isAdminRightsRequired: false,
+        });
+        // BaseUpdater schedules AppAdapter.quit after doInstall returns true.
+        if (started) setTimeout(() => vendor.app.quit(), 0);
+      });
+      const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+      autoUpdaterService.initialize();
+      autoUpdaterService.setInstallGuard(async () => ({ release }));
+      await autoUpdaterService.quitAndInstall();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(quit).not.toHaveBeenCalled();
+      if (outcome === 'rejects') rejectSpawn(Object.assign(new Error('spawn EIO'), { code: 'EIO' }));
+      else resolveSpawn(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(quit).toHaveBeenCalledTimes(outcome === 'rejects' ? 0 : 1);
+      expect(release).toHaveBeenCalledTimes(outcome === 'rejects' ? 1 : 0);
+      expect(vendor.quitAndInstallCalled).toBe(outcome === 'resolves');
+      expect(vendor.spawnLog).toBe(spawnLog);
+      expect(vendor.app.quit).toBe(quit);
+    }
+  );
+
+  it.each(['opens', 'returns-error', 'rejects'] as const)(
+    'tracks real NSIS ENOENT openPath fallback when it %s',
+    async (outcome) => {
+      setPlatform('win32');
+      vi.useFakeTimers();
+      appMock.isPackaged = true;
+      const { NsisUpdater } = await import('electron-updater/out/NsisUpdater');
+      const testRequire = createRequire(import.meta.url);
+      const vendorRequire = createRequire(testRequire.resolve('electron-updater/out/NsisUpdater'));
+      const electronPath = vendorRequire.resolve('electron');
+      vendorRequire('electron');
+      const electronModule = vendorRequire.cache[electronPath]!;
+      const originalExports: unknown = electronModule.exports;
+      electronModule.exports = { shell: shellMock };
+      try {
+        let resolveOpen!: (result: string) => void;
+        let rejectOpen!: (error: Error) => void;
+        shellMock.openPath.mockImplementation(
+          () =>
+            new Promise<string>((resolve, reject) => {
+              resolveOpen = resolve;
+              rejectOpen = reject;
+            })
+        );
+        const openPath = shellMock.openPath;
+        const spawnLog = vi.fn().mockRejectedValue(Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' }));
+        const quit = vi.fn();
+        const release = vi.fn().mockResolvedValue(undefined);
+        const vendor = Object.assign(autoUpdaterMock, {
+          app: { quit },
+          spawnLog,
+          quitAndInstallCalled: false,
+          installerPath: 'C:/cached/OpenH3-update.exe',
+          downloadedUpdateHelper: null,
+          _logger: { info: vi.fn() },
+          dispatchError: (error: Error) => {
+            getErrorHandler()(error);
+          },
+        });
+        autoUpdaterMock.quitAndInstall.mockImplementationOnce(() => {
+          vendor.quitAndInstallCalled = true;
+          const started = NsisUpdater.prototype.doInstall.call(vendor as unknown as InstanceType<typeof NsisUpdater>, {
+            isSilent: true,
+            isForceRunAfter: true,
+            isAdminRightsRequired: false,
+          });
+          if (started) setTimeout(() => vendor.app.quit(), 0);
+        });
+        const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+        autoUpdaterService.initialize();
+        autoUpdaterService.setInstallGuard(async () => ({ release }));
+        autoUpdaterService.triggerEventForTest('update-downloaded', { version: '2.2.0' });
+        await autoUpdaterService.quitAndInstall();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(openPath).toHaveBeenCalledExactlyOnceWith(vendor.installerPath);
+        expect(quit).not.toHaveBeenCalled();
+        if (outcome === 'rejects') rejectOpen(new Error('installer unavailable'));
+        else resolveOpen(outcome === 'opens' ? '' : 'The file does not exist');
+        await vi.advanceTimersByTimeAsync(0);
+        expect(quit).toHaveBeenCalledTimes(outcome === 'opens' ? 1 : 0);
+        expect(release).toHaveBeenCalledTimes(outcome === 'opens' ? 0 : 1);
+        expect(vendor.quitAndInstallCalled).toBe(outcome === 'opens');
+        expect(vendor.spawnLog).toBe(spawnLog);
+        expect(vendor.app.quit).toBe(quit);
+        expect(shellMock.openPath).toBe(openPath);
+        expect(
+          JSON.parse(fs.readFileSync(path.join(appMock.getPath('userData'), 'automatic-update-attempt.json'), 'utf8'))
+        ).toEqual({ currentVersion: appMock.getVersion(), targetVersion: '2.2.0' });
+        await vi.advanceTimersByTimeAsync(15000);
+        expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledTimes(1);
+      } finally {
+        electronModule.exports = originalExports;
+      }
+    }
+  );
+
   const getUpdateDownloadedHandler = (): ((info: { version: string }) => void) => {
     const entry = autoUpdaterMock.on.mock.calls.find(([event]) => event === 'update-downloaded');
     if (!entry) throw new Error('update-downloaded handler not registered');
@@ -287,6 +571,7 @@ describe('AutoUpdaterService', () => {
     appMock.isPackaged = false;
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
 
     const statuses: Array<{ status: string; error?: string }> = [];
     autoUpdaterService.on('update-status', (s: { status: string; error?: string }) => statuses.push(s));
@@ -302,6 +587,7 @@ describe('AutoUpdaterService', () => {
     appMock.isPackaged = false;
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
 
     const statuses: Array<{ status: string; error?: string }> = [];
     autoUpdaterService.on('update-status', (s: { status: string; error?: string }) => statuses.push(s));
@@ -323,6 +609,7 @@ describe('AutoUpdaterService', () => {
 
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
 
     const first = autoUpdaterService.downloadUpdate();
     const second = autoUpdaterService.downloadUpdate();
@@ -339,6 +626,7 @@ describe('AutoUpdaterService', () => {
 
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
 
     await expect(autoUpdaterService.downloadUpdate()).resolves.toEqual({ success: true });
     getUpdateDownloadedHandler()({ version: '2.2.0' });
@@ -358,6 +646,7 @@ describe('AutoUpdaterService', () => {
 
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
 
     const download = autoUpdaterService.downloadUpdate();
 
@@ -381,6 +670,7 @@ describe('AutoUpdaterService', () => {
     try {
       const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
       autoUpdaterService.initialize();
+      autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
       await expect(autoUpdaterService.restoreDownloadedUpdateIfAvailable()).resolves.toEqual({
         success: true,
         data: { ready: false },
@@ -422,6 +712,7 @@ describe('AutoUpdaterService', () => {
 
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
 
     await expect(autoUpdaterService.restoreDownloadedUpdateIfAvailable()).resolves.toEqual({
       success: true,
@@ -465,6 +756,7 @@ describe('AutoUpdaterService', () => {
 
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
 
     await expect(autoUpdaterService.restoreDownloadedUpdateIfAvailable()).resolves.toEqual({
       success: true,
@@ -481,6 +773,7 @@ describe('AutoUpdaterService', () => {
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
 
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
     autoUpdaterService.setBeforeQuitAndInstall(cleanup);
     autoUpdaterService.on('update-status', (status: { status: string; error?: string }) => statuses.push(status));
     getUpdateDownloadedHandler()({ version: '2.2.0' });
@@ -511,6 +804,7 @@ describe('AutoUpdaterService', () => {
     const cleanup = vi.fn();
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
     autoUpdaterService.setBeforeQuitAndInstall(cleanup);
     getUpdateDownloadedHandler()({ version: '2.2.0' });
     expect(autoUpdaterMock.autoInstallOnAppQuit).toBe(false);
@@ -534,6 +828,7 @@ describe('AutoUpdaterService', () => {
     const cleanup = vi.fn();
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
     autoUpdaterService.setBeforeQuitAndInstall(cleanup);
     getUpdateDownloadedHandler()({ version: '2.2.0' });
     nativeAutoUpdaterMock.checkForUpdates.mockImplementationOnce(() => {
@@ -561,6 +856,7 @@ describe('AutoUpdaterService', () => {
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
 
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
     autoUpdaterService.on('update-status', (status: { status: string; error?: string }) => statuses.push(status));
     getUpdateDownloadedHandler()({ version: '2.2.0' });
 
@@ -583,6 +879,7 @@ describe('AutoUpdaterService', () => {
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
 
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
     autoUpdaterService.on('update-status', (status: { status: string; error?: string }) => statuses.push(status));
     getUpdateDownloadedHandler()({ version: '2.2.0' });
 
@@ -605,6 +902,7 @@ describe('AutoUpdaterService', () => {
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
 
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
     autoUpdaterService.setBeforeQuitAndInstall(cleanup);
     getUpdateDownloadedHandler()({ version: '2.2.0' });
     getNativeUpdateDownloadedHandler()();
@@ -629,6 +927,7 @@ describe('AutoUpdaterService', () => {
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
 
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
     getUpdateDownloadedHandler()({ version: '2.2.0' });
 
     const installPromise = autoUpdaterService.quitAndInstall();
@@ -648,6 +947,7 @@ describe('AutoUpdaterService', () => {
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
 
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
     autoUpdaterService.setBeforeQuitAndInstall(async () => {
       throw cleanupError;
     });
@@ -676,6 +976,7 @@ describe('AutoUpdaterService', () => {
       throw new Error('handoff failed');
     });
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
     autoUpdaterService.on('update-status', (status: { status: string; error?: string }) => statuses.push(status));
     getUpdateDownloadedHandler()({ version: '2.2.0' });
     getNativeUpdateDownloadedHandler()();
@@ -701,6 +1002,7 @@ describe('AutoUpdaterService', () => {
       const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
 
       autoUpdaterService.initialize();
+      autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
       autoUpdaterService.setBeforeQuitAndInstall(cleanup);
 
       await autoUpdaterService.quitAndInstall();
@@ -724,6 +1026,7 @@ describe('AutoUpdaterService', () => {
       const statuses: Array<{ status: string; error?: string }> = [];
       const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
       autoUpdaterService.initialize();
+      autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
       autoUpdaterService.on('update-status', (status: { status: string; error?: string }) => statuses.push(status));
       if (platform === 'darwin') {
         getUpdateDownloadedHandler()({ version: '2.2.0' });
@@ -758,6 +1061,7 @@ describe('AutoUpdaterService', () => {
     const rejection = { message: 'native rejected the handoff', toString: stringify };
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
     autoUpdaterMock.quitAndInstall.mockImplementationOnce(() => {
       for (const handler of getActiveErrorHandlers()) handler(rejection);
     });
@@ -779,6 +1083,7 @@ describe('AutoUpdaterService', () => {
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
 
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
     autoUpdaterService.setBeforeQuitAndInstall(cleanup);
 
     await autoUpdaterService.quitAndInstall();
@@ -794,6 +1099,7 @@ describe('AutoUpdaterService', () => {
     const expectedCwd = path.join(appMock.getPath('temp'), 'openh3-updater-cwd');
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
     autoUpdaterService.initialize();
+    autoUpdaterService.setInstallGuard(async () => ({ release: vi.fn() }));
 
     await autoUpdaterService.quitAndInstall();
 

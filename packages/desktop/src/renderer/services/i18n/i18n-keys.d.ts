@@ -3492,6 +3492,7 @@ export type I18nKey =
   | 'update.sidebarDownloading'
   | 'update.sidebarRestart'
   | 'update.sidebarRetry'
+  | 'update.sidebarWaitingForIdle'
   | 'update.upToDateTitle'
   | 'update.viewRelease';
 

@@ -34,6 +34,8 @@ export class ContentCatalogService {
   private timer?: ReturnType<typeof setTimeout>;
   private gcTimer?: ReturnType<typeof setInterval>;
   private stopped = true;
+  private updatePaused = false;
+  private admitted = 0;
   private failures = 0;
   private listeners = new Set<() => void>();
   private leases = new Map<number, { catalog: ContentCatalog; candidate?: ContentCandidate; expires: number }>();
@@ -89,11 +91,39 @@ export class ContentCatalogService {
     for (const fn of this.listeners) fn();
   }
   start(): void {
-    if (!this.stopped) return;
+    if (!this.stopped || this.updatePaused) return;
     this.stopped = false;
     this.schedule(30000);
     this.gcTimer = setInterval(() => void this.collect(), 60000);
     this.gcTimer.unref?.();
+  }
+  /** Synchronously fence all task entry points without cancelling admitted work. */
+  tryAcquireUpdateLease(): { release: () => void } | null {
+    if (
+      this.stopped ||
+      this.updatePaused ||
+      this.operation ||
+      this.collection ||
+      this.admitted ||
+      this.assetOperations.size ||
+      this.assetRequests.size
+    )
+      return null;
+    this.updatePaused = true;
+    clearTimeout(this.timer);
+    clearInterval(this.gcTimer);
+    let released = false;
+    return {
+      release: () => {
+        if (released) return;
+        released = true;
+        this.updatePaused = false;
+        if (!this.stopped) {
+          this.stopped = true;
+          this.start();
+        }
+      },
+    };
   }
   async stop(): Promise<void> {
     this.stopped = true;
@@ -112,20 +142,31 @@ export class ContentCatalogService {
     clearTimeout(this.timer);
     if (!this.stopped && this.status.autoSync) {
       this.timer = setTimeout(() => {
-        void this.check().then(() => {
-          const delays = [60000, 300000, 900000];
-          const retry =
-            this.status.phase === 'failed' &&
-            /^(NETWORK_ERROR|HTTP_(408|429|5\d\d))$/.test(this.status.errorCode ?? '') &&
-            this.failures < 3;
-          this.schedule(retry ? delays[this.failures++] : 21600000);
-          if (!retry) this.failures = 0;
-        });
+        void this.check()
+          .then(() => {
+            const delays = [60000, 300000, 900000];
+            const retry =
+              this.status.phase === 'failed' &&
+              /^(NETWORK_ERROR|HTTP_(408|429|5\d\d))$/.test(this.status.errorCode ?? '') &&
+              this.failures < 3;
+            this.schedule(retry ? delays[this.failures++] : 21600000);
+            if (!retry) this.failures = 0;
+          })
+          .catch((): void => {});
       }, delay);
       this.timer.unref?.();
     }
   }
   async setAutoSync(value: boolean): Promise<void> {
+    if (this.updatePaused) throw new ContentCatalogError('APP_UPDATE_PENDING');
+    this.admitted += 1;
+    try {
+      await this.applyAutoSync(value);
+    } finally {
+      this.admitted -= 1;
+    }
+  }
+  private async applyAutoSync(value: boolean): Promise<void> {
     await this.options.store.settings(value);
     this.set({ autoSync: value });
     if (!value) {
@@ -137,6 +178,7 @@ export class ContentCatalogService {
     this.abort?.abort();
   }
   check(): Promise<void> {
+    if (this.updatePaused) return Promise.reject(new ContentCatalogError('APP_UPDATE_PENDING'));
     if (this.operation) return this.operation.catch(() => {});
     this.abort = new AbortController();
     const signal = this.abort.signal;
@@ -231,6 +273,7 @@ export class ContentCatalogService {
     }
   }
   restore(): Promise<void> {
+    if (this.updatePaused) return Promise.reject(new ContentCatalogError('APP_UPDATE_PENDING'));
     if (this.operation) return Promise.reject(new ContentCatalogError('BUSY'));
     this.operation = this.runRestore().finally(() => {
       this.operation = undefined;
@@ -247,6 +290,15 @@ export class ContentCatalogService {
     this.set({ phase: 'ready', activeSequence: this.catalog.releaseSequence, errorCode: undefined, changes: diff });
   }
   async lease(sequence: number): Promise<void> {
+    if (this.updatePaused) throw new ContentCatalogError('APP_UPDATE_PENDING');
+    this.admitted += 1;
+    try {
+      await this.pinSequence(sequence);
+    } finally {
+      this.admitted -= 1;
+    }
+  }
+  private async pinSequence(sequence: number): Promise<void> {
     for (const [id, lease] of this.leases) if (lease.expires < Date.now()) this.leases.delete(id);
     const catalog =
       sequence === this.catalog.releaseSequence
@@ -273,6 +325,7 @@ export class ContentCatalogService {
     await this.options.store.pin(pins);
   }
   private collect(): Promise<void> {
+    if (this.updatePaused) return Promise.resolve();
     // Pending covers are not committed receipts yet. Never collect across an
     // update or restore, and let a pre-existing collection finish first.
     if (this.operation) return Promise.resolve();
@@ -298,6 +351,19 @@ export class ContentCatalogService {
     }
   }
   async asset(sequence: number, hash: string, signal: AbortSignal): Promise<{ bytes: Buffer; asset: ContentAsset }> {
+    if (this.updatePaused) throw new ContentCatalogError('APP_UPDATE_PENDING');
+    this.admitted += 1;
+    try {
+      return await this.readAsset(sequence, hash, signal);
+    } finally {
+      this.admitted -= 1;
+    }
+  }
+  private async readAsset(
+    sequence: number,
+    hash: string,
+    signal: AbortSignal
+  ): Promise<{ bytes: Buffer; asset: ContentAsset }> {
     signal.throwIfAborted();
     await this.lease(sequence);
     const lease = this.leases.get(sequence)!;

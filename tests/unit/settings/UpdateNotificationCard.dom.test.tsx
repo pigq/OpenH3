@@ -89,7 +89,12 @@ vi.mock('@/common', () => ({
   },
 }));
 
-import { getSidebarUpdateState, requestSidebarUpdateAction } from '@/renderer/components/settings/updateReadyState';
+import {
+  getSidebarUpdateState,
+  requestSidebarUpdateAction,
+  setSidebarUpdateState,
+} from '@/renderer/components/settings/updateReadyState';
+import { initialUpdateNotificationState } from '@/renderer/components/settings/updateNotificationState';
 import SiderFooter from '@/renderer/components/layout/Sider/SiderFooter';
 import UpdateNotificationCard from '@/renderer/components/settings/UpdateNotificationCard';
 
@@ -154,6 +159,32 @@ describe('UpdateNotificationCard', () => {
     expect(mocks.autoStatusHandler).toBeNull();
   });
 
+  it('tracks main-owned automatic downloads without a user download click or restart confirmation', async () => {
+    render(<UpdateNotificationCard />);
+    await act(async () => {
+      mocks.autoStatusHandler?.({
+        status: 'downloading',
+        version: '3.0.7',
+        progress: {
+          bytesPerSecond: 100,
+          percent: 42,
+          transferred: 42,
+          total: 100,
+        },
+      });
+    });
+    expect(getSidebarUpdateState()?.status).toBe('downloading');
+    expect(getSidebarUpdateState()?.autoUpdateInfo?.version).toBe('3.0.7');
+    expect(mocks.autoUpdateDownloadMock).not.toHaveBeenCalled();
+    await act(async () => {
+      mocks.autoStatusHandler?.({ status: 'downloaded', version: '3.0.7' });
+    });
+    expect(getSidebarUpdateState()?.status).toBe('downloaded');
+    expect(screen.queryByText('update.confirmInstall')).not.toBeInTheDocument();
+    expect(screen.getByText('update.sidebarWaitingForIdle')).toBeInTheDocument();
+    expect(mocks.autoUpdateQuitAndInstallMock).not.toHaveBeenCalled();
+  });
+
   it('does not replay availability discovered during cached restore as a popup', async () => {
     let resolve!: (value: unknown) => void;
     mocks.autoUpdateRestoreDownloadedMock.mockImplementation(
@@ -186,13 +217,13 @@ describe('UpdateNotificationCard', () => {
         />
       </>
     );
-    expect(screen.queryByRole('button', { name: 'update.manualInstall' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'update.sidebarAvailable' })).not.toBeInTheDocument();
     await act(async () => {
       mocks.updateOpenHandler?.({ source: 'startup' });
     });
     expect(screen.queryByTestId('update-notification-card')).not.toBeInTheDocument();
     expect(getSidebarUpdateState()?.status).toBe('available');
-    fireEvent.click(screen.getByRole('button', { name: 'update.manualInstall' }));
+    fireEvent.click(screen.getByRole('button', { name: 'update.sidebarAvailable' }));
     await act(async () => {
       requestSidebarUpdateAction();
     });
@@ -232,7 +263,7 @@ describe('UpdateNotificationCard', () => {
     await act(async () => {
       mocks.updateOpenHandler?.({ source: 'startup' });
     });
-    const button = screen.getByRole('button', { name: 'update.manualInstall' });
+    const button = screen.getByRole('button', { name: 'update.sidebarAvailable' });
     expect(button).not.toHaveTextContent('update.manualInstall');
     fireEvent.click(button);
     expect(mocks.updateDownloadMock).not.toHaveBeenCalled();
@@ -416,16 +447,13 @@ describe('UpdateNotificationCard', () => {
     expect(screen.queryByTestId('update-notification-card')).not.toBeInTheDocument();
   });
 
-  it('requires confirmation before installation and supports cancellation', async () => {
+  it('requests idle installation without a repeated confirmation and waits for main readiness', async () => {
     mocks.autoUpdateRestoreDownloadedMock.mockResolvedValue({ success: true, data: { ready: true, version: '2.2.0' } });
     render(<UpdateNotificationCard />);
     fireEvent.click(await screen.findByText('update.restartNow'));
-    expect(mocks.autoUpdateQuitAndInstallMock).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByText('update.cancel'));
-    expect(mocks.autoUpdateQuitAndInstallMock).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByText('update.restartNow'));
-    fireEvent.click(screen.getByText('update.confirmInstall'));
-    await waitFor(() => expect(mocks.autoUpdateQuitAndInstallMock).toHaveBeenCalledTimes(1));
+    expect(mocks.autoUpdateQuitAndInstallMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('update.confirmInstall')).not.toBeInTheDocument();
+    expect(getSidebarUpdateState()?.status).toBe('downloaded');
   });
 
   it('renders a bottom-right notification card for auto-update availability without a dialog', async () => {
@@ -475,7 +503,7 @@ describe('UpdateNotificationCard', () => {
 
     expect(await screen.findByTestId('update-notification-card')).toBeInTheDocument();
     // Downloaded state shows the "download complete" label + restart button (no progress bar).
-    expect(screen.getByText('update.downloadCompleteTitle')).toBeInTheDocument();
+    expect(screen.getByText('update.sidebarWaitingForIdle')).toBeInTheDocument();
     expect(screen.getByText('update.restartNow')).toBeInTheDocument();
     expect(mocks.updateCheckMock).not.toHaveBeenCalled();
 
@@ -557,7 +585,7 @@ describe('UpdateNotificationCard', () => {
       });
     });
 
-    expect(await screen.findByText('update.downloadCompleteTitle')).toBeInTheDocument();
+    expect(await screen.findByText('update.sidebarWaitingForIdle')).toBeInTheDocument();
     expect(screen.getByText('update.restartNow')).toBeInTheDocument();
     expect(screen.queryByText('update.downloadButton')).not.toBeInTheDocument();
   });
@@ -674,51 +702,24 @@ describe('UpdateNotificationCard', () => {
     expect(screen.getByText('update.viewRelease')).toBeInTheDocument();
   });
 
-  it('keeps the cancel action available while downloading and cancel restores the initial state', async () => {
+  it('keeps forced automatic updates running when their progress is minimized', async () => {
     render(<UpdateNotificationCard />);
-
-    await waitFor(() => {
-      expect(mocks.autoStatusHandler).toBeTruthy();
-    });
-
-    await act(async () => {
-      mocks.autoStatusHandler?.({
-        status: 'available',
-        version: '2.1.14',
-        currentVersion: '2.1.13',
-        releaseNotes: 'auto notes',
-      });
-    });
-
-    fireEvent.click(await screen.findByText('update.downloadButton'));
-
     await act(async () => {
       mocks.autoStatusHandler?.({
         status: 'downloading',
+        version: '3.0.7',
         progress: {
-          bytesPerSecond: 1048576,
+          bytesPerSecond: 100,
           percent: 18,
-          transferred: 1048576,
-          total: 4194304,
+          transferred: 18,
+          total: 100,
         },
       });
     });
-
-    // Downloading hides text buttons while keeping the header actions available.
-    expect(screen.queryByText('update.later')).not.toBeInTheDocument();
-    expect(screen.queryByText('update.cancel')).not.toBeInTheDocument();
-    expect(screen.queryByText('update.minimize')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'update.minimize' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'update.cancel' })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'update.cancel' }));
-
-    await waitFor(() => {
-      expect(mocks.autoUpdateCancelDownloadMock).toHaveBeenCalled();
-    });
-    expect(await screen.findByText('update.downloadButton')).toBeInTheDocument();
-    expect(screen.getByText('update.later')).toBeInTheDocument();
-    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'update.cancel' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'update.minimize' }));
+    expect(mocks.autoUpdateCancelDownloadMock).not.toHaveBeenCalled();
+    expect(getSidebarUpdateState()?.status).toBe('downloading');
   });
 
   it('minimizes an active download without cancelling and restores its progress', async () => {
@@ -811,7 +812,7 @@ describe('UpdateNotificationCard', () => {
       });
     });
 
-    expect(await screen.findByText('update.downloadCompleteTitle')).toBeInTheDocument();
+    expect(await screen.findByText('update.sidebarWaitingForIdle')).toBeInTheDocument();
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
     expect(screen.getByText('update.later')).toBeInTheDocument();
     expect(screen.getByText('update.restartNow')).toBeInTheDocument();
@@ -860,7 +861,9 @@ describe('UpdateNotificationCard', () => {
     });
 
     fireEvent.click(await screen.findByText('update.restartNow'));
-    fireEvent.click(screen.getByText('update.confirmInstall'));
+    await act(async () => {
+      mocks.autoStatusHandler?.({ status: 'preparing-install', version: '2.1.14' });
+    });
 
     expect(await screen.findByText('update.preparingInstall')).toBeInTheDocument();
     expect(screen.getByText('update.downloadCompleteTitle')).toBeInTheDocument();
@@ -937,5 +940,94 @@ describe('UpdateNotificationCard', () => {
     await waitFor(() => {
       expect(mocks.autoUpdateCheckMock).toHaveBeenCalled();
     });
+  });
+});
+
+describe('sidebar update icon', () => {
+  beforeEach(() => {
+    mocks.desktop = true;
+    setSidebarUpdateState({
+      ...initialUpdateNotificationState,
+      status: 'available',
+      autoUpdateAvailable: true,
+      autoUpdateInfo: { version: '3.0.7' },
+    });
+  });
+  afterEach(() => {
+    cleanup();
+    setSidebarUpdateState(null);
+  });
+
+  it.each(['light', 'dark'])('renders a prominent icon without visible label in the %s theme', (theme) => {
+    render(
+      <SiderFooter
+        isMobile={false}
+        isSettings={false}
+        theme={theme}
+        siderTooltipProps={{}}
+        onSettingsClick={vi.fn()}
+        onThemeToggle={vi.fn()}
+      />
+    );
+    const button = screen.getByRole('button', { name: 'update.sidebarAvailable' });
+    expect(button.textContent).toBe('');
+    expect(button).toHaveClass('sider-update-button');
+    expect(button).toHaveAttribute('data-update-status', 'available');
+  });
+
+  it('shows the availability tooltip on keyboard focus even when other sidebar tooltips are disabled', async () => {
+    render(
+      <SiderFooter
+        collapsed
+        isMobile={false}
+        isSettings={false}
+        theme='dark'
+        siderTooltipProps={{ disabled: true, popupVisible: false, trigger: [] }}
+        onSettingsClick={vi.fn()}
+        onThemeToggle={vi.fn()}
+      />
+    );
+    const button = screen.getByRole('button', { name: 'update.sidebarAvailable' });
+    fireEvent.focus(button);
+    expect(await screen.findByText('update.sidebarAvailable')).toBeInTheDocument();
+    expect(button).toHaveAttribute('type', 'button');
+  });
+
+  it('keeps downloading and waiting states accessible without adding text to the button', () => {
+    render(
+      <SiderFooter
+        isMobile={false}
+        isSettings={false}
+        theme='light'
+        siderTooltipProps={{}}
+        onSettingsClick={vi.fn()}
+        onThemeToggle={vi.fn()}
+      />
+    );
+    act(() =>
+      setSidebarUpdateState({
+        ...initialUpdateNotificationState,
+        status: 'downloaded',
+        autoUpdateAvailable: true,
+        autoUpdateInfo: { version: '3.0.7' },
+      })
+    );
+    const button = screen.getByRole('button', { name: 'update.sidebarWaitingForIdle' });
+    expect(button.textContent).toBe('');
+  });
+
+  it('does not offer app updates in WebUI', () => {
+    mocks.desktop = false;
+    render(
+      <SiderFooter
+        isMobile={false}
+        isSettings={false}
+        theme='light'
+        siderTooltipProps={{}}
+        onSettingsClick={vi.fn()}
+        onThemeToggle={vi.fn()}
+      />
+    );
+    expect(screen.queryByRole('button', { name: 'update.sidebarAvailable' })).not.toBeInTheDocument();
   });
 });

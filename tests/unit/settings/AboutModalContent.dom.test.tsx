@@ -125,14 +125,13 @@ describe('AboutModalContent update ready state', () => {
       );
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: '2.1.14 已就绪, 立即安装' }));
-    expect(mocks.quitAndInstallMock).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByText('update.confirmInstall'));
+    fireEvent.click(await screen.findByRole('button', { name: 'update.sidebarWaitingForIdle' }));
+    expect(screen.queryByText('update.confirmInstall')).not.toBeInTheDocument();
 
     expect(mocks.quitAndInstallMock).toHaveBeenCalledTimes(1);
   });
 
-  it('shows preparing loading state for ready auto-update install from About', async () => {
+  it('waits for main-process install readiness after a request from About', async () => {
     let rejectInstall!: (error: Error) => void;
     mocks.quitAndInstallMock.mockImplementation(
       () =>
@@ -159,18 +158,17 @@ describe('AboutModalContent update ready state', () => {
       );
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: '2.1.14 已就绪, 立即安装' }));
-    expect(mocks.quitAndInstallMock).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByText('update.confirmInstall'));
+    fireEvent.click(await screen.findByRole('button', { name: 'update.sidebarWaitingForIdle' }));
+    expect(screen.queryByText('update.confirmInstall')).not.toBeInTheDocument();
 
-    expect(await screen.findByRole('button', { name: '准备安装...' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'update.sidebarWaitingForIdle' })).not.toBeDisabled();
     expect(mocks.quitAndInstallMock).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       rejectInstall(new Error('prepare failed'));
     });
 
-    expect(await screen.findByRole('button', { name: '2.1.14 已就绪, 立即安装' })).not.toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'update.sidebarWaitingForIdle' })).not.toBeDisabled();
   });
 
   it('reveals the notification card only when an update is available, with no toast', async () => {

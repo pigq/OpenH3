@@ -28,6 +28,39 @@ use openh3_session_message::service::{SessionMessageDeps, SessionMessageService}
 use openh3_sidebar::UserOrderDeleteHook;
 use tokio::sync::Notify;
 
+/// Coordinates the existing turn-claim fence with real agent/background state.
+pub(crate) struct UpdateActivityService {
+    pub(crate) runtime: Arc<ConversationRuntimeStateService>,
+    pub(crate) control_token: Option<String>,
+    tasks: Arc<dyn IWorkerTaskManager>,
+    queue: Arc<DeliveryQueue>,
+}
+
+impl UpdateActivityService {
+    pub(crate) fn new(services: &AppServices) -> Self {
+        Self {
+            runtime: services.conversation_runtime_state.clone(),
+            control_token: std::env::var("OPENH3_UPDATE_CONTROL_TOKEN")
+                .ok()
+                .filter(|value| !value.is_empty()),
+            tasks: services.worker_task_manager.clone(),
+            queue: services.session_message_queue.clone(),
+        }
+    }
+
+    pub(crate) fn acquire(&self, lease_id: &str, expires_at: i64) -> bool {
+        if !self.runtime.try_pause_for_update(lease_id, expires_at) {
+            return false;
+        }
+        if !self.tasks.update_idle() || !self.queue.is_empty() {
+            self.runtime.resume_after_update(lease_id);
+            return false;
+        }
+        tracing::info!("desktop update admission paused after confirming idle");
+        true
+    }
+}
+
 pub struct AppServices {
     pub content_catalog_proxy: Option<Arc<crate::ContentCatalogProxy>>,
     pub database: Database,

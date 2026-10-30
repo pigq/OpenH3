@@ -2,6 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Worker } from 'node:worker_threads';
+import { UpdateAdmissionGate } from '../packages/desktop/src/process/startup/updateInstallGuard';
 import { H3SetupTask } from '../packages/desktop/src/process/services/runtime/H3SetupTask';
 import { inspectCreationInventory } from '../packages/desktop/src/process/services/media/creation/inventory';
 import { CreationOperations } from '../packages/desktop/src/process/services/media/creation/CreationOperations';
@@ -50,6 +51,8 @@ import {
 } from '../packages/desktop/src/process/services/runtime/h3BundlePath';
 
 const port = Number(process.env.AIONUI_MEDIA_PORT ?? 33002);
+const updateGate = new UpdateAdmissionGate();
+const updateControlToken = process.env.OPENH3_UPDATE_CONTROL_TOKEN;
 const dataDir = process.env.AIONUI_DATA_DIR ?? path.resolve('.runtime/dev-data');
 fs.mkdirSync(dataDir, { recursive: true });
 let db: BetterSqlite3Driver | undefined;
@@ -201,7 +204,12 @@ const creationOperations = new CreationOperations(path.join(dataDir, 'creation-o
   },
 });
 const creationTimer = setInterval(() => {
-  void creationOperations.pump().catch((error) => console.error('[creation]', error));
+  const finish = updateGate.enter();
+  if (!finish) return;
+  void creationOperations
+    .pump()
+    .catch((error) => console.error('[creation]', error))
+    .finally(finish);
   pumpH3Jobs();
 }, 1500);
 creationTimer.unref();
@@ -397,8 +405,50 @@ async function body(req: http.IncomingMessage): Promise<unknown> {
 }
 
 const server = http.createServer(async (req, res) => {
+  let finish: (() => void) | null = null;
   try {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`);
+    if (url.pathname === '/api/system/update-lease' && ['POST', 'DELETE'].includes(req.method ?? '')) {
+      if (!updateControlToken || req.headers['x-openh3-update-token'] !== updateControlToken)
+        return json(res, 403, { error: 'UPDATE_CONTROL_FORBIDDEN' });
+      const payload = (await body(req)) as { leaseId?: unknown; expiresAt?: unknown };
+      if (typeof payload.leaseId !== 'string' || !/^[a-f0-9-]{36}$/i.test(payload.leaseId))
+        return json(res, 400, { error: 'UPDATE_LEASE_INVALID' });
+      if (req.method === 'DELETE') {
+        updateGate.release(payload.leaseId);
+        return json(res, 200, { ok: true });
+      }
+      if (typeof payload.expiresAt !== 'number') return json(res, 400, { error: 'UPDATE_LEASE_INVALID' });
+      const idle = updateGate.acquire(
+        payload.leaseId,
+        () =>
+          (!(store instanceof JsonMediaJobStore) || store.recoveryKnown) &&
+          !active.size &&
+          !store.listActive().length &&
+          !h3Active.size &&
+          !h3Dispatching &&
+          !reconciling &&
+          !h3Store.listActive().length &&
+          !h3Store.listBlocked().length &&
+          !h3Runner.blocked() &&
+          !h3Setup.busy() &&
+          !h3Setup.status().error?.startsWith('H3_SETUP_STATE_') &&
+          !runtimeStarting &&
+          comfyService.updateIdle() &&
+          creationOperations.updateIdle(),
+        payload.expiresAt
+      );
+      return json(res, 200, { idle });
+    }
+    // Authenticated Core-port refresh changes connection metadata only; it must
+    // also work while recovering a failed update before admissions reopen.
+    const isCoreContextRefresh = req.method === 'POST' && url.pathname === '/api/comfy/runtime-context';
+    const isEventSubscription =
+      req.method === 'GET' && /^\/api\/(h3\/jobs|media-jobs)\/[^/]+\/events$/.test(url.pathname);
+    if (!isCoreContextRefresh && !isEventSubscription && url.pathname !== '/health' && req.method !== 'OPTIONS') {
+      finish = updateGate.enter();
+      if (!finish) return json(res, 503, { error: 'APP_UPDATE_PENDING' });
+    }
     if (req.method === 'OPTIONS') return json(res, 204, null);
     if (req.method === 'POST' && url.pathname.startsWith('/api/h3/') && runtimeStarting)
       return json(res, 409, { error: 'H3_RUNTIME_STARTING' });
@@ -718,6 +768,8 @@ const server = http.createServer(async (req, res) => {
       error: error instanceof Error ? error.message : String(error),
       ...(diagnosis ? { diagnosis } : {}),
     });
+  } finally {
+    finish?.();
   }
 });
 server.listen(port, '127.0.0.1', () => console.log(`[media-service] listening on http://127.0.0.1:${port}`));

@@ -22,7 +22,6 @@ import {
 import { getIncludePrerelease, runUpdateCheck, type CheckUpdateOutcome } from './checkForUpdatesShared';
 import {
   dismissUpdateInstallConfirmation,
-  confirmUpdateInstall,
   setUpdateReadyState,
   setSidebarUpdateState,
   SIDEBAR_UPDATE_ACTION_EVENT,
@@ -339,6 +338,11 @@ export const useUpdateNotificationController = () => {
           dispatchAutoAvailable(evt);
           break;
         case 'downloading': {
+          if (stateRef.current.activeTask?.kind === 'manual') break;
+          if (stateRef.current.activeTask?.kind !== 'auto') {
+            if (evt.version) dispatchAutoAvailable(evt);
+            dispatch({ type: 'autoDownloadStarted' });
+          }
           const progress = toAutoProgress(evt, i18n.language);
           if (progress) {
             dispatch({ type: 'autoProgress', progress });
@@ -346,7 +350,11 @@ export const useUpdateNotificationController = () => {
           break;
         }
         case 'downloaded':
-          dispatch({ type: 'autoDownloaded' });
+          if (stateRef.current.activeTask?.kind !== 'auto' && evt.version) {
+            dispatch({ type: 'autoDownloadedRestored', version: evt.version, currentVersion: evt.currentVersion });
+          } else {
+            dispatch({ type: 'autoDownloaded' });
+          }
           break;
         case 'preparing-install':
           dispatch({ type: 'autoPreparingInstall', version: evt.version });
@@ -478,15 +486,9 @@ export const useUpdateNotificationController = () => {
         .catch((error) => dispatch({ type: 'autoError', message: String(error) }));
       return;
     }
-    const version = getVersionLabelFromState(current);
-    dispatch({ type: 'autoPreparingInstall', version });
-    setUpdateReadyState({
-      ready: true,
-      version,
-      preparing: true,
-    });
+    // Main owns the idle lease and broadcasts preparing-install only after it
+    // has reserved all workers. A click never asserts that the app is idle.
     void ipcBridge.autoUpdate.quitAndInstall.invoke().catch(() => {
-      if (stateRef.current.status !== 'preparing-install') return;
       dispatch({
         type: 'autoError',
         message: t('update.errors.prepareInstallFailed'),
@@ -496,16 +498,8 @@ export const useUpdateNotificationController = () => {
 
   const quitAndInstall = useCallback(() => {
     if (stateRef.current.status !== 'downloaded') return;
-    confirmUpdateInstall(
-      {
-        title: t('update.readyToInstall'),
-        content: t('update.confirmInstallDescription'),
-        okText: t('update.confirmInstall'),
-        cancelText: t('update.cancel'),
-      },
-      performInstall
-    );
-  }, [performInstall, t]);
+    performInstall();
+  }, [performInstall]);
 
   useEffect(() => {
     const handle = () => {

@@ -138,5 +138,6 @@
   "sidebarRetry": "Retry update",
   "openInstaller": "Manual install (fallback)",
   "confirmInstall": "Confirm installation",
-  "confirmInstallDescription": "The app will close to install the update. Running tasks may be interrupted. Finish your work before continuing."
+  "confirmInstallDescription": "The app will close to install the update. Running tasks may be interrupted. Finish your work before continuing.",
+  "sidebarWaitingForIdle": "Update downloaded — waiting for tasks to finish before restarting"
 }

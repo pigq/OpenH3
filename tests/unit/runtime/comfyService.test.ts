@@ -108,6 +108,58 @@ function plan() {
   };
 }
 describe('Comfy installation and profile service', () => {
+  it('defers app replacement when saved remote activity cannot be recovered', () => {
+    fs.writeFileSync(path.join(root, 'state.json'), '{broken');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(setup().service.updateIdle()).toBe(false);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('defers app replacement for a failed job with unconfirmed remote submission', () => {
+    const { service } = setup();
+    service.register(profile);
+    const filename = path.join(root, 'state.json');
+    const saved = JSON.parse(fs.readFileSync(filename, 'utf8'));
+    saved.jobs.push({
+      id: '33333333-3333-4333-8333-333333333333',
+      requestId,
+      profile,
+      input: { prompt: 'test' },
+      status: 'failed',
+      submissionUncertain: true,
+    });
+    fs.writeFileSync(filename, JSON.stringify(saved));
+    expect(setup().service.updateIdle()).toBe(false);
+  });
+  it('keeps app replacement blocked throughout generation', async () => {
+    let finish!: (value: { promptId: string; artifacts: { path: string; mimeType: string }[] }) => void;
+    const { service, engine } = setup();
+    service.register(profile);
+    service.bind({
+      requestId,
+      conversationId: 'chat',
+      family: 'z-image',
+      intent: 'generate',
+      source: 'local',
+      profileId: profile.id,
+    });
+    expect(service.updateIdle()).toBe(true);
+    engine.generate.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    service.generate(requestId, profile.id, { prompt: 'test' });
+    expect(service.updateIdle()).toBe(false);
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    finish({ promptId: 'prompt', artifacts: [{ path: path.join(root, 'out.png'), mimeType: 'image/png' }] });
+    await service.idle();
+    expect(service.updateIdle()).toBe(true);
+  });
   it('round-trips the original template revision on each submitted job, independent of later selection and restart', async () => {
     const { service, engine, install, probe } = setup();
     service.register(profile);

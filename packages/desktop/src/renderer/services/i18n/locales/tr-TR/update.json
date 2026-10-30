@@ -132,11 +132,12 @@
     "removed": "Yayından kaldırılan",
     "linkUnavailable": "Bağlı şablon yayından kaldırılmış, revizyonu eşleşmiyor veya istemci güncellemesi gerekiyor. Bu eser yalnızca görüntülenebilir."
   },
-  "sidebarAvailable": "Güncelleme var",
+  "sidebarAvailable": "Güncelleme mevcut",
   "sidebarDownloading": "İndiriliyor {{percent}}%",
   "sidebarRestart": "Yeniden başlat ve güncelle",
   "sidebarRetry": "Güncellemeyi tekrar dene",
   "openInstaller": "Elle yükle (alternatif)",
   "confirmInstall": "Yüklemeyi onayla",
-  "confirmInstallDescription": "Güncellemeyi yüklemek için uygulama kapanacak. Devam eden görevler kesintiye uğrayabilir. Devam etmeden önce işinizi tamamlayın."
+  "confirmInstallDescription": "Güncellemeyi yüklemek için uygulama kapanacak. Devam eden görevler kesintiye uğrayabilir. Devam etmeden önce işinizi tamamlayın.",
+  "sidebarWaitingForIdle": "Güncelleme indirildi. Tüm görevler tamamlanınca otomatik yeniden başlatılacak"
 }

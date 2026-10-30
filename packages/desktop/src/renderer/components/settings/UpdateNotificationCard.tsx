@@ -128,7 +128,7 @@ const UpdateNotificationCard: React.FC = () => {
         return (
           <div className='flex items-start gap-10px text-13px text-t-secondary leading-relaxed'>
             <CheckOne theme='filled' size='18' fill='rgb(var(--success-6))' className='mt-2px shrink-0' />
-            <span>{t('update.downloadCompleteTitle')}</span>
+            <span>{t(state.downloadPath ? 'update.downloadCompleteTitle' : 'update.sidebarWaitingForIdle')}</span>
           </div>
         );
       case 'preparing-install':
@@ -287,14 +287,16 @@ const UpdateNotificationCard: React.FC = () => {
                 onClick={actions.minimize}
                 aria-label={t('update.minimize')}
               />
-              <Button
-                type='text'
-                size='mini'
-                className='!p-0 !w-24px !h-24px !text-t-tertiary hover:!text-t-primary'
-                icon={<Close size='16' />}
-                onClick={actions.cancelDownload}
-                aria-label={t('update.cancel')}
-              />
+              {state.activeTask?.kind === 'manual' && (
+                <Button
+                  type='text'
+                  size='mini'
+                  className='!p-0 !w-24px !h-24px !text-t-tertiary hover:!text-t-primary'
+                  icon={<Close size='16' />}
+                  onClick={actions.cancelDownload}
+                  aria-label={t('update.cancel')}
+                />
+              )}
             </div>
           )}
         </div>

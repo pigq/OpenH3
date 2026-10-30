@@ -17,6 +17,7 @@ import { ArrowCircleLeft, CloseOne, Download, Moon, SettingTwo, SunOne } from '@
 import classNames from 'classnames';
 import { iconColors } from '@renderer/styles/colors';
 import type { SiderTooltipProps } from '@renderer/utils/ui/siderTooltip';
+import styles from './Sider.module.css';
 
 interface SiderFooterProps {
   isMobile: boolean;
@@ -52,12 +53,12 @@ const SiderFooter: React.FC<SiderFooterProps> = ({
     update?.status === 'downloading'
       ? t('update.sidebarDownloading', { percent: update.progress.percent })
       : update?.status === 'downloaded'
-        ? t(update.downloadPath ? 'update.openInstaller' : 'update.sidebarRestart')
+        ? t(update.downloadPath ? 'update.openInstaller' : 'update.sidebarWaitingForIdle')
         : update?.status === 'preparing-install'
           ? t('update.preparingInstall')
           : update?.status === 'error'
             ? t('update.sidebarRetry')
-            : t(update?.autoUpdateAvailable ? 'update.sidebarAvailable' : 'update.manualInstall');
+            : t('update.sidebarAvailable');
 
   const settingsIcon = isSettings ? (
     <ArrowCircleLeft
@@ -103,38 +104,35 @@ const SiderFooter: React.FC<SiderFooterProps> = ({
         </Tooltip>
         {showUpdate && (
           <Tooltip
-            {...siderTooltipProps}
-            content={updateLabel + ' · ' + (update.autoUpdateInfo?.version || update.updateInfo?.version)}
+            className={siderTooltipProps.className}
+            getPopupContainer={siderTooltipProps.getPopupContainer}
+            unmountOnExit
+            popupHoverStay={false}
+            trigger={['hover', 'focus']}
+            content={updateLabel}
             position='top'
           >
             <Button
               type='text'
               size='small'
+              shape='circle'
               aria-label={updateLabel}
-              disabled={update.status === 'preparing-install'}
-              onClick={requestSidebarUpdateAction}
+              aria-busy={update.status === 'downloading' || update.status === 'preparing-install'}
+              aria-disabled={update.status === 'preparing-install'}
+              data-update-status={update.status}
+              onClick={update.status === 'preparing-install' ? undefined : requestSidebarUpdateAction}
               className={classNames(
-                'shrink-0 !h-34px !rounded-8px !text-[rgb(var(--primary-6))]',
-                collapsed ? '!w-full' : '!max-w-140px !px-8px'
+                'sider-update-button shrink-0 !h-34px !w-34px !p-0',
+                styles.updateButton,
+                collapsed && '!self-center'
               )}
               icon={
-                <span className='relative inline-flex'>
-                  <Download size='16' />
-                  {update.status === 'available' && (
-                    <span
-                      aria-hidden='true'
-                      className='absolute -top-2px -end-2px w-5px h-5px rd-full bg-[rgb(var(--primary-6))]'
-                    />
-                  )}
+                <span aria-hidden='true' className='relative inline-flex'>
+                  <Download size='16' strokeWidth={3} fill='currentColor' />
+                  {update.status === 'available' && <span aria-hidden='true' className={styles.updateDot} />}
                 </span>
               }
-            >
-              {!collapsed && (
-                <span className='block truncate' aria-live='polite'>
-                  {updateLabel}
-                </span>
-              )}
-            </Button>
+            />
           </Tooltip>
         )}
         {showLogout && onLogoutClick && (

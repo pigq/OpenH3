@@ -1,5 +1,19 @@
 use serde::{Deserialize, Serialize};
 
+/// Parent-process-only update admission control; never persisted.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct UpdateLeaseRequest {
+    #[serde(rename = "leaseId")]
+    pub lease_id: String,
+    #[serde(rename = "expiresAt")]
+    pub expires_at: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct UpdateLeaseStatus {
+    pub idle: bool,
+}
+
 /// Response for `GET /api/system/info`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SystemInfoResponse {

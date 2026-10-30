@@ -65,6 +65,11 @@ pub trait IAgentTask: Send + Sync {
         0
     }
 
+    /// Backends explicitly distinguish a completed warmup from unknown state.
+    fn update_idle(&self) -> bool {
+        self.status() == Some(ConversationStatus::Finished) && self.live_background_tasks() == 0
+    }
+
     /// Subscribe to the agent's stream event channel.
     fn subscribe(&self) -> broadcast::Receiver<AgentStreamEvent>;
 
@@ -257,6 +262,10 @@ impl AgentInstance {
     /// Current conversation status.
     pub fn status(&self) -> Option<ConversationStatus> {
         self.as_task().status()
+    }
+
+    pub fn update_idle(&self) -> bool {
+        self.as_task().update_idle()
     }
 
     /// Timestamp (ms) of the last activity.

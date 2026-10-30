@@ -10,6 +10,49 @@ use tracing::{info, warn};
 
 use crate::ConversationError;
 
+#[cfg(test)]
+mod update_quiescence_tests {
+    use super::*;
+
+    #[test]
+    fn update_fence_does_not_interrupt_a_turn_and_blocks_new_turns_until_released() {
+        let state = Arc::new(ConversationRuntimeStateService::default());
+        let claim = state.try_claim_turn("conversation", "turn").unwrap();
+        assert!(!state.try_pause_for_update("lease-a", openh3_common::now_ms() + 10_000));
+        assert!(state.is_claimed("conversation"));
+        drop(claim);
+        assert!(state.try_pause_for_update("lease-b", openh3_common::now_ms() + 10_000));
+        assert!(state.try_claim_turn("next", "turn").is_err());
+        state.resume_after_update("wrong-owner");
+        assert!(state.try_claim_turn("next", "turn").is_err());
+        state.resume_after_update("lease-b");
+        assert!(state.try_claim_turn("next", "turn").is_ok());
+    }
+
+    #[test]
+    fn late_acquire_cannot_reopen_a_released_update_attempt() {
+        let state = ConversationRuntimeStateService::default();
+        state.resume_after_update("cancelled");
+        assert!(!state.try_pause_for_update("cancelled", openh3_common::now_ms() + 10_000));
+        assert!(state.try_pause_for_update("next", openh3_common::now_ms() + 10_000));
+    }
+
+    #[test]
+    fn expired_requests_cannot_acquire_even_after_old_tombstones_are_collected() {
+        let state = ConversationRuntimeStateService::default();
+        let now = openh3_common::now_ms();
+        state
+            .state
+            .lock()
+            .unwrap()
+            .cancelled_updates
+            .insert("old".into(), now - 1);
+        assert!(!state.try_pause_for_update("old", now - 1));
+        assert!(state.state.lock().unwrap().cancelled_updates.is_empty());
+        assert!(state.try_pause_for_update("fresh", now + 10_000));
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct ConversationRuntimeStateService {
     state: Mutex<ConversationRuntimeState>,
@@ -30,6 +73,19 @@ struct ConversationRuntimeState {
     /// time. See [`ConversationRuntimeStateService::should_log_once_for_turn`].
     logged_once_per_turn: HashMap<(OncePerTurn, String), String>,
     shutting_down: bool,
+    update_owner: Option<String>,
+    cancelled_updates: HashMap<String, i64>,
+    update_requests: usize,
+}
+
+pub struct UpdateRequestClaim(Arc<ConversationRuntimeStateService>);
+
+impl Drop for UpdateRequestClaim {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.0.state.lock() {
+            state.update_requests = state.update_requests.saturating_sub(1);
+        }
+    }
 }
 
 /// Events that are worth one log line per turn rather than one per attempt.
@@ -62,6 +118,50 @@ pub enum RuntimeLifecycleState {
 }
 
 impl ConversationRuntimeStateService {
+    /// Fence HTTP admissions and turn claims using the same mutex.
+    pub fn enter_update_request(self: &Arc<Self>) -> Option<UpdateRequestClaim> {
+        let mut state = self.state.lock().ok()?;
+        if state.update_owner.is_some() {
+            return None;
+        }
+        state.update_requests += 1;
+        Some(UpdateRequestClaim(self.clone()))
+    }
+
+    pub fn try_pause_for_update(&self, lease_id: &str, expires_at: i64) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        let now = openh3_common::now_ms();
+        state.cancelled_updates.retain(|_, expires| *expires > now);
+        if expires_at <= now
+            || expires_at > now + 15_000
+            || state.shutting_down
+            || state.update_owner.is_some()
+            || state.cancelled_updates.contains_key(lease_id)
+            || state.update_requests > 0
+            || !state.active_turns.is_empty()
+            || !state.cancelling_conversations.is_empty()
+            || !state.restarting_conversations.is_empty()
+            || !state.deleting_conversations.is_empty()
+        {
+            return false;
+        }
+        state.update_owner = Some(lease_id.to_owned());
+        true
+    }
+
+    pub fn resume_after_update(&self, lease_id: &str) {
+        if let Ok(mut state) = self.state.lock() {
+            let now = openh3_common::now_ms();
+            state.cancelled_updates.retain(|_, expires| *expires > now);
+            state.cancelled_updates.insert(lease_id.to_owned(), now + 15_000);
+            if state.update_owner.as_deref() == Some(lease_id) {
+                state.update_owner = None;
+            }
+        }
+    }
+
     pub fn try_claim_turn(
         self: &Arc<Self>,
         conversation_id: &str,
@@ -75,7 +175,7 @@ impl ConversationRuntimeStateService {
             ConversationError::internal("conversation runtime state lock poisoned")
         })?;
 
-        if state.shutting_down {
+        if state.shutting_down || state.update_owner.is_some() {
             info!(
                 conversation_id,
                 turn_id, "conversation runtime turn claim rejected because runtime is shutting down"
@@ -307,7 +407,7 @@ impl ConversationRuntimeStateService {
             .state
             .lock()
             .map_err(|_| ConversationError::internal("conversation runtime state lock poisoned"))?;
-        if state.shutting_down {
+        if state.shutting_down || state.update_owner.is_some() {
             return Err(ConversationError::Busy {
                 reason: "conversation runtime is shutting down".into(),
             });

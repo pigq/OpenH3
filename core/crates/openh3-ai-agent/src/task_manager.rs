@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use dashmap::DashMap;
@@ -62,6 +63,11 @@ pub trait IWorkerTaskManager: Send + Sync {
     /// Number of active tasks (useful for diagnostics).
     fn active_count(&self) -> usize;
 
+    /// Unknown implementations must never authorize automatic process replacement.
+    fn update_idle(&self) -> bool {
+        false
+    }
+
     /// Conversation IDs for active tasks, used by callers that need to apply
     /// owner-aware filtering outside the task manager.
     fn active_conversation_ids(&self) -> Vec<String> {
@@ -91,12 +97,20 @@ struct ManagedAgentTask {
 /// may retry; the slot itself is only removed on `kill` / `clear`.
 type TaskSlot = Arc<OnceCell<ManagedAgentTask>>;
 
+struct BuildActivity<'a>(&'a AtomicUsize);
+impl Drop for BuildActivity<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// Default implementation of [`IWorkerTaskManager`] using a concurrent hash map.
 pub struct WorkerTaskManagerImpl {
     tasks: DashMap<String, TaskSlot>,
     factory: AgentFactory,
     active_leases: Arc<ActiveLeaseRegistry>,
     runtime_token_service: Option<Arc<RuntimeTokenService>>,
+    building: AtomicUsize,
 }
 
 impl WorkerTaskManagerImpl {
@@ -110,6 +124,7 @@ impl WorkerTaskManagerImpl {
             factory,
             active_leases,
             runtime_token_service: None,
+            building: AtomicUsize::new(0),
         }
     }
 
@@ -172,6 +187,8 @@ impl IWorkerTaskManager for WorkerTaskManagerImpl {
         conversation_id: &str,
         mut options: BuildTaskOptions,
     ) -> Result<AgentInstance, AgentError> {
+        self.building.fetch_add(1, Ordering::SeqCst);
+        let _activity = BuildActivity(&self.building);
         if let Some(existing) = self.initialised_managed_task(conversation_id)
             && (!existing.runtime_capabilities.satisfies(&options.runtime_capabilities)
                 || existing.skills != options.context.skills)
@@ -300,6 +317,16 @@ impl IWorkerTaskManager for WorkerTaskManagerImpl {
         self.tasks.iter().filter(|entry| entry.value().get().is_some()).count()
     }
 
+    fn update_idle(&self) -> bool {
+        self.building.load(Ordering::SeqCst) == 0
+            && self.tasks.iter().all(|entry| {
+                // An empty slot with no active initializer is a completed failure;
+                // it is retained by OnceCell for retries but owns no agent process.
+                entry.value().get().is_none_or(|task| task.agent.update_idle())
+            })
+            && self.building.load(Ordering::SeqCst) == 0
+    }
+
     fn active_conversation_ids(&self) -> Vec<String> {
         self.tasks
             .iter()
@@ -421,6 +448,81 @@ mod tests {
         event_tx: broadcast::Sender<AgentStreamEvent>,
     }
 
+    #[test]
+    fn update_idle_requires_terminal_agents_without_live_background_tasks() {
+        for (status, background, expected) in [
+            (Some(ConversationStatus::Finished), 0, true),
+            (Some(ConversationStatus::Finished), 1, false),
+            (Some(ConversationStatus::Running), 0, false),
+            (None, 0, false),
+        ] {
+            let factory: AgentFactory = Arc::new(|_| Box::pin(async { Err(AgentError::internal("unused")) }));
+            let manager = WorkerTaskManagerImpl::new(factory);
+            let slot = Arc::new(OnceCell::new());
+            let task = MockAgent::new("conversation", status).with_live_background_tasks(background);
+            assert!(
+                slot.set(ManagedAgentTask {
+                    agent: AgentInstance::Mock(Arc::new(task)),
+                    runtime_capabilities: RuntimeCapabilities::default(),
+                    skills: Vec::new(),
+                })
+                .is_ok()
+            );
+            manager.tasks.insert("conversation".into(), slot);
+            assert_eq!(
+                manager.update_idle(),
+                expected,
+                "status={status:?}, background={background}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn update_idle_waits_for_initializers_but_not_completed_failed_slots() {
+        let started = Arc::new(tokio::sync::Notify::new());
+        let finish = Arc::new(tokio::sync::Notify::new());
+        let factory: AgentFactory = Arc::new({
+            let started = started.clone();
+            let finish = finish.clone();
+            move |_| {
+                let started = started.clone();
+                let finish = finish.clone();
+                Box::pin(async move {
+                    started.notify_one();
+                    finish.notified().await;
+                    Err(AgentError::internal("failed fixture build"))
+                })
+            }
+        });
+        let manager = Arc::new(WorkerTaskManagerImpl::new(factory));
+        let task = tokio::spawn({
+            let manager = manager.clone();
+            async move { manager.get_or_build_task("failed", make_options("failed")).await }
+        });
+        started.notified().await;
+        assert!(!manager.update_idle());
+        finish.notify_one();
+        assert!(task.await.unwrap().is_err());
+        assert!(
+            manager.update_idle(),
+            "a completed failed initializer owns no live agent"
+        );
+    }
+
+    #[test]
+    fn warmed_aionrs_pending_is_idle_without_a_running_turn() {
+        let manager = make_manager();
+        let slot = OnceCell::new();
+        assert!(
+            slot.set(managed_instance(mock_instance(
+                MockAgent::new("warm", Some(ConversationStatus::Pending)).with_agent_type(AgentType::Aionrs)
+            )))
+            .is_ok()
+        );
+        manager.tasks.insert("warm".into(), Arc::new(slot));
+        assert!(manager.update_idle());
+    }
+
     impl MockAgent {
         fn new(conversation_id: &str, status: Option<ConversationStatus>) -> Self {
             let (event_tx, _) = broadcast::channel(16);
@@ -476,6 +578,11 @@ mod tests {
         }
         fn live_background_tasks(&self) -> usize {
             self.live_background_tasks
+        }
+        fn update_idle(&self) -> bool {
+            (self.status == Some(ConversationStatus::Finished)
+                || (self.agent_type == AgentType::Aionrs && self.status == Some(ConversationStatus::Pending)))
+                && self.live_background_tasks == 0
         }
         fn subscribe(&self) -> broadcast::Receiver<AgentStreamEvent> {
             self.event_tx.subscribe()

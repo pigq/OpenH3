@@ -1337,6 +1337,15 @@ impl IAgentTask for SessionAgentTask {
         self.runtime.status.lock().ok().and_then(|g| *g)
     }
 
+    fn update_idle(&self) -> bool {
+        self.runtime
+            .status
+            .lock()
+            .map(|status| matches!(*status, None | Some(ConversationStatus::Finished)))
+            .unwrap_or(false)
+            && self.live_background_tasks() == 0
+    }
+
     fn last_activity_at(&self) -> TimestampMs {
         self.runtime.last_activity_ms.load(Ordering::Relaxed)
     }

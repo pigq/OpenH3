@@ -5,8 +5,12 @@ import type { MediaJobStoreLike } from './MediaJobRunner';
 
 export class JsonMediaJobStore implements MediaJobStoreLike {
   private rows = new Map<string, MediaJob>();
+  private recovered = true;
   constructor(private readonly filePath: string) {
     this.load();
+  }
+  get recoveryKnown(): boolean {
+    return this.recovered;
   }
   get(id: string): MediaJob | undefined {
     return this.rows.get(id);
@@ -34,7 +38,8 @@ export class JsonMediaJobStore implements MediaJobStoreLike {
     try {
       const data = JSON.parse(fs.readFileSync(this.filePath, 'utf8')) as MediaJob[];
       for (const job of data) this.rows.set(job.id, job);
-    } catch {
+    } catch (error) {
+      this.recovered = (error as NodeJS.ErrnoException).code === 'ENOENT';
       /* first run or corrupt cache: start empty */
     }
   }

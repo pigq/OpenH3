@@ -424,6 +424,10 @@ impl IAgentTask for AionrsAgentManager {
         self.runtime.status()
     }
 
+    fn update_idle(&self) -> bool {
+        self.runtime.update_idle(true) && self.live_background_tasks() == 0
+    }
+
     fn last_activity_at(&self) -> TimestampMs {
         self.runtime.last_activity_at()
     }

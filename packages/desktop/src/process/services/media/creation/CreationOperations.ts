@@ -21,6 +21,7 @@ export class CreationOperations {
   private starting = new Set<string>();
   private submitting = new Set<string>();
   private cancelling = new Set<string>();
+  private activityKnown = true;
   constructor(
     private filename: string,
     private ports: Ports
@@ -55,6 +56,7 @@ export class CreationOperations {
         this.flush();
       } catch (error) {
         // Preserve corrupt state for diagnostics; it must never trigger installation or generation.
+        this.activityKnown = false;
         this.operations.clear();
         this.requests.clear();
         console.error('[creation] saved requests could not be recovered', error);
@@ -165,6 +167,17 @@ export class CreationOperations {
     } finally {
       this.pumping = false;
     }
+  }
+  /** Include continuations that can enqueue a job after installer completion. */
+  updateIdle(): boolean {
+    return (
+      this.activityKnown &&
+      !this.pumping &&
+      !this.starting.size &&
+      !this.submitting.size &&
+      !this.cancelling.size &&
+      ![...this.operations.values()].some((value) => ['authorized', 'installing', 'cancelling'].includes(value.state))
+    );
   }
   private async submit(operation: CreationOperation): Promise<void> {
     if (this.wantsCancellation(operation.id) || this.submitting.has(operation.id)) return;

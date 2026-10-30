@@ -19,6 +19,28 @@ use openh3_common::{ConversationStatus, TimestampMs, now_ms};
 
 use crate::protocol::events::{AgentStreamEvent, ErrorEventData, FinishEventData};
 
+#[cfg(test)]
+mod update_idle_tests {
+    use super::*;
+    #[test]
+    fn known_warmup_is_idle_but_running_or_poisoned_state_is_not() {
+        let runtime = AgentRuntime::new("warm", "fixture", 8);
+        assert!(runtime.update_idle(false));
+        runtime.transition_to(ConversationStatus::Pending);
+        assert!(!runtime.update_idle(false));
+        assert!(runtime.update_idle(true));
+        runtime.transition_to(ConversationStatus::Running);
+        assert!(!runtime.update_idle(true));
+        let status = runtime.status.clone();
+        let _ = std::thread::spawn(move || {
+            let _lock = status.write().unwrap();
+            panic!("poison fixture");
+        })
+        .join();
+        assert!(!runtime.update_idle(true));
+    }
+}
+
 #[derive(Clone)]
 pub struct AgentRuntime {
     conversation_id: Arc<str>,
@@ -57,6 +79,16 @@ impl AgentRuntime {
 
     pub fn status(&self) -> Option<ConversationStatus> {
         *self.status.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub(crate) fn update_idle(&self, allow_pending: bool) -> bool {
+        self.status
+            .read()
+            .map(|status| {
+                matches!(*status, None | Some(ConversationStatus::Finished))
+                    || (allow_pending && *status == Some(ConversationStatus::Pending))
+            })
+            .unwrap_or(false)
     }
 
     pub fn last_activity_at(&self) -> TimestampMs {
