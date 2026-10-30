@@ -10,6 +10,24 @@ import { describe, expect, it } from 'vitest';
 import type { H3Activity } from '@/common/chat/document/h3Job';
 import { H3ComfyClient } from '@/process/services/runtime/H3ComfyClient';
 
+// Node's fetch rejects these ports before opening a socket. A port returned by
+// listen(0) can occasionally land in this list on a busy Windows runner.
+const FETCH_BLOCKED_PORTS = new Set([
+  1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102, 103, 104, 109, 110,
+  111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532,
+  540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061,
+  6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080,
+]);
+
+async function listenOnFetchSafePort(server: ReturnType<typeof createServer>) {
+  while (true) {
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    if (!FETCH_BLOCKED_PORTS.has(port)) return port;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
 async function fixture(mode: 'events' | 'disconnect' | 'missing' | 'error') {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'h3-transport-'));
   const workflowPath = path.join(directory, 'workflow.json');
@@ -74,10 +92,10 @@ async function fixture(mode: 'events' | 'disconnect' | 'missing' | 'error') {
   sockets.on('connection', (_socket, req) => {
     connectedId = new URL(req.url!, 'http://local').searchParams.get('clientId')!;
   });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = await listenOnFetchSafePort(server);
   return {
     client: new H3ComfyClient({
-      baseUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
+      baseUrl: `http://127.0.0.1:${port}`,
       workflowPath,
       pollIntervalMs: 5,
       eventCheckIntervalMs: 1000,
@@ -109,11 +127,9 @@ describe('H3 preflight and WebSocket transport integration', () => {
         )
       );
     });
-    await new Promise<void>((resolve) => backend.listen(0, '127.0.0.1', resolve));
-    const backendPort = (backend.address() as { port: number }).port;
+    const backendPort = await listenOnFetchSafePort(backend);
     const reservation = createServer();
-    await new Promise<void>((resolve) => reservation.listen(0, '127.0.0.1', resolve));
-    const servicePort = (reservation.address() as { port: number }).port;
+    const servicePort = await listenOnFetchSafePort(reservation);
     await new Promise<void>((resolve) => reservation.close(() => resolve()));
     const serviceFile = path.join(directory, 'service.cjs');
     await build({
