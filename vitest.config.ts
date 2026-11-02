@@ -31,6 +31,7 @@ export default defineConfig({
           include: [
             'packages/web-host/src/**/*.test.ts',
             'tests/unit/**/*.test.ts',
+            'tests/unit/scripts/*.test.mjs',
             'tests/unit/**/test_*.ts',
             'tests/integration/**/*.test.ts',
             'tests/regression/**/*.test.ts',

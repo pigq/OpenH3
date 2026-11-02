@@ -186,3 +186,221 @@ jobs:
               [ -n "$file" ] && echo "- \`${S3_RELEASE_PREFIX}/$file\`"
             done <<< "$FILES"
           } >> $GITHUB_STEP_SUMMARY
+
+  distribute-oss:
+    name: Publish stable updates to Aliyun OSS
+    runs-on: ubuntu-latest
+    if: vars.PUBLISH_OSS_UPDATES == 'true' && (github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false)
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: oss-stable-update
+      cancel-in-progress: false
+    env:
+      OSS_BUCKET_NAME: bohuauhd
+      OSS_ENDPOINT: https://oss-cn-shenzhen.aliyuncs.com
+      OSS_REGION: cn-shenzhen
+      OSS_STABLE_PREFIX: updates/stable
+      OSSUTIL_VERSION: 2.4.1
+      OSSUTIL_SHA256: 57ee4c56796a40144acd6b0b96b53b4ba75e5cec09c01d8d0313c09a5524022f
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.3
+
+      - name: Install workspace dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Resolve release tag and version
+        id: version
+        env:
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${EVENT_TAG:-$INPUT_TAG}"
+          if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::OSS updates can only publish stable vMAJOR.MINOR.PATCH tags."
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download and validate release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir dist \
+            --pattern "*.exe" \
+            --pattern "*.msi" \
+            --pattern "*.dmg" \
+            --pattern "*.zip" \
+            --pattern "*.deb" \
+            --pattern "*.rpm" \
+            --pattern "*.blockmap" \
+            --pattern "latest*.yml"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > dist/release-api.json
+          node scripts/build-update-release-index.mjs dist/release-api.json dist/releases.json
+          node scripts/validate-update-release-assets.mjs dist "$VERSION"
+
+      - name: Install pinned ossutil and verify its checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE="ossutil-${OSSUTIL_VERSION}-linux-amd64.zip"
+          curl --fail --silent --show-error --location \
+            "https://gosspublic.alicdn.com/ossutil/v2/${OSSUTIL_VERSION}/${ARCHIVE}" \
+            --output "$RUNNER_TEMP/$ARCHIVE"
+          printf '%s  %s\n' "$OSSUTIL_SHA256" "$RUNNER_TEMP/$ARCHIVE" | sha256sum --check --status
+          unzip -q "$RUNNER_TEMP/$ARCHIVE" -d "$RUNNER_TEMP/ossutil"
+          mkdir -p "$RUNNER_TEMP/ossutil/bin"
+          install -m 0755 "$RUNNER_TEMP/ossutil/ossutil-${OSSUTIL_VERSION}-linux-amd64/ossutil" "$RUNNER_TEMP/ossutil/bin/ossutil"
+          echo "$RUNNER_TEMP/ossutil/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/ossutil/bin/ossutil" version
+
+      - name: Assume the OSS publishing role with OIDC
+        id: aliyun
+        uses: aliyun/configure-aliyun-credentials-action@1e5248c8d5d93a8781ac344a68e19a43341e79e6
+        with:
+          role-to-assume: ${{ vars.OSS_ROLE_ARN }}
+          oidc-provider-arn: ${{ vars.OSS_OIDC_PROVIDER_ARN }}
+          role-session-name: openh3-release-${{ github.run_id }}
+          role-session-expiration: 1800
+
+      - name: Upload verified immutable assets, then publish latest metadata
+        env:
+          OSS_ACCESS_KEY_ID: ${{ steps.aliyun.outputs.aliyun-access-key-id }}
+          OSS_ACCESS_KEY_SECRET: ${{ steps.aliyun.outputs.aliyun-access-key-secret }}
+          OSS_SESSION_TOKEN: ${{ steps.aliyun.outputs.aliyun-security-token }}
+          OSS_ENDPOINT: ${{ env.OSS_ENDPOINT }}
+          OSS_BUCKET_NAME: ${{ env.OSS_BUCKET_NAME }}
+          OSS_STABLE_PREFIX: ${{ env.OSS_STABLE_PREFIX }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION_PREFIX="${OSS_STABLE_PREFIX}/${VERSION}"
+          OSS_VERSION_URI="oss://${OSS_BUCKET_NAME}/${VERSION_PREFIX}/"
+          OSS_STABLE_URI="oss://${OSS_BUCKET_NAME}/${OSS_STABLE_PREFIX}/"
+          PUBLIC_BASE="https://${OSS_BUCKET_NAME}.${OSS_ENDPOINT#https://}"
+
+          # The shared concurrency group and monotonic pointer check prevent a
+          # delayed older release/manual rerun from rolling stable metadata back.
+          CURRENT_INDEX="$RUNNER_TEMP/oss-current-release.json"
+          INDEX_STATUS="$(curl --silent --show-error --connect-timeout 15 --max-time 60 \
+            --output "$CURRENT_INDEX" --write-out '%{http_code}' \
+            "$PUBLIC_BASE/$OSS_STABLE_PREFIX/releases.json")"
+          if [[ "$INDEX_STATUS" == 200 ]]; then
+            node - "$CURRENT_INDEX" "$VERSION" <<'NODE'
+          const fs = require('node:fs');
+          const current = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')).release?.version;
+          const stable = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+          if (typeof current !== 'string' || !stable.test(current)) throw Error('Invalid published stable index');
+          const left = current.split('.').map(BigInt);
+          const right = process.argv[3].split('.').map(BigInt);
+          for (let index = 0; index < 3; index++) {
+            if (left[index] > right[index]) throw Error('Refusing to replace a newer OSS stable release');
+            if (left[index] < right[index]) break;
+          }
+          NODE
+          elif [[ "$INDEX_STATUS" != 404 ]]; then
+            echo "::error::Could not verify current stable metadata (HTTP $INDEX_STATUS)."
+            exit 1
+          fi
+
+          declare -A expected_sha256=()
+          declare -A present=()
+          while IFS= read -r -d '' file; do
+            name="$(basename "$file")"
+            case "$name" in
+              latest*.yml|release-api.json|releases.json) continue ;;
+            esac
+            expected_sha256["$name"]="$(sha256sum "$file" | awk '{print $1}')"
+          done < <(find dist -maxdepth 1 -type f -print0)
+          if [[ "${#expected_sha256[@]}" -eq 0 ]]; then
+            echo "::error::No immutable update assets were downloaded."
+            exit 1
+          fi
+
+          remote_listing="$(ossutil ls "$OSS_VERSION_URI" --short-format)"
+          while IFS= read -r object; do
+            [[ "$object" == oss://* ]] || continue
+            object_key="${object#oss://${OSS_BUCKET_NAME}/}"
+            [[ "$object_key" == "$VERSION_PREFIX/"* ]] || continue
+            name="${object_key#"$VERSION_PREFIX/"}"
+            if [[ -z "${expected_sha256[$name]+present}" ]]; then
+              echo "::error::Unexpected object already exists in the immutable release prefix: $object_key"
+              exit 1
+            fi
+            remote_digest="$(curl --fail --silent --show-error --head "$PUBLIC_BASE/$object_key" | awk 'tolower($1) == "x-oss-meta-sha256:" { gsub("\r", "", $2); print $2 }')"
+            if [[ "$remote_digest" != "${expected_sha256[$name]}" ]]; then
+              echo "::error::Existing OSS object has a missing or mismatched SHA-256: $object_key"
+              exit 1
+            fi
+            present["$name"]=1
+          done <<< "$remote_listing"
+
+          for name in "${!expected_sha256[@]}"; do
+            if [[ -n "${present[$name]+present}" ]]; then
+              echo "Verified existing immutable object $VERSION_PREFIX/$name"
+              continue
+            fi
+            file="dist/$name"
+            mime_type="application/octet-stream"
+            case "$name" in
+              *.blockmap) mime_type="application/json" ;;
+              *.zip) mime_type="application/zip" ;;
+              *.deb) mime_type="application/vnd.debian.binary-package" ;;
+              *.rpm) mime_type="application/x-rpm" ;;
+              *.msi) mime_type="application/x-msi" ;;
+              *.dmg) mime_type="application/x-apple-diskimage" ;;
+              *.exe) mime_type="application/vnd.microsoft.portable-executable" ;;
+            esac
+            ossutil cp "$file" "$OSS_VERSION_URI$name" \
+              --metadata "sha256=${expected_sha256[$name]}" \
+              --cache-control "public, max-age=31536000, immutable" \
+              --content-type "$mime_type"
+            remote_digest="$(curl --fail --silent --show-error --head "$PUBLIC_BASE/$VERSION_PREFIX/$name" | awk 'tolower($1) == "x-oss-meta-sha256:" { gsub("\r", "", $2); print $2 }')"
+            if [[ "$remote_digest" != "${expected_sha256[$name]}" ]]; then
+              echo "::error::Uploaded OSS object failed SHA-256 metadata verification: $VERSION_PREFIX/$name"
+              exit 1
+            fi
+          done
+
+          for metadata in dist/latest*.yml; do
+            [[ -f "$metadata" ]] || continue
+            ossutil cp "$metadata" "$OSS_STABLE_URI$(basename "$metadata")" \
+              --force \
+              --cache-control "public, max-age=60" \
+              --content-type "text/yaml"
+          done
+          ossutil cp dist/releases.json "${OSS_STABLE_URI}releases.json" \
+            --force \
+            --cache-control "public, max-age=60" \
+            --content-type "application/json"
+
+      - name: Summary
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          {
+            echo "### Aliyun OSS stable update published"
+            echo ""
+            echo "- Tag: \`$TAG\`"
+            echo "- Version prefix: \`updates/stable/$VERSION/\`"
+            echo "- Stable metadata: \`updates/stable/latest*.yml\` and \`updates/stable/releases.json\`"
+          } >> "$GITHUB_STEP_SUMMARY"

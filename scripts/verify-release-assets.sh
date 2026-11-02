@@ -3,7 +3,10 @@
 set -euo pipefail
 
 OUTPUT_DIR="${1:-release-assets}"
+VERSION="${MOCK_VERSION:-1.0.0}"
 ERRORS=0
+
+node scripts/validate-update-release-assets.mjs "$OUTPUT_DIR" "$VERSION"
 
 for f in latest.yml latest-mac.yml latest-linux.yml latest-linux-arm64.yml; do
   if [ ! -f "$OUTPUT_DIR/$f" ]; then

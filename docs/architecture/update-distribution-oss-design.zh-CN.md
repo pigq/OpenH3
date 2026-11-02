@@ -2,13 +2,13 @@
 
 日期：2026-11-02
 
-状态：待用户审阅
+状态：方案已确认，本地实现与自动化验证已完成，云端配置及正式发布待执行
 
 ## 背景
 
 OpenH3 v3.0.7 的桌面更新器将 GitHub Releases 配置为更新源。当前自动更新、手动版本查询和备用安装包下载均依赖 GitHub 端点；部分中国大陆网络无法稳定访问这些端点。仓库已有发布后分发工作流，将 Release 资产镜像到 S3，但它没有改变桌面客户端的更新源，且下载清单必须与实际安装包和 blockmap 配套。
 
-仓库中还已有 `CdnGenericProvider`，可作为静态更新源的基础；该 Provider 尚未接入生产更新流程。
+本次实现将已有 `CdnGenericProvider` 接入稳定版更新流程；已发布的客户端仍使用其原有更新源。
 
 ## 目标
 
@@ -51,11 +51,25 @@ updates/stable/<version>/<installer>.blockmap
 
 1. 正式 Release 发布后，由 CI 获取相同 tag 对应的安装包、所有平台 `latest*.yml` 和相关 `.blockmap`；不通过重新构建生成 OSS 专用二进制。
 2. 校验平台清单版本与 tag 一致、清单引用对象存在、安装包大小和 SHA-512 一致、架构文件齐全。发布说明和手动安装索引从同一 Release 生成。
-3. 先将安装包、blockmap 和版本索引上传到不可变版本目录；执行 OSS HEAD/GET 验证并确认 SHA-512。
+3. 先将安装包和 blockmap 上传到不可变版本目录；上传前校验本地 SHA-512，以及安装包与 GitHub Release 索引中的 SHA-256。上传后以匿名 HEAD 验证对象的 SHA-256 元数据；客户端下载时再次校验实际内容摘要。
 4. 校验成功后，最后更新根目录的 `latest*.yml` 和 `releases.json`。单对象写入具备原子可见性；索引设置短缓存，版本对象设置长缓存。
 5. GitHub Release 保持现有发布方式与完整资产。OSS 失败必须在工作流中显式报错并告警，不能把未完成镜像报告为成功。
 
-仓库现有 `release-distribute.yml` 可扩展为 OSS 并行分发目标。改造时应一并核对其 S3 文件选择：electron-updater 所需的 blockmap 不能在镜像阶段遗漏。若保留 S3，发布产物仍来自同一经过校验的 `dist`，各目标可独立报告结果。
+`release-distribute.yml` 新增独立 OSS 分发 job，下载并校验包含 blockmap 的正式 Release 资产。现有 S3 job 保持原有实现和开关，各目标独立报告结果；本次客户端不使用 S3 作为更新源。
+
+### 实施后的上线配置
+
+OSS job 独立于现有 S3 job，默认关闭。首次上线前由管理员完成以下配置，本地实现不会创建云端身份或上传对象：
+
+1. 轮换已在会话中披露的 AccessKey，不将其用于发布。为 GitHub Actions 创建专用 RAM OIDC 身份提供商，发行者为 `https://token.actions.githubusercontent.com`，受众为 `sts.aliyuncs.com`。角色信任策略必须校验发行者、受众和 subject；只接受本仓库的正式 tag、获准手动运行的受保护分支，并按组织的 OIDC subject 策略绑定发布工作流。不要使用只校验受众、允许任意仓库的信任策略。
+2. RAM 角色仅允许对 `acs:oss:*:*:bohuauhd/updates/*` 执行 `oss:GetObject`、`oss:PutObject`、`oss:ListParts`、`oss:AbortMultipartUpload`。为版本前缀预检授予 Bucket 级 `oss:ListObjects`，同时用 `oss:Prefix` 条件限定为 `updates/*`。不授予 Bucket 配置或前缀外对象写入权限。
+3. Bucket 保持私有；用 Bucket Policy 仅对 `bohuauhd/updates/*` 允许匿名 `oss:GetObject`，不开放匿名列举、写入或其他业务前缀。保持 OSS 阻止公共访问设置与该前缀策略相容，不要直接把整个 Bucket 改为公共读。
+4. 在 GitHub Repository Variables 配置 `OSS_ROLE_ARN`、`OSS_OIDC_PROVIDER_ARN`，完成验证后将 `PUBLISH_OSS_UPDATES` 设为字符串 `true`。无需保存静态发布 AccessKey。workflow 使用 `cn-shenzhen` 区域，通过短期 STS 凭证访问 OSS。
+5. 通过正常 Release 发布事件分发下一稳定版；需要重跑时，手动运行 `release-distribute.yml` 并指定已有稳定 tag。所有 OSS 发布串行执行；若线上索引已指向更高版本，拒绝旧版本重跑覆盖稳定指针。
+
+同版本重跑会检查不可变目录：只有已有对象的 SHA-256 元数据与本次文件一致时才跳过上传；遇到其他对象或摘要不一致立即失败。安装包和 blockmap 全部验证后才覆盖 `latest*.yml`，最后发布 `releases.json`。正式安装包使用一年不可变缓存，清单使用 60 秒缓存。外部角色授权、匿名读取及首次真实发布需在上线时另行验证。
+
+自动化验证使用本地 HTTP 更新源与模拟 OSS 命令，覆盖 OSS 独立成功、检查回退、同版本下载回退、版本/摘要不一致拒绝、发布顺序、失败中止和同版本重跑；这些结果不替代已安装程序的真实升级验收。
 
 ## 客户端行为
 
@@ -98,3 +112,6 @@ v3.0.7 无法仅通过上传 OSS 文件切换更新源，因为已发布程序�
 - [electron-builder Generic 更新服务器选项](https://www.electron.build/docs/api/builder-util-runtime.interface.genericserveroptions/)
 - [阿里云 OSS CDN 加速与大文件 Range 回源](https://www.alibabacloud.com/help/en/oss/user-guide/cdn-acceleration)
 - [阿里云 AccessKey 泄露响应](https://www.alibabacloud.com/help/en/ram/user-guide/solution-to-accesskey-leakage)
+- [阿里云 OIDC 可信身份提供商角色](https://www.alibabacloud.com/help/en/ram/user-guide/create-a-ram-role-for-a-trusted-idp)
+- [GitHub OIDC subject 与工作流限制](https://docs.github.com/en/actions/reference/security/oidc)
+- [ossutil 2 上传参数](https://www.alibabacloud.com/help/en/oss/developer-reference/cp-upload-file)
