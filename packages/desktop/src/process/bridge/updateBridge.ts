@@ -19,12 +19,14 @@ import type {
 import { uuid } from '@/common/utils';
 import { app } from 'electron';
 import log from 'electron-log';
+import { createHash } from 'node:crypto';
 import * as fs from 'fs';
 import { load as loadYaml } from 'js-yaml';
 import * as path from 'path';
 import semver from 'semver';
 import { autoUpdaterService } from '../services/autoUpdaterService';
 import { consumeInstallerLastFailure } from '../services/installerLastFailure';
+import { buildStableReleaseAssets, parseStableReleaseIndex } from '../services/updateReleaseManifest';
 
 /** Lazily loads i18n to avoid pulling in initStorage chain at module load time */
 let _i18nCache: Promise<typeof import('../services/i18n')> | null = null;
@@ -41,6 +43,7 @@ type GitHubReleaseApiAsset = {
   browser_download_url: string;
   size: number;
   content_type?: string;
+  digest?: string;
 };
 
 type GitHubReleaseApi = {
@@ -64,6 +67,9 @@ const DEFAULT_REPO = 'pigq/OpenH3';
 const DEFAULT_USER_AGENT = 'OpenH3';
 const ALLOWED_ASSET_EXTS = new Set(['.exe', '.msi', '.dmg', '.zip', '.deb', '.rpm']);
 const GITHUB_RELEASES_URL = 'https://github.com/pigq/OpenH3/releases';
+const OSS_STABLE_INDEX_URL = 'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/releases.json';
+const OSS_UPDATE_HOST = 'bohuauhd.oss-cn-shenzhen.aliyuncs.com';
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const ALLOWED_DOWNLOAD_HOSTS = new Set<string>([
   'github.com',
   'objects.githubusercontent.com',
@@ -279,8 +285,64 @@ const assertAllowedUrl = async (rawUrl: string) => {
   if (parsed.protocol !== 'https:') {
     throw new Error((await getI18n()).t('update.errors.httpsOnly'));
   }
+  if (parsed.port || parsed.username || parsed.password || parsed.hash) {
+    throw new Error((await getI18n()).t('update.errors.invalidUrl'));
+  }
+  if (parsed.hostname === OSS_UPDATE_HOST) {
+    const match = /^\/updates\/stable\/(0|[1-9]\d*\.\d+\.\d+)\/([A-Za-z0-9][A-Za-z0-9._-]*)$/.exec(parsed.pathname);
+    if (
+      rawUrl !== `https://${OSS_UPDATE_HOST}${parsed.pathname}` ||
+      !match ||
+      !semver.valid(match[1]) ||
+      !isAllowedAssetName(match[2])
+    ) {
+      throw new Error((await getI18n()).t('update.errors.invalidUrl'));
+    }
+    return;
+  }
   if (!ALLOWED_DOWNLOAD_HOSTS.has(parsed.hostname)) {
     throw new Error((await getI18n()).t('update.errors.hostNotAllowed', { host: parsed.hostname }));
+  }
+};
+
+const getOssUpdateAsset = (rawUrl: string): { version: string; name: string } | null => {
+  try {
+    const parsed = new URL(rawUrl);
+    if (
+      parsed.protocol !== 'https:' ||
+      parsed.hostname !== OSS_UPDATE_HOST ||
+      parsed.port ||
+      parsed.username ||
+      parsed.password
+    ) {
+      return null;
+    }
+    const match = /^\/updates\/stable\/(0|[1-9]\d*\.\d+\.\d+)\/([A-Za-z0-9][A-Za-z0-9._-]*)$/.exec(parsed.pathname);
+    if (
+      rawUrl !== `https://${OSS_UPDATE_HOST}${parsed.pathname}` ||
+      !match ||
+      !semver.valid(match[1]) ||
+      !isAllowedAssetName(match[2])
+    )
+      return null;
+    return { version: match[1], name: match[2] };
+  } catch {
+    return null;
+  }
+};
+
+const fetchStableReleaseIndex = async (timeoutMs = 30000) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(OSS_STABLE_INDEX_URL, {
+      headers: { 'User-Agent': DEFAULT_USER_AGENT },
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`OSS update index request failed (${res.status})`);
+    return parseStableReleaseIndex((await res.json()) as unknown);
+  } finally {
+    clearTimeout(timeoutId);
   }
 };
 
@@ -371,21 +433,28 @@ const sanitizeFileName = (name: string): string => {
 };
 
 const ensureUniquePath = (target: string): string => {
-  if (!fs.existsSync(target)) return target;
+  const isReserved = (candidate: string) =>
+    fs.existsSync(candidate) || [...downloads.values()].some((download) => download.file_path === candidate);
+  if (!isReserved(target)) return target;
   const dir = path.dirname(target);
   const ext = path.extname(target);
   const base = path.basename(target, ext);
   for (let i = 1; i < 1000; i++) {
     const next = path.join(dir, `${base} (${i})${ext}`);
-    if (!fs.existsSync(next)) return next;
+    if (!isReserved(next)) return next;
   }
   return path.join(dir, `${base}-${Date.now()}${ext}`);
 };
 
-const buildManualDownloadKey = (url: string, fallbackUrl: string | undefined, fileName: string): string => {
+const buildManualDownloadKey = (
+  url: string,
+  fallbackUrl: string | undefined,
+  sha256: string | undefined,
+  fileName: string
+): string => {
   const primary = new URL(url).toString();
   const fallback = fallbackUrl ? new URL(fallbackUrl).toString() : '';
-  return [primary, fallback, fileName].join('\n');
+  return [primary, fallback, sha256 ?? '', fileName].join('\n');
 };
 
 const emitProgress = (evt: UpdateDownloadProgressEvent) => {
@@ -419,7 +488,8 @@ const attemptDownload = async (
   downloadId: string,
   url: string,
   file_path: string,
-  abortController: AbortController
+  abortController: AbortController,
+  expectedSha256?: string
 ): Promise<DownloadAttempt> => {
   let receivedBytes = 0;
   let totalBytes: number | undefined;
@@ -452,6 +522,7 @@ const attemptDownload = async (
   log.info('[update-download] Downloading from URL:', url);
 
   let stream: fs.WriteStream | null = null;
+  const hash = expectedSha256 ? createHash('sha256') : null;
   try {
     const res = await fetchWithAllowlistedRedirects(url, abortController.signal);
 
@@ -484,6 +555,7 @@ const attemptDownload = async (
       receivedBytes += value.byteLength;
 
       const buf = Buffer.from(value);
+      hash?.update(buf);
       if (!stream.write(buf)) {
         await new Promise<void>((resolve) => stream?.once('drain', () => resolve()));
       }
@@ -499,6 +571,12 @@ const attemptDownload = async (
       stream.end(() => resolve());
       stream.on('error', reject);
     });
+
+    if (expectedSha256 && hash?.digest('hex') !== expectedSha256) {
+      throw new Error(
+        (await getI18n()).t('settings.runtimeStatus.failedChecksum', { resource: path.basename(file_path) })
+      );
+    }
 
     return { ok: true, isAbort: false, message: '', receivedBytes, totalBytes };
   } catch (err: unknown) {
@@ -529,10 +607,11 @@ const startDownloadInBackground = async (
   url: string,
   file_path: string,
   abortController: AbortController,
-  fallbackUrl?: string
+  fallbackUrl?: string,
+  expectedSha256?: string
 ) => {
   const runWithFallback = async (): Promise<DownloadAttempt> => {
-    const primary = await attemptDownload(downloadId, url, file_path, abortController);
+    const primary = await attemptDownload(downloadId, url, file_path, abortController, expectedSha256);
     if (primary.ok) return primary;
     if (primary.isAbort) return primary;
     if (!fallbackUrl || fallbackUrl === url) return primary;
@@ -546,7 +625,7 @@ const startDownloadInBackground = async (
     }
 
     log.warn(`[update-download] Primary download failed (${primary.message}). Retrying with fallback URL.`);
-    return attemptDownload(downloadId, fallbackUrl, file_path, abortController);
+    return attemptDownload(downloadId, fallbackUrl, file_path, abortController, expectedSha256);
   };
 
   const finalResult = await runWithFallback();
@@ -612,42 +691,73 @@ export function initUpdateBridge(): void {
     async (params): Promise<{ success: boolean; data?: UpdateCheckResult; msg?: string }> => {
       try {
         const currentVersion = app.getVersion();
-        const releases = await fetchGitHubReleases(DEFAULT_REPO);
-        const candidates = releases
-          .flatMap((release) => {
-            if (!release || release.draft || typeof release.tag_name !== 'string') return [];
-            const version = normalizeTagToSemver(release.tag_name);
-            if (!version || (!params?.includePrerelease && (release.prerelease || semver.prerelease(version))))
-              return [];
-            return [{ release, version }];
-          })
-          .toSorted((a, b) => semver.rcompare(a.version, b.version));
-        const selected = candidates[0];
-        const currentSemver = semver.valid(currentVersion) || semver.coerce(currentVersion)?.version;
-        if (!currentSemver || !selected) {
-          return { success: true, data: { currentVersion, updateAvailable: false } };
+        let latest: UpdateReleaseInfo | undefined;
+        if (!params?.includePrerelease) {
+          try {
+            const index = await fetchStableReleaseIndex();
+            const assets = buildStableReleaseAssets(index);
+            latest = {
+              ...index.release,
+              assets,
+              recommendedAsset: pickRecommendedAsset(assets),
+            };
+          } catch (error) {
+            log.warn('[update-check] OSS stable index unavailable; falling back to GitHub Releases API', {
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
         }
-        const { release, version } = selected;
-        const assets: GitHubReleaseAsset[] = (release.assets ?? [])
-          .filter((asset) => isAllowedAssetName(asset.name))
-          .map((asset) => ({ name: asset.name, url: asset.browser_download_url, size: asset.size }));
-        return {
-          success: true,
-          data: {
-            currentVersion,
-            updateAvailable: semver.gt(version, currentSemver),
-            latest: {
+
+        if (!latest) {
+          const releases = await fetchGitHubReleases(DEFAULT_REPO);
+          const candidates = releases
+            .flatMap((release) => {
+              if (!release || release.draft || typeof release.tag_name !== 'string') return [];
+              const version = normalizeTagToSemver(release.tag_name);
+              if (!version || (!params?.includePrerelease && (release.prerelease || semver.prerelease(version))))
+                return [];
+              return [{ release, version }];
+            })
+            .toSorted((a, b) => semver.rcompare(a.version, b.version));
+          const selected = candidates[0];
+          if (selected) {
+            const { release, version } = selected;
+            const assets: GitHubReleaseAsset[] = (release.assets ?? [])
+              .filter((asset) => isAllowedAssetName(asset.name))
+              .map((asset) => ({
+                name: asset.name,
+                url: buildGitHubAssetUrl(asset.name, version),
+                size: asset.size,
+                sha256:
+                  typeof asset.digest === 'string' && /^sha256:[a-f0-9]{64}$/.test(asset.digest)
+                    ? asset.digest.slice('sha256:'.length)
+                    : undefined,
+              }));
+            latest = {
               version,
               tagName: release.tag_name,
               name: release.name,
               body: release.body,
-              htmlUrl: release.html_url,
+              htmlUrl: `https://github.com/${DEFAULT_REPO}/releases/tag/v${version}`,
               publishedAt: release.published_at,
               prerelease: release.prerelease,
               draft: false,
               assets,
               recommendedAsset: pickRecommendedAsset(assets),
-            },
+            };
+          }
+        }
+
+        const currentSemver = semver.valid(currentVersion) || semver.coerce(currentVersion)?.version;
+        if (!currentSemver || !latest) {
+          return { success: true, data: { currentVersion, updateAvailable: false } };
+        }
+        return {
+          success: true,
+          data: {
+            currentVersion,
+            updateAvailable: semver.gt(latest.version, currentSemver),
+            latest,
           },
         };
       } catch (err: unknown) {
@@ -664,10 +774,20 @@ export function initUpdateBridge(): void {
         }
 
         // Defense-in-depth: do not allow arbitrary downloads from renderer.
-        // EN: Only allowlisted hosts (GitHub release hosts) are permitted;
+        // EN: Only allowlisted GitHub hosts or the exact stable OSS prefix are permitted;
         // each redirect hop is re-validated against the allowlist.
         // 中文：仅允许白名单内的域名（GitHub release 相关），并手动处理重定向，每一跳都校验白名单。
         await assertAllowedUrl(params.url);
+        if (params.sha256 !== undefined && !SHA256_PATTERN.test(params.sha256)) {
+          return { success: false, msg: (await getI18n()).t('update.errors.invalidUrl') };
+        }
+        const ossAsset = getOssUpdateAsset(params.url);
+        if (ossAsset) {
+          const expectedFallback = buildGitHubAssetUrl(ossAsset.name, ossAsset.version);
+          if (params.sha256 === undefined || params.fallbackUrl !== expectedFallback) {
+            return { success: false, msg: (await getI18n()).t('update.errors.invalidUrl') };
+          }
+        }
         if (params.fallbackUrl) {
           await assertAllowedUrl(params.fallbackUrl);
         }
@@ -679,7 +799,7 @@ export function initUpdateBridge(): void {
         const urlObj = new URL(params.url);
         const urlName = path.basename(urlObj.pathname);
         const baseName = sanitizeFileName(params.file_name || urlName);
-        const activeKey = buildManualDownloadKey(params.url, params.fallbackUrl, baseName);
+        const activeKey = buildManualDownloadKey(params.url, params.fallbackUrl, params.sha256, baseName);
         const activeDownload = activeManualDownloads.get(activeKey);
         if (activeDownload) {
           return Promise.resolve({ success: true, data: activeDownload });
@@ -691,7 +811,14 @@ export function initUpdateBridge(): void {
         manualDownloadKeysById.set(downloadId, activeKey);
 
         // Start background download, but return immediately so the UI stays responsive.
-        void startDownloadInBackground(downloadId, params.url, targetPath, abortController, params.fallbackUrl);
+        void startDownloadInBackground(
+          downloadId,
+          params.url,
+          targetPath,
+          abortController,
+          params.fallbackUrl,
+          params.sha256
+        );
 
         return Promise.resolve({ success: true, data: { downloadId, file_path: targetPath } });
       } catch (err: unknown) {

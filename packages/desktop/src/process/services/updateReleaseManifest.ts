@@ -96,7 +96,7 @@ export const parseStableReleaseIndex = (value: unknown): StableReleaseIndexV1 =>
   if (!isPublishedAt(release.publishedAt)) throw new Error('UPDATE_RELEASE_PUBLISHED_AT_INVALID');
 
   const assets = value.assets.map(parseAsset);
-  if (new Set(assets.map(({ name }) => name)).size !== assets.length) {
+  if (!assets.length || new Set(assets.map(({ name }) => name)).size !== assets.length) {
     throw new Error('UPDATE_RELEASE_ASSET_DUPLICATE');
   }
 

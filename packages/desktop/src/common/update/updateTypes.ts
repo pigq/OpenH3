@@ -70,6 +70,8 @@ export interface UpdateDownloadRequest {
   url: string;
   /** Optional allowlisted fallback URL tried when the primary URL fails. */
   fallbackUrl?: string;
+  /** Expected SHA-256 for OSS update assets and their GitHub fallback. */
+  sha256?: string;
   file_name?: string;
 }
 

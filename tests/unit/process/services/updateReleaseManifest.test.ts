@@ -56,4 +56,8 @@ describe('stable update release manifest', () => {
     }
     expect(() => parseStableReleaseIndex(merged)).toThrow();
   });
+
+  it('rejects a stable index without installers so the check can fall back to GitHub', () => {
+    expect(() => parseStableReleaseIndex({ ...validIndex, assets: [] })).toThrow();
+  });
 });

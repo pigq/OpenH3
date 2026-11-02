@@ -109,18 +109,40 @@ const release = (tag_name = 'v2.1.45', extra = {}) => ({
       name: 'OpenH3-mac-arm64.dmg',
       browser_download_url: 'https://github.com/pigq/OpenH3/releases/download/' + tag_name + '/OpenH3-mac-arm64.dmg',
       size: 12,
+      digest: `sha256:${'a'.repeat(64)}`,
     },
   ],
   ...extra,
 });
-describe('GitHub-only update checks', () => {
+const stableIndex = (overrides = {}) => ({
+  schemaVersion: 1,
+  release: {
+    tagName: 'v2.1.45',
+    version: '2.1.45',
+    name: 'OpenH3 2.1.45',
+    body: 'stable notes',
+    htmlUrl: 'https://github.com/pigq/OpenH3/releases/tag/v2.1.45',
+    publishedAt: '2026-11-02T00:00:00Z',
+    prerelease: false,
+    draft: false,
+  },
+  assets: [{ name: 'OpenH3-mac-arm64.dmg', size: 12, sha256: 'a'.repeat(64) }],
+  ...overrides,
+});
+
+describe('OSS-first update checks', () => {
   afterEach(() => vi.unstubAllGlobals());
   const serve = (data: unknown, status = 200) =>
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(JSON.stringify(data), { status }))
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input) === 'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/releases.json') {
+          return new Response('unavailable', { status: 503 });
+        }
+        return new Response(JSON.stringify(data), { status });
+      })
     );
-  it('uses the fixed repository and original asset URL', async () => {
+  it('uses the fixed repository when OSS is unavailable', async () => {
     serve([release()]);
     const result = await (await getCheckHandler())({ repo: 'other/repo' });
     expect(result.success).toBe(true);
@@ -128,7 +150,8 @@ describe('GitHub-only update checks', () => {
     expect(result.data?.latest?.body).toBe('notes');
     expect(result.data?.latest?.assets[0].url).toContain('/pigq/OpenH3/releases/download/v2.1.45/');
     expect(result.data?.latest?.assets[0].fallbackUrl).toBeUndefined();
-    expect(fetch).toHaveBeenCalledWith('https://api.github.com/repos/pigq/OpenH3/releases', expect.anything());
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenLastCalledWith('https://api.github.com/repos/pigq/OpenH3/releases', expect.anything());
   });
   it('filters drafts, invalid tags and prereleases and sorts semver', async () => {
     serve([
@@ -156,6 +179,55 @@ describe('GitHub-only update checks', () => {
   it('fails without another source when GitHub fails', async () => {
     serve({}, 503);
     expect((await (await getCheckHandler())({})).success).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses a valid OSS stable index without contacting GitHub and derives both asset URLs', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(stableIndex()), { status: 200 }))
+    );
+
+    const result = await (await getCheckHandler())({});
+
+    expect(result.success).toBe(true);
+    expect(result.data?.latest).toMatchObject({
+      version: '2.1.45',
+      body: 'stable notes',
+      htmlUrl: 'https://github.com/pigq/OpenH3/releases/tag/v2.1.45',
+      recommendedAsset: {
+        url: 'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/2.1.45/OpenH3-mac-arm64.dmg',
+        fallbackUrl: 'https://github.com/pigq/OpenH3/releases/download/v2.1.45/OpenH3-mac-arm64.dmg',
+        sha256: 'a'.repeat(64),
+      },
+    });
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['network failure', () => Promise.reject(new Error('timeout'))],
+    ['malformed index', async () => new Response('{broken', { status: 200 })],
+  ])('falls back to GitHub after OSS %s', async (_label, ossResponse) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === 'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/releases.json') {
+        return ossResponse();
+      }
+      return new Response(JSON.stringify([release()]), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await (await getCheckHandler())({});
+
+    expect(result.success).toBe(true);
+    expect(result.data?.latest?.version).toBe('2.1.45');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps opted-in prerelease checks on the existing GitHub API path', async () => {
+    serve([release(), release('v3.0.0-beta.1', { prerelease: true })]);
+
+    expect((await (await getCheckHandler())({ includePrerelease: true })).data?.latest?.version).toBe('3.0.0-beta.1');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith('https://api.github.com/repos/pigq/OpenH3/releases', expect.anything());
   });
 });

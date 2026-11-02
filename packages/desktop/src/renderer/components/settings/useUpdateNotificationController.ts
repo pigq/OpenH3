@@ -426,6 +426,7 @@ export const useUpdateNotificationController = () => {
         downloadId: callerDownloadId,
         url: asset.url,
         fallbackUrl: asset.fallbackUrl,
+        sha256: asset.sha256,
         file_name: asset.name,
       });
       if (stateRef.current.activeTask?.id !== callerDownloadId) {
