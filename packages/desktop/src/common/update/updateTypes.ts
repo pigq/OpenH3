@@ -11,8 +11,33 @@ export interface GitHubReleaseAsset {
   /** Optional alternative URL; subject to the same GitHub host allowlist. */
   fallbackUrl?: string;
   size: number;
+  /** SHA-256 digest from the validated stable release index. */
+  sha256?: string;
   contentType?: string;
 }
+
+export type StableReleaseAssetV1 = {
+  name: string;
+  size: number;
+  sha256: string;
+};
+
+export type StableReleaseInfoV1 = {
+  tagName: string;
+  version: string;
+  name: string;
+  body: string;
+  htmlUrl: string;
+  publishedAt: string;
+  prerelease: false;
+  draft: false;
+};
+
+export type StableReleaseIndexV1 = {
+  schemaVersion: 1;
+  release: StableReleaseInfoV1;
+  assets: StableReleaseAssetV1[];
+};
 
 export interface UpdateReleaseInfo {
   tagName: string;
