@@ -98,6 +98,8 @@ describe('AutoUpdaterService', () => {
     testTempRoot = mkdtempSync(path.join(os.tmpdir(), 'openh3-updater-test-'));
     vi.resetModules();
     vi.clearAllMocks();
+    autoUpdaterMock.checkForUpdates.mockReset();
+    autoUpdaterMock.downloadUpdate.mockReset();
     vi.spyOn(process, 'chdir').mockImplementation(() => undefined);
     setPlatform(originalPlatform);
     autoUpdaterMock.logger = null;
@@ -140,7 +142,7 @@ describe('AutoUpdaterService', () => {
 
   it('automatically downloads a newer stable release without renderer interaction', async () => {
     appMock.isPackaged = true;
-    autoUpdaterMock.checkForUpdates.mockResolvedValue({
+    autoUpdaterMock.checkForUpdates.mockResolvedValueOnce({
       isUpdateAvailable: true,
       updateInfo: { version: '2.2.0', files: [], releaseDate: '' },
     });
@@ -307,7 +309,7 @@ describe('AutoUpdaterService', () => {
       sha512: 'sha512-value',
       releaseDate: '2026-06-08T00:00:00.000Z',
     };
-    autoUpdaterMock.checkForUpdates.mockResolvedValue({ isUpdateAvailable: true, updateInfo });
+    autoUpdaterMock.checkForUpdates.mockResolvedValueOnce({ isUpdateAvailable: true, updateInfo });
 
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
     autoUpdaterService.initialize();
@@ -318,16 +320,237 @@ describe('AutoUpdaterService', () => {
     expect(result).toEqual({ success: true, updateInfo });
   });
 
-  it('configures electron-updater to read stable metadata from GitHub Releases', async () => {
+  it('checks OSS first and falls back to GitHub when the OSS check fails', async () => {
+    const updateInfo = {
+      version: '2.1.14',
+      files: [{ url: 'OpenH3-2.1.14-mac-arm64.dmg', sha512: 'stable-hash' }],
+      path: 'OpenH3-2.1.14-mac-arm64.dmg',
+      sha512: 'stable-hash',
+      releaseDate: '2026-06-08T00:00:00.000Z',
+    };
+    autoUpdaterMock.checkForUpdates
+      .mockRejectedValueOnce(new Error('OSS unavailable'))
+      .mockResolvedValueOnce({ isUpdateAvailable: true, updateInfo });
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    autoUpdaterService.initialize();
+    autoUpdaterMock.setFeedURL.mockClear();
+
+    const result = await autoUpdaterService.checkForUpdates();
+
+    expect(result).toEqual({ success: true, updateInfo });
+    expect(autoUpdaterMock.checkForUpdates).toHaveBeenCalledTimes(2);
+    expect(autoUpdaterMock.setFeedURL.mock.calls.map(([feed]) => (feed as { provider: string }).provider)).toEqual([
+      'custom',
+      'github',
+    ]);
+  });
+
+  it('does not check GitHub when OSS confirms the app is up to date', async () => {
+    autoUpdaterMock.checkForUpdates.mockResolvedValueOnce({
+      isUpdateAvailable: false,
+      updateInfo: { version: '2.1.13', files: [], releaseDate: '' },
+    });
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    autoUpdaterService.initialize();
+    autoUpdaterMock.setFeedURL.mockClear();
+
+    await expect(autoUpdaterService.checkForUpdates()).resolves.toEqual({ success: true });
+
+    expect(autoUpdaterMock.checkForUpdates).toHaveBeenCalledTimes(1);
+    expect(autoUpdaterMock.setFeedURL).toHaveBeenCalledTimes(1);
+    expect(autoUpdaterMock.setFeedURL.mock.calls[0]?.[0]).toMatchObject({ provider: 'custom' });
+  });
+
+  it('shares simultaneous stable checks so the feed cannot change mid-request', async () => {
+    let resolveCheck!: (value: unknown) => void;
+    autoUpdaterMock.checkForUpdates.mockImplementationOnce(() => new Promise((resolve) => (resolveCheck = resolve)));
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    autoUpdaterService.initialize();
+
+    const first = autoUpdaterService.checkForUpdates();
+    const second = autoUpdaterService.checkForUpdates();
+    await Promise.resolve();
+    expect(autoUpdaterMock.checkForUpdates).toHaveBeenCalledTimes(1);
+    resolveCheck({ isUpdateAvailable: false, updateInfo: { version: '2.1.13', files: [], releaseDate: '' } });
+
+    await expect(Promise.all([first, second])).resolves.toEqual([{ success: true }, { success: true }]);
+    expect(autoUpdaterMock.checkForUpdates).toHaveBeenCalledTimes(1);
+  });
+
+  it('rechecks GitHub after an OSS download failure only for the same version and SHA-512', async () => {
+    const ossInfo = {
+      version: '2.1.14',
+      files: [{ url: 'OpenH3-2.1.14-mac-arm64.dmg', sha512: 'same-hash' }],
+      path: 'OpenH3-2.1.14-mac-arm64.dmg',
+      sha512: 'same-hash',
+      releaseDate: '',
+    };
+    const githubInfo = structuredClone(ossInfo);
+    autoUpdaterMock.checkForUpdates
+      .mockResolvedValueOnce({ isUpdateAvailable: true, updateInfo: ossInfo })
+      .mockResolvedValueOnce({ isUpdateAvailable: true, updateInfo: githubInfo });
+    autoUpdaterMock.downloadUpdate.mockRejectedValueOnce(new Error('OSS download failed')).mockResolvedValueOnce([]);
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    autoUpdaterService.initialize();
+    autoUpdaterMock.setFeedURL.mockClear();
+
+    await autoUpdaterService.checkForUpdates();
+    const result = await autoUpdaterService.downloadUpdate();
+
+    expect(result).toEqual({ success: true });
+    expect(autoUpdaterMock.checkForUpdates).toHaveBeenCalledTimes(2);
+    expect(autoUpdaterMock.downloadUpdate).toHaveBeenCalledTimes(2);
+    expect(autoUpdaterMock.setFeedURL.mock.calls.map(([feed]) => (feed as { provider: string }).provider)).toEqual([
+      'custom',
+      'github',
+    ]);
+  });
+
+  it('refuses GitHub download fallback when the same version has a different SHA-512', async () => {
+    const ossInfo = {
+      version: '2.1.14',
+      files: [{ url: 'OpenH3-2.1.14-mac-arm64.dmg', sha512: 'oss-hash' }],
+      path: 'OpenH3-2.1.14-mac-arm64.dmg',
+      sha512: 'oss-hash',
+      releaseDate: '',
+    };
+    const githubInfo = {
+      ...ossInfo,
+      files: [{ url: 'OpenH3-2.1.14-mac-arm64.dmg', sha512: 'different-hash' }],
+      sha512: 'different-hash',
+    };
+    autoUpdaterMock.checkForUpdates
+      .mockResolvedValueOnce({ isUpdateAvailable: true, updateInfo: ossInfo })
+      .mockResolvedValueOnce({ isUpdateAvailable: true, updateInfo: githubInfo });
+    autoUpdaterMock.downloadUpdate.mockRejectedValueOnce(new Error('OSS download failed'));
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    autoUpdaterService.initialize();
+
+    await autoUpdaterService.checkForUpdates();
+    const result = await autoUpdaterService.downloadUpdate();
+
+    expect(result.success).toBe(false);
+    expect(autoUpdaterMock.downloadUpdate).toHaveBeenCalledTimes(1);
+    expect(autoUpdaterMock.checkForUpdates).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps cancelled OSS downloads from triggering a GitHub replay', async () => {
+    const updateInfo = {
+      version: '2.1.14',
+      files: [{ url: 'OpenH3-2.1.14-mac-arm64.dmg', sha512: 'stable-hash' }],
+      path: 'OpenH3-2.1.14-mac-arm64.dmg',
+      sha512: 'stable-hash',
+      releaseDate: '',
+    };
+    autoUpdaterMock.checkForUpdates.mockResolvedValueOnce({ isUpdateAvailable: true, updateInfo });
+    autoUpdaterMock.downloadUpdate.mockRejectedValueOnce(new Error('cancelled'));
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    autoUpdaterService.initialize();
+
+    await autoUpdaterService.checkForUpdates();
+    await autoUpdaterService.downloadUpdate();
+
+    expect(autoUpdaterMock.checkForUpdates).toHaveBeenCalledTimes(1);
+    expect(autoUpdaterMock.downloadUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('restores the OSS provider cache after rejecting a different GitHub release', async () => {
+    const ossInfo = {
+      version: '2.1.14',
+      files: [{ url: 'OpenH3-2.1.14-win-x64.exe', sha512: 'oss-hash' }],
+      releaseDate: '',
+    };
+    const githubInfo = { ...ossInfo, version: '2.1.15' };
+    const cache = autoUpdaterMock as typeof autoUpdaterMock & { updateInfoAndProvider?: unknown };
+    const ossCache = { info: ossInfo, provider: { source: 'oss' } };
+    autoUpdaterMock.checkForUpdates
+      .mockImplementationOnce(async () => {
+        cache.updateInfoAndProvider = ossCache;
+        return { isUpdateAvailable: true, updateInfo: ossInfo };
+      })
+      .mockImplementationOnce(async () => {
+        cache.updateInfoAndProvider = { info: githubInfo, provider: { source: 'github' } };
+        return { isUpdateAvailable: true, updateInfo: githubInfo };
+      });
+    autoUpdaterMock.downloadUpdate.mockRejectedValueOnce(new Error('OSS download failed'));
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    autoUpdaterService.initialize();
+
+    await autoUpdaterService.checkForUpdates();
+    expect((await autoUpdaterService.downloadUpdate()).success).toBe(false);
+    expect(cache.updateInfoAndProvider).toBe(ossCache);
+  });
+
+  it('waits for an active check before starting a download', async () => {
+    let finishCheck!: (result: unknown) => void;
+    autoUpdaterMock.checkForUpdates.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishCheck = resolve;
+        })
+    );
+    autoUpdaterMock.downloadUpdate.mockResolvedValueOnce([]);
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    autoUpdaterService.initialize();
+    const checking = autoUpdaterService.checkForUpdates();
+    const downloading = autoUpdaterService.downloadUpdate();
+    expect(autoUpdaterMock.downloadUpdate).not.toHaveBeenCalled();
+    finishCheck({
+      isUpdateAvailable: true,
+      updateInfo: {
+        version: '2.1.14',
+        files: [{ url: 'OpenH3.exe', sha512: 'same-hash' }],
+        releaseDate: '',
+      },
+    });
+    await checking;
+    await expect(downloading).resolves.toEqual({ success: true });
+    expect(autoUpdaterMock.downloadUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not replay or advertise an unchecked version after cancellation during fallback', async () => {
+    const updateInfo = {
+      version: '2.1.14',
+      files: [{ url: 'OpenH3.exe', sha512: 'same-hash' }],
+      releaseDate: '',
+    };
+    let finishFallback!: () => void;
+    autoUpdaterMock.checkForUpdates.mockResolvedValueOnce({ isUpdateAvailable: true, updateInfo });
+    autoUpdaterMock.downloadUpdate.mockRejectedValueOnce(new Error('OSS disconnected'));
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    const broadcast = vi.fn();
+    autoUpdaterService.initialize(broadcast);
+    await autoUpdaterService.checkForUpdates();
+    autoUpdaterMock.checkForUpdates.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishFallback = () => {
+            autoUpdaterService.triggerEventForTest('update-available', updateInfo);
+            resolve({ isUpdateAvailable: true, updateInfo });
+          };
+        })
+    );
+    const downloading = autoUpdaterService.downloadUpdate();
+    await vi.waitFor(() => expect(autoUpdaterMock.checkForUpdates).toHaveBeenCalledTimes(2));
+    await autoUpdaterService.cancelDownload();
+    broadcast.mockClear();
+    finishFallback();
+    await downloading;
+    expect(autoUpdaterMock.downloadUpdate).toHaveBeenCalledTimes(1);
+    expect(broadcast).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'available' }));
+  });
+
+  it('configures electron-updater to check stable metadata from OSS', async () => {
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
 
     autoUpdaterService.resetForTest();
 
-    expect(autoUpdaterMock.setFeedURL).toHaveBeenCalledWith({
-      provider: 'github',
-      owner: 'pigq',
-      repo: 'OpenH3',
-    });
+    expect(autoUpdaterMock.setFeedURL).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'custom',
+        url: 'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/',
+      })
+    );
   });
 
   it('enables forced updater checks in unpacked dev builds when requested', async () => {

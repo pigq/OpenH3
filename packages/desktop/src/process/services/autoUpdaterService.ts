@@ -25,7 +25,7 @@ import {
   recordAutoUpdateQuitAndInstall,
   recordAutoUpdateStatus,
 } from './autoUpdateDiagnostics';
-import { buildGitHubFeedOptions } from './updateFeed';
+import { buildUpdateFeedOptions, type UpdateFeedSource } from './updateFeed';
 
 const FORCE_DEV_AUTO_UPDATE_ENV = 'AIONUI_FORCE_DEV_AUTO_UPDATE';
 const DEBUG_AUTO_UPDATE_CURRENT_VERSION_ENV = 'AIONUI_DEBUG_AUTO_UPDATE_CURRENT_VERSION';
@@ -121,6 +121,7 @@ class AutoUpdaterService extends EventEmitter {
   private _installTimer: ReturnType<typeof setTimeout> | undefined;
   private _installPromise: Promise<void> | null = null;
   private _automaticCheckPromise: Promise<void> | null = null;
+  private _stableCheckPromise: Promise<{ success: boolean; updateInfo?: UpdateInfo; error?: string }> | null = null;
   private _installHandedOff = false;
   private _installHandoffPending = false;
   private _installHandoffError: Error | null = null;
@@ -131,6 +132,9 @@ class AutoUpdaterService extends EventEmitter {
   private _macExitTimer: ReturnType<typeof setTimeout> | undefined;
   private _attemptedInstallVersion: string | undefined;
   private _activeDownloadPromise: Promise<{ success: boolean; error?: string }> | null = null;
+  private _activeUpdateSource: UpdateFeedSource = 'oss';
+  private _activeUpdateInfo: UpdateInfo | undefined;
+  private _activeStableDownloadFallback = false;
   private _activeDownloadCancellationToken: CancellationToken | null = null;
   private _ignoreActiveDownloadEvents = false;
   private _nativeInstallReady = process.platform !== 'darwin';
@@ -158,7 +162,7 @@ class AutoUpdaterService extends EventEmitter {
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = false;
     this.configureDevAutoUpdateDebug();
-    const githubFeedOptions = buildGitHubFeedOptions();
+    const stableFeedOptions = buildUpdateFeedOptions('oss');
 
     // Set the correct update channel based on platform and architecture before
     // any update checks are performed
@@ -167,11 +171,11 @@ class AutoUpdaterService extends EventEmitter {
       autoUpdater.channel = channel;
       log.info(`Update channel set to: ${channel}`);
     }
-    autoUpdater.setFeedURL(githubFeedOptions);
-    log.info('Update feed set to GitHub provider');
-    log.debug('[auto-update] GitHub feed configured', {
-      provider: githubFeedOptions.provider,
-      url: 'https://github.com/pigq/OpenH3/releases',
+    autoUpdater.setFeedURL(stableFeedOptions);
+    log.info('Update feed set to Aliyun OSS provider');
+    log.debug('[auto-update] OSS feed configured', {
+      provider: stableFeedOptions.provider,
+      url: 'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/',
       channel: channel ?? 'latest',
       platform: process.platform,
       arch: process.arch,
@@ -387,6 +391,7 @@ class AutoUpdaterService extends EventEmitter {
     this._installTimer = undefined;
     this._installPromise = null;
     this._automaticCheckPromise = null;
+    this._stableCheckPromise = null;
     this._installHandedOff = false;
     this._installHandoffPending = false;
     this._installHandoffError = null;
@@ -397,6 +402,9 @@ class AutoUpdaterService extends EventEmitter {
     this._macExitTimer = undefined;
     this._attemptedInstallVersion = undefined;
     this._activeDownloadPromise = null;
+    this._activeUpdateSource = 'oss';
+    this._activeUpdateInfo = undefined;
+    this._activeStableDownloadFallback = false;
     this._activeDownloadCancellationToken = null;
     this._ignoreActiveDownloadEvents = false;
     this.clearNativeInstallReadyWait();
@@ -420,6 +428,7 @@ class AutoUpdaterService extends EventEmitter {
     this._installTimer = undefined;
     this._installPromise = null;
     this._automaticCheckPromise = null;
+    this._stableCheckPromise = null;
     this._installHandedOff = false;
     this._installHandoffPending = false;
     this._installHandoffError = null;
@@ -430,6 +439,9 @@ class AutoUpdaterService extends EventEmitter {
     this._macExitTimer = undefined;
     this._attemptedInstallVersion = undefined;
     this._activeDownloadPromise = null;
+    this._activeUpdateSource = 'oss';
+    this._activeUpdateInfo = undefined;
+    this._activeStableDownloadFallback = false;
     this._activeDownloadCancellationToken = null;
     this._ignoreActiveDownloadEvents = false;
     this.clearNativeInstallReadyWait();
@@ -518,12 +530,14 @@ class AutoUpdaterService extends EventEmitter {
     }
 
     register('checking-for-update', () => {
+      if (this._activeStableDownloadFallback) return;
       log.info('Checking for updates...');
       this.resetNativeInstallReady();
       this.broadcastStatus({ status: 'checking' });
     });
 
     register('update-available', (info: UpdateInfo) => {
+      if (this._activeStableDownloadFallback) return;
       log.info(`Update available: ${info.version}`);
       this.resetNativeInstallReady(info.version);
       this.broadcastStatus({
@@ -538,6 +552,7 @@ class AutoUpdaterService extends EventEmitter {
     });
 
     register('update-not-available', () => {
+      if (this._activeStableDownloadFallback) return;
       log.info('Application is up to date');
       this.broadcastStatus({ status: 'not-available' });
     });
@@ -565,7 +580,6 @@ class AutoUpdaterService extends EventEmitter {
         return;
       }
       log.info('Update downloaded');
-      this._activeDownloadPromise = null;
       this._activeDownloadCancellationToken = null;
       this._downloadedUpdateVersion = info.version;
       this._hasDownloadedUpdate = true;
@@ -583,7 +597,6 @@ class AutoUpdaterService extends EventEmitter {
 
     register('update-cancelled', () => {
       log.info('Update download cancelled');
-      this._activeDownloadPromise = null;
       this._activeDownloadCancellationToken = null;
       this._ignoreActiveDownloadEvents = false;
       this.broadcastStatus({ status: 'cancelled' });
@@ -594,9 +607,14 @@ class AutoUpdaterService extends EventEmitter {
         log.debug('[auto-update] Ignoring error after cancellation');
         return;
       }
+      if (this._activeDownloadPromise && this._activeUpdateSource === 'oss') {
+        log.warn('[auto-update] Deferring OSS download error while a verified GitHub fallback is considered', {
+          error: error.message,
+        });
+        return;
+      }
       log.error('Auto-updater error:', error);
       this.handleInstallHandoffError(error);
-      this._activeDownloadPromise = null;
       this._activeDownloadCancellationToken = null;
       this.broadcastStatus({
         status: 'error',
@@ -761,6 +779,23 @@ class AutoUpdaterService extends EventEmitter {
   }
 
   async checkForUpdates(): Promise<{ success: boolean; updateInfo?: UpdateInfo; error?: string }> {
+    if (this._stableCheckPromise) return this._stableCheckPromise;
+
+    if (this._activeDownloadPromise) {
+      const activeInfo = (autoUpdater as unknown as AutoUpdaterCacheAccess).updateInfoAndProvider?.info;
+      return { success: true, updateInfo: activeInfo };
+    }
+
+    const promise = this.checkStableFeed();
+    this._stableCheckPromise = promise;
+    try {
+      return await promise;
+    } finally {
+      if (this._stableCheckPromise === promise) this._stableCheckPromise = null;
+    }
+  }
+
+  private async checkStableFeed(): Promise<{ success: boolean; updateInfo?: UpdateInfo; error?: string }> {
     try {
       if (!this._isInitialized) {
         throw new Error('AutoUpdaterService not initialized');
@@ -779,7 +814,20 @@ class AutoUpdaterService extends EventEmitter {
         return { success: true };
       }
 
-      const result = await autoUpdater.checkForUpdates();
+      let source: UpdateFeedSource = 'oss';
+      let result: Awaited<ReturnType<typeof autoUpdater.checkForUpdates>>;
+      try {
+        autoUpdater.setFeedURL(buildUpdateFeedOptions('oss'));
+        result = await autoUpdater.checkForUpdates();
+        if (!result?.updateInfo) throw new Error('OSS update check returned no usable result');
+      } catch (ossError) {
+        log.warn('[auto-update] OSS update check failed; retrying the GitHub feed', {
+          error: ossError instanceof Error ? ossError.message : String(ossError),
+        });
+        source = 'github';
+        autoUpdater.setFeedURL(buildUpdateFeedOptions('github'));
+        result = await autoUpdater.checkForUpdates();
+      }
       if (!result) {
         const { default: i18n } = await import('./i18n');
         log.debug('[auto-update] checkForUpdates returned null');
@@ -789,7 +837,8 @@ class AutoUpdaterService extends EventEmitter {
       // When isUpdateAvailable is false, updateInfoAndProvider is NOT set internally,
       // so a subsequent downloadUpdate() call would fail with "Please check update first".
       if (!result.isUpdateAvailable) {
-        log.debug('[auto-update] no update available from GitHub feed', {
+        this._activeUpdateInfo = undefined;
+        log.debug(`[auto-update] no update available from ${source} feed`, {
           version: result.updateInfo.version,
         });
         return { success: true };
@@ -808,7 +857,10 @@ class AutoUpdaterService extends EventEmitter {
         });
         return { success: true };
       }
-      log.debug('[auto-update] update available from GitHub feed', {
+      this._activeUpdateSource = source;
+      this._activeUpdateInfo = result.updateInfo;
+      this._activeStableDownloadFallback = false;
+      log.debug(`[auto-update] update available from ${source} feed`, {
         version: result.updateInfo.version,
         releaseDate: result.updateInfo.releaseDate,
       });
@@ -836,6 +888,73 @@ class AutoUpdaterService extends EventEmitter {
         success: false,
         error: message,
       };
+    }
+  }
+
+  private getStableDownloadIdentity(info: UpdateInfo): string | null {
+    if (
+      !Array.isArray(info.files) ||
+      !info.files.length ||
+      info.files.some(
+        (file) => !file || typeof file.url !== 'string' || typeof file.sha512 !== 'string' || !file.sha512
+      )
+    ) {
+      return null;
+    }
+    const files = info.files
+      .map((file) => ({ name: path.posix.basename(file.url.replaceAll('\\', '/')), sha512: file.sha512 }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+    if (!files.length) return null;
+    return JSON.stringify(files);
+  }
+
+  private async retryStableDownloadFromGitHub(expectedInfo: UpdateInfo, originalError: string): Promise<boolean> {
+    if (this._activeUpdateSource !== 'oss' || this._activeStableDownloadFallback) return false;
+    const expectedVersion = parse(expectedInfo.version);
+    const expectedIdentity = this.getStableDownloadIdentity(expectedInfo);
+    if (!expectedVersion || expectedVersion.prerelease.length || !expectedIdentity) return false;
+
+    this._activeStableDownloadFallback = true;
+    const cache = autoUpdater as unknown as AutoUpdaterCacheAccess;
+    const previousUpdateInfoAndProvider = cache.updateInfoAndProvider;
+    try {
+      autoUpdater.setFeedURL(buildUpdateFeedOptions('github'));
+      const result = await autoUpdater.checkForUpdates();
+      const candidate = result?.updateInfo;
+      const candidateVersion = candidate ? parse(candidate.version) : null;
+      if (
+        !result?.isUpdateAvailable ||
+        !candidate ||
+        !candidateVersion ||
+        candidateVersion.prerelease.length ||
+        candidateVersion.version !== expectedVersion.version ||
+        this.getStableDownloadIdentity(candidate) !== expectedIdentity
+      ) {
+        log.warn('[auto-update] GitHub fallback rejected because the stable release identity differs', {
+          expectedVersion: expectedVersion.version,
+          candidateVersion: candidateVersion?.version,
+        });
+        return false;
+      }
+
+      this._activeUpdateSource = 'github';
+      this._activeUpdateInfo = candidate;
+      log.info('[auto-update] Retrying the identical stable installer from GitHub after OSS download failure', {
+        version: expectedVersion.version,
+      });
+      return true;
+    } catch (error) {
+      log.warn('[auto-update] GitHub download fallback check failed', {
+        originalError,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    } finally {
+      if (this._activeUpdateSource === 'oss') {
+        autoUpdater.setFeedURL(buildUpdateFeedOptions('oss'));
+        cache.updateInfoAndProvider = previousUpdateInfoAndProvider;
+      }
+      this._activeStableDownloadFallback = false;
     }
   }
 
@@ -964,6 +1083,10 @@ class AutoUpdaterService extends EventEmitter {
   }
 
   async downloadUpdate(): Promise<{ success: boolean; error?: string }> {
+    if (this._stableCheckPromise) {
+      const checked = await this._stableCheckPromise;
+      if (!checked.success) return { success: false, error: checked.error };
+    }
     if (this._activeDownloadPromise) {
       log.debug('[auto-update] downloadUpdate reused active download');
       return this._activeDownloadPromise;
@@ -972,8 +1095,9 @@ class AutoUpdaterService extends EventEmitter {
     const cancellationToken = new CancellationToken();
     this._activeDownloadCancellationToken = cancellationToken;
 
-    const runDownload = async (): Promise<{ success: boolean; error?: string }> => {
+    const runDownloadOnce = async (): Promise<{ success: boolean; error?: string }> => {
       try {
+        if (cancellationToken.cancelled) return { success: true };
         if (!this._isInitialized) {
           throw new Error('AutoUpdaterService not initialized');
         }
@@ -1003,10 +1127,26 @@ class AutoUpdaterService extends EventEmitter {
       }
     };
 
-    const promise = runDownload();
+    const initialUpdateInfo =
+      this._activeUpdateInfo ?? (autoUpdater as unknown as AutoUpdaterCacheAccess).updateInfoAndProvider?.info;
+    const promise = (async (): Promise<{ success: boolean; error?: string }> => {
+      const firstResult = await runDownloadOnce();
+      if (cancellationToken.cancelled) return { success: true };
+      if (firstResult.success || !initialUpdateInfo || this._activeUpdateSource !== 'oss') return firstResult;
+
+      const canRetry = await this.retryStableDownloadFromGitHub(
+        initialUpdateInfo,
+        firstResult.error ?? 'download failed'
+      );
+      if (!canRetry) return firstResult;
+      return runDownloadOnce();
+    })();
     this._activeDownloadPromise = promise;
     const result = await promise;
-    if (!result.success && this._activeDownloadPromise === promise) this._activeDownloadPromise = null;
+    if (this._activeDownloadPromise === promise) {
+      this._activeDownloadPromise = null;
+      this._activeDownloadCancellationToken = null;
+    }
     return result;
   }
 
@@ -1018,8 +1158,6 @@ class AutoUpdaterService extends EventEmitter {
 
     log.info('[auto-update] Cancelling active auto-update download');
     this._activeDownloadCancellationToken?.cancel();
-    this._activeDownloadCancellationToken = null;
-    this._activeDownloadPromise = null;
     this._ignoreActiveDownloadEvents = true;
     this.broadcastStatus({ status: 'cancelled' });
     return { success: true };

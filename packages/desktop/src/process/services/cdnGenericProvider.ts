@@ -5,6 +5,7 @@
  */
 
 import type { UpdateInfo } from 'electron-updater';
+import type { WindowsUpdateInfo } from 'builder-util-runtime';
 import { GenericProvider } from 'electron-updater/out/providers/GenericProvider';
 import { resolveFiles as resolveProviderFiles } from 'electron-updater/out/providers/Provider';
 import { getChannelFilename, newUrlFromBase } from 'electron-updater/out/util';
@@ -36,13 +37,16 @@ export class CdnGenericProvider extends GenericProvider {
       ...configuration,
       provider: 'generic',
     };
-    super(genericConfiguration, updater, runtimeOptions);
+    super(genericConfiguration, updater, {
+      ...runtimeOptions,
+      isUseMultipleRangeRequest: false,
+    });
     this._updater = updater;
     this._cdnBaseUrl = new URL(withTrailingSlash(configuration.url));
     log.debug('[auto-update] CDN provider initialized', {
       baseUrl: this._cdnBaseUrl.href,
       platform: runtimeOptions.platform,
-      isUseMultipleRangeRequest: runtimeOptions.isUseMultipleRangeRequest,
+      isUseMultipleRangeRequest: this.isUseMultipleRangeRequest,
     });
   }
 
@@ -61,7 +65,28 @@ export class CdnGenericProvider extends GenericProvider {
 
   override async getLatestVersion(): Promise<UpdateInfo> {
     log.info('[auto-update] Checking latest version from URL:', this.resolveLatestVersionUrl().href);
-    return super.getLatestVersion();
+    const info: WindowsUpdateInfo = await super.getLatestVersion();
+    if (
+      !info ||
+      !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(info.version) ||
+      !Array.isArray(info.files) ||
+      !info.files.length ||
+      info.files.some(
+        (file) =>
+          !file ||
+          typeof file.url !== 'string' ||
+          !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(file.url) ||
+          typeof file.sha512 !== 'string' ||
+          !/^[A-Za-z0-9+/]{86}==$/.test(file.sha512)
+      ) ||
+      (info.packages &&
+        Object.values(info.packages).some(
+          (file) => !file || typeof file.path !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(file.path)
+        ))
+    ) {
+      throw new Error('UPDATE_OSS_METADATA_INVALID');
+    }
+    return info;
   }
 
   override resolveFiles(updateInfo: UpdateInfo): ReturnType<GenericProvider['resolveFiles']> {
