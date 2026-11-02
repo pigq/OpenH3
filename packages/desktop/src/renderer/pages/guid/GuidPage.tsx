@@ -740,7 +740,7 @@ const GuidPage: React.FC = () => {
   return (
     <ConfigProvider getPopupContainer={() => guidContainerRef.current || document.body}>
       <div ref={guidContainerRef} className={`${styles.guidContainer} ${isAiCreationPage ? styles.creationPage : ''}`}>
-        <div className={styles.guidLayout}>
+        <div className={`${styles.guidLayout} ${isAiCreationPage ? styles.creationScrollArea : ''}`}>
           <div className={styles.heroHeader}>
             <div className='text-center'>
               <p className='text-2xl font-semibold mb-0 text-t-primary text-center'>
@@ -862,7 +862,6 @@ const GuidPage: React.FC = () => {
             </div>
           ) : null}
         </div>
-
         <QuickActionButtons
           onOpenLink={openLink}
           onOpenBugReport={() => setShowFeedbackModal(true)}
