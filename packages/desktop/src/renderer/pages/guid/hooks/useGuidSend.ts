@@ -196,11 +196,11 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
           }
         : undefined;
     if (creationRequest?.source === 'cloud') {
-      if (creationRequest.kind === 'video') {
+      if (creationRequest.kind === 'video' && creationRequest.state === 'unsupported') {
         Message.error(t('guid.creation.cloudVideoUnsupported'));
         return false;
       }
-      if (!creationModel?.available || !creationModel.provider?.api_key?.trim()) {
+      if (!creationModel?.available || (creationRequest.kind === 'image' && !creationModel.provider?.api_key?.trim())) {
         Message.error(t('guid.creation.configureCloud'));
         return false;
       }
@@ -225,7 +225,8 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
           )
         : input;
     const creationRequestId = creationRequest ? (installationRequestId ?? crypto.randomUUID()) : undefined;
-    const requiresCreationBinding = creationRequest?.source === 'local';
+    const cloudVideo = creationRequest?.source === 'cloud' && creationRequest.kind === 'video';
+    const requiresCreationBinding = creationRequest?.source === 'local' || cloudVideo;
     const deterministicInstallation =
       requiresCreationBinding && creationRequest.family && creationRequest.intent !== 'generate';
     const creationSnapshot = creationRequest
@@ -286,8 +287,9 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
             runtime_scope_id: creationRequestId,
           });
           const tools = new Set(check.tools?.map((tool) => tool.name));
-          const needed =
-            creationRequest.intent === 'generate'
+          const needed = cloudVideo
+            ? ['openh3_cloud_video_generate', 'openh3_cloud_video_status']
+            : creationRequest.intent === 'generate'
               ? [
                   'openh3_comfy_environment',
                   'openh3_comfy_profiles',
@@ -345,12 +347,14 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
       model: assistantOverrideModel,
       permission: selectedMode || undefined,
       thought_level: selectedThoughtLevelValue || undefined,
-      skill_ids: requiresCreationBinding
-        ? [...new Set([...(enabled_skills_to_send ?? []), 'comfyui-local'])]
-        : enabled_skills_to_send,
-      disabled_builtin_skill_ids: requiresCreationBinding
-        ? (excludeBuiltinSkills ?? []).filter((skill) => skill !== 'comfyui-local')
-        : excludeBuiltinSkills,
+      skill_ids:
+        creationRequest?.source === 'local'
+          ? [...new Set([...(enabled_skills_to_send ?? []), 'comfyui-local'])]
+          : enabled_skills_to_send,
+      disabled_builtin_skill_ids:
+        creationRequest?.source === 'local'
+          ? (excludeBuiltinSkills ?? []).filter((skill) => skill !== 'comfyui-local')
+          : excludeBuiltinSkills,
       mcp_ids: creationRequest
         ? [
             ...new Set([

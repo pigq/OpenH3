@@ -58,8 +58,24 @@ describe('resolveBinaryPath', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     setResourcesPath(originalResourcesPath);
     restoreBackendBin();
+  });
+
+  it('uses the project bundle during development before looking on PATH', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    setResourcesPath('/electron/runtime/resources');
+    const projectBinary = join(
+      process.cwd(),
+      'resources',
+      'bundled-openh3-core',
+      `${process.platform}-${process.arch}`,
+      process.platform === 'win32' ? 'openh3-core.exe' : 'openh3-core'
+    );
+    vi.mocked(existsSync).mockImplementation((filename) => filename === projectBinary);
+    expect(resolveBinaryPath()).toBe(projectBinary);
+    expect(execSync).not.toHaveBeenCalled();
   });
 
   it('returns the AIONUI_BACKEND_BIN override when the file exists', () => {

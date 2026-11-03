@@ -203,7 +203,6 @@ export async function handleComfyRoute(
         'content-length': end - start + 1,
         'accept-ranges': 'bytes',
         'cache-control': 'private, max-age=3600',
-        'access-control-allow-origin': 'http://127.0.0.1:33001',
         ...(partial ? { 'content-range': `bytes ${start}-${end}/${stat.size}` } : {}),
       });
       const stream = fs.createReadStream(artifact.path, { start, end });

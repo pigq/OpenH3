@@ -252,13 +252,15 @@
 }
 .modelTrigger {
   width: auto;
-  flex: 1 1 260px;
-  max-width: 100%;
+  flex: 0 1 auto;
+  max-width: min(300px, 100%);
   min-width: 0;
-  border: 0 !important;
-  background: transparent !important;
-  border-radius: 9px;
-  padding: 0 8px;
+  height: 30px;
+  border: 1px solid var(--color-border-2) !important;
+  color: var(--color-text-2);
+  background: var(--color-bg-2) !important;
+  border-radius: 8px;
+  padding: 0 10px;
 }
 .modelContent {
   display: flex;
@@ -284,6 +286,11 @@
   color: var(--color-text-3);
   flex-shrink: 0;
 }
+.triggerState {
+  composes: state;
+  padding-inline-start: 7px;
+  border-inline-start: 1px solid var(--color-border-2);
+}
 .arrow,
 .arrowOpen {
   display: inline-flex;
@@ -294,10 +301,24 @@
   transform: rotate(180deg);
 }
 .menu {
-  width: 100%;
+  width: 220px;
   max-width: calc(100vw - 24px);
   max-height: min(460px, 65vh);
   overflow-y: auto;
+  padding: 4px;
+  border-radius: 10px;
+}
+.menuCheck {
+  display: inline-flex;
+  width: 16px;
+  flex-shrink: 0;
+  color: rgb(var(--primary-6));
+}
+.menu .manageItem {
+  margin-top: 4px;
+  border-top: 1px solid var(--color-border-2);
+  border-radius: 0;
+  color: var(--color-text-3);
 }
 .menuModel {
   display: flex;
@@ -313,20 +334,23 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.menu :global(.arco-menu-item) {
+.menu :global(.arco-dropdown-menu-item) {
   display: flex;
   align-items: center;
   gap: 8px;
   height: auto;
-  min-height: 36px;
-  padding-block: 6px;
+  min-height: 32px;
+  padding: 5px 10px;
   line-height: 20px;
   min-width: 0;
+  border-radius: 6px;
+}
+.menu :global(.arco-dropdown-menu-item.arco-dropdown-menu-disabled) {
+  white-space: normal;
 }
 @media (max-width: 560px) {
   .modelTrigger {
-    width: 100%;
-    flex-basis: 100%;
+    max-width: min(260px, 100%);
   }
 }
 @media (prefers-reduced-motion: reduce) {

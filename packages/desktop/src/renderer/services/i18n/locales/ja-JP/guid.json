@@ -171,7 +171,21 @@
       "invalid": "名前、有効な URL、キーと対応画像モデル（例：gpt-image-2.5-all）を入力してください。",
       "saveFailed": "保存できませんでした。再試行してください。"
     },
-    "toolsCheckFailed": "ローカル ComfyUI ツールを利用できません（{{reason}}）。これはアプリ／セッションへのツール注入の問題であり、デバイスの非対応を示すものではありません。ハードウェア確認やタスク送信は行われていません。OpenH3 を再起動または更新し、モデルカードから再試行してください。"
+    "toolsCheckFailed": "ローカル ComfyUI ツールを利用できません（{{reason}}）。これはアプリ／セッションへのツール注入の問題であり、デバイスの非対応を示すものではありません。ハードウェア確認やタスク送信は行われていません。OpenH3 を再起動または更新し、モデルカードから再試行してください。",
+    "cloudVideoSetup": {
+      "hint": "Add a cloud video service. H3 supports text, first frame and first/last frames; other services must expose the OpenAI Videos API. Saved connections are checked when generating.",
+      "protocol": "Video API protocol",
+      "modelHint": "H3: leave empty to use the server default",
+      "keyHint": "H3: optional. Leave empty to keep the existing key on the same endpoint.",
+      "loraPath": "Server LoRA file path",
+      "invalid": "Check the service name, API URL and model. OpenAI Videos requires a model and API key.",
+      "uncertain": "The server may have received this request. Automatic resubmission is disabled to prevent duplicate generation.",
+      "retrying": "Waiting for the cloud service to respond. This task will be checked again automatically.",
+      "failed": "Video generation could not complete. Check the service status or task details before starting a new request."
+    },
+    "noLocalModels": "ローカルモデルなし",
+    "noLocalModelsHint": "ローカルモデルが見つかりません。インストールまたは追加してください。",
+    "addCloud": "クラウド API を追加"
   },
   "aiCreation": "AIクリエーション",
   "aiCreationSubtitle": "想像力を形にしましょう",

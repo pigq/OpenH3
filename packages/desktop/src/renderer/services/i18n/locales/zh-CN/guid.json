@@ -58,7 +58,21 @@
       "invalid": "请填写名称、有效地址、Key 和支持的图片模型（如 gpt-image-2.5-all）。",
       "saveFailed": "保存失败，请重试。"
     },
-    "toolsCheckFailed": "本地 ComfyUI 工具检查失败（{{reason}}）。这是应用/会话工具连接问题，不代表设备不兼容；尚未检测硬件或提交任务。请重启或更新应用，再从模型卡重试。"
+    "toolsCheckFailed": "本地 ComfyUI 工具检查失败（{{reason}}）。这是应用/会话工具连接问题，不代表设备不兼容；尚未检测硬件或提交任务。请重启或更新应用，再从模型卡重试。",
+    "cloudVideoSetup": {
+      "hint": "添加云端视频服务。H3 支持文生、首帧及首尾帧；其他平台需提供 OpenAI Videos 接口。保存连接后，实际可用性以生成结果为准。",
+      "protocol": "视频接口协议",
+      "modelHint": "H3 可留空，使用服务端默认模型",
+      "keyHint": "H3 可不填；同一地址留空则保留已有 Key",
+      "loraPath": "服务端 LoRA 文件路径",
+      "invalid": "请检查服务商名称、API 地址及模型；OpenAI Videos 必须填写模型和 API Key。",
+      "uncertain": "服务端可能已收到请求。为避免重复生成，系统不会自动重新提交。",
+      "retrying": "正在等待云端服务响应，系统会自动再次查询此任务。",
+      "failed": "视频生成未能完成，请检查服务状态或任务详情后再发起新请求。"
+    },
+    "noLocalModels": "未安装本地模型",
+    "noLocalModelsHint": "尚未发现本地模型，请先安装或添加",
+    "addCloud": "添加云端 API"
   },
   "templatePlay": "播放 {{title}}",
   "templatePause": "暂停 {{title}}",

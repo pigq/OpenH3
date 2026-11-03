@@ -25,6 +25,7 @@ type GuidInputCardProps = {
   onFocus: () => void;
   onBlur: () => void;
   placeholder: string;
+  minRows?: number;
 
   // Styling
   isInputActive: boolean;
@@ -58,6 +59,7 @@ const GuidInputCard: React.FC<GuidInputCardProps> = ({
   onFocus,
   onBlur,
   placeholder,
+  minRows = 2,
   isInputActive,
   isFileDragging,
   activeBorderColor,
@@ -77,7 +79,7 @@ const GuidInputCard: React.FC<GuidInputCardProps> = ({
   const { compositionHandlers, isComposing } = useCompositionInput();
   const inputRef = useRef<RefTextAreaType | null>(null);
   const lastTemplateFocus = useRef<string | undefined>(undefined);
-  const textareaAutoSize = isMobile ? { minRows: 2, maxRows: 8 } : { minRows: 2, maxRows: 20 };
+  const textareaAutoSize = isMobile ? { minRows: Math.min(minRows, 3), maxRows: 8 } : { minRows, maxRows: 20 };
 
   useEffect(() => {
     if (!focusRequestKey || (isMobile && !scrollOnFocusRequest)) return;

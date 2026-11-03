@@ -5,6 +5,25 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { resolveMediaBinary } from './mediaBinary';
 import { resolveComfyResourcesRoot } from './comfy/planning/catalog';
 
+/** Permit the application renderer, including its exact development origin. */
+export function mediaServiceCorsHeaders(origin?: string, rendererUrl?: string): Record<string, string> {
+  const allowed = new Set(['http://127.0.0.1:33001']);
+  if (rendererUrl) {
+    try {
+      const url = new URL(rendererUrl);
+      if (['http:', 'https:'].includes(url.protocol)) allowed.add(url.origin);
+    } catch {
+      /* An invalid renderer URL does not grant another origin access. */
+    }
+  }
+  return {
+    vary: 'Origin',
+    'access-control-allow-methods': 'GET,POST,OPTIONS',
+    'access-control-allow-headers': 'content-type,x-openh3-ui-token',
+    ...(!origin || allowed.has(origin) ? { 'access-control-allow-origin': origin ?? 'http://127.0.0.1:33001' } : {}),
+  };
+}
+
 export type MediaServiceProcessOptions = {
   scriptPath: string;
   dataDir: string;
@@ -64,6 +83,7 @@ export class MediaServiceProcess {
       AIONUI_FFMPEG_PATH: resolveMediaBinary('ffmpeg'),
       AIONUI_FFPROBE_PATH: resolveMediaBinary('ffprobe'),
       OPENH3_MEDIA_UI_TOKEN: this.uiToken,
+      OPENH3_MEDIA_UI_ORIGIN: process.env.ELECTRON_RENDERER_URL ?? '',
       AIONUI_MEDIA_UI_TOKEN: this.uiToken,
       ...(this.options.backendPort ? { OPENH3_MEDIA_BACKEND_PORT: String(this.options.backendPort) } : {}),
       ...(this.options.bundleRoot

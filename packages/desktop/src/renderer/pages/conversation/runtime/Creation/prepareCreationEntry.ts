@@ -1,8 +1,10 @@
 import type { ComfyFamily, ComfyIntent, ComfyOperation } from '@/common/chat/document/creation/comfy';
 import { comfyApi } from '@/common/chat/document/creation/comfyApi';
+import { cloudVideoApi } from '@/common/chat/document/creation/cloudVideoApi';
 import type { TemplateSnapshot } from '@/common/contentCatalog/snapshot';
 
 type Entry = {
+  id?: string;
   profileId?: string;
   family?: ComfyFamily;
   intent?: ComfyIntent;
@@ -22,6 +24,11 @@ export function prepareCreationEntry(
   const prior = pending.get(key);
   if (prior) return prior;
   const request = (async () => {
+    if (entry.source === 'cloud' && entry.kind === 'video') {
+      if (!entry.id?.startsWith('cloud-video:')) throw new Error('CLOUD_VIDEO_CONNECTION_MISSING');
+      const bound = await cloudVideoApi.bind(requestId, conversationId, entry.id.slice('cloud-video:'.length));
+      if (!bound.ok) throw new Error('CLOUD_VIDEO_BIND_FAILED');
+    }
     const bound = await comfyApi.bind(requestId, conversationId, entry.profileId, entry.family, entry.intent, {
       source: entry.source ?? 'local',
       kind: entry.kind ?? 'image',

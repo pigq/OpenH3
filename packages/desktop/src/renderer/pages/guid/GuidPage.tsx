@@ -765,6 +765,7 @@ const GuidPage: React.FC = () => {
                 templateFocusKey || (navState?.focusPrefill && navState.prefillPrompt ? location.key : undefined)
               }
               scrollOnFocusRequest={isAiCreationPage && Boolean(templateFocusKey)}
+              minRows={isAiCreationPage ? 5 : undefined}
               input={guidInput.input}
               onInputChange={handleInputChange}
               onKeyDown={handleInputKeyDown}
