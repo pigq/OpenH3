@@ -1,8 +1,8 @@
 # OpenH3 OSS 更新分发设计
 
-日期：2026-11-02
+日期：2026-11-03
 
-状态：方案已确认，本地实现与自动化验证已完成，云端配置及正式发布待执行
+状态：方案已确认，本地实现与自动化验证已完成；RAM/OIDC、OSS 目录策略及 GitHub Variables 已配置并回读核对，代码上线及真实发布验收待执行
 
 ## 背景
 
@@ -45,7 +45,7 @@ updates/stable/<version>/<installer>.blockmap
 
 示例基础 URL：`https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/`。平台清单使用 electron-builder 生成的正式元数据，不手工改写其中的版本、路径或 SHA-512。版本目录不可变；禁止用新内容覆盖已发布版本的对象。`latest*.yml` 和 `releases.json` 是可更新的索引对象。
 
-匿名读取权限仅授予 `updates/*` 对象；上传身份只获得该前缀所需的写入权限。若 Bucket 策略无法将匿名读取安全限定到此对象前缀，则先新建独立更新 Bucket，而不扩大当前 Bucket 的公开权限。
+新增 Bucket Policy 仅对 `updates/stable/*` 对象允许匿名读取；上传角色也仅获得该前缀所需的权限。首次配置时发现 Bucket 已使用 `public-read` ACL，为避免影响现有图片业务，本次保留该 ACL。因此新增策略不意味着其他业务前缀已经私有化；若后续需要收紧现有公共读范围，应另行梳理业务依赖或迁移到独立更新 Bucket。
 
 ## 发布流程
 
@@ -59,17 +59,46 @@ updates/stable/<version>/<installer>.blockmap
 
 ### 实施后的上线配置
 
-OSS job 独立于现有 S3 job，默认关闭。首次上线前由管理员完成以下配置，本地实现不会创建云端身份或上传对象：
+OSS job 独立于现有 S3 job，未设置开关时关闭。首次上线需要完成以下配置；截至 2026-11-03，云端配置已执行，正式上传尚未执行：
 
-1. 轮换已在会话中披露的 AccessKey，不将其用于发布。为 GitHub Actions 创建专用 RAM OIDC 身份提供商，发行者为 `https://token.actions.githubusercontent.com`，受众为 `sts.aliyuncs.com`。角色信任策略必须校验发行者、受众和 subject；只接受本仓库的正式 tag、获准手动运行的受保护分支，并按组织的 OIDC subject 策略绑定发布工作流。不要使用只校验受众、允许任意仓库的信任策略。
-2. RAM 角色仅允许对 `acs:oss:*:*:bohuauhd/updates/*` 执行 `oss:GetObject`、`oss:PutObject`、`oss:ListParts`、`oss:AbortMultipartUpload`。为版本前缀预检授予 Bucket 级 `oss:ListObjects`，同时用 `oss:Prefix` 条件限定为 `updates/*`。不授予 Bucket 配置或前缀外对象写入权限。
-3. Bucket 保持私有；用 Bucket Policy 仅对 `bohuauhd/updates/*` 允许匿名 `oss:GetObject`，不开放匿名列举、写入或其他业务前缀。保持 OSS 阻止公共访问设置与该前缀策略相容，不要直接把整个 Bucket 改为公共读。
+1. 轮换已在会话中披露的 AccessKey，不将其用于发布。为 GitHub Actions 创建专用 RAM OIDC 身份提供商，发行者为 `https://token.actions.githubusercontent.com`，受众为 `sts.aliyuncs.com`。角色信任策略同时校验发行者、受众和 subject，限定本仓库版本 tag 上的 `release-distribute.yml`；不授权 `main` 分支。GitHub 保留不可变 owner/repository ID，并将 `repo`、`context`、`workflow_ref` 纳入 subject。
+2. RAM 角色仅允许对 `acs:oss:*:*:bohuauhd/updates/stable/*` 执行 `oss:GetObject`、`oss:PutObject`、`oss:ListParts`、`oss:AbortMultipartUpload`。为版本前缀预检授予 Bucket 级 `oss:ListObjects`，同时用 `oss:Prefix` 条件限定为 `updates/stable/*`。不授予 Bucket 配置或前缀外对象写入权限。
+3. 用 Bucket Policy 对 `bohuauhd/updates/stable/*` 允许匿名 `oss:GetObject`；策略不增加匿名列举或写入权限。实际 Bucket 已有的 `public-read` ACL 和阻止公共访问设置本次均未更改，其他前缀的既有公共读能力仍然存在。
 4. 在 GitHub Repository Variables 配置 `OSS_ROLE_ARN`、`OSS_OIDC_PROVIDER_ARN`，完成验证后将 `PUBLISH_OSS_UPDATES` 设为字符串 `true`。无需保存静态发布 AccessKey。workflow 使用 `cn-shenzhen` 区域，通过短期 STS 凭证访问 OSS。
-5. 通过正常 Release 发布事件分发下一稳定版；需要重跑时，手动运行 `release-distribute.yml` 并指定已有稳定 tag。所有 OSS 发布串行执行；若线上索引已指向更高版本，拒绝旧版本重跑覆盖稳定指针。
+5. 包含新工作流的代码上线后，通过正常 Release 发布事件分发下一稳定版；需要重跑时，手动运行 `release-distribute.yml`，运行引用选择对应正式 tag，输入参数也填写同一 tag。仅填写 tag 参数、仍从 `main` 运行，不能通过角色信任校验。所有 OSS 发布串行执行；若线上索引已指向更高版本，拒绝旧版本重跑覆盖稳定指针。
 
-同版本重跑会检查不可变目录：只有已有对象的 SHA-256 元数据与本次文件一致时才跳过上传；遇到其他对象或摘要不一致立即失败。安装包和 blockmap 全部验证后才覆盖 `latest*.yml`，最后发布 `releases.json`。正式安装包使用一年不可变缓存，清单使用 60 秒缓存。外部角色授权、匿名读取及首次真实发布需在上线时另行验证。
+同版本重跑会检查不可变目录：只有已有对象的 SHA-256 元数据与本次文件一致时才跳过上传；遇到其他对象或摘要不一致立即失败。安装包和 blockmap 全部验证后才覆盖 `latest*.yml`，最后发布 `releases.json`。正式安装包使用一年不可变缓存，清单使用 60 秒缓存。角色和目录策略已通过管理 API 回读核对；GitHub Actions 实际换取 STS 凭证、正式对象匿名读取及真实发布仍需在上线时验证。
 
 自动化验证使用本地 HTTP 更新源与模拟 OSS 命令，覆盖 OSS 独立成功、检查回退、同版本下载回退、版本/摘要不一致拒绝、发布顺序、失败中止和同版本重跑；这些结果不替代已安装程序的真实升级验收。
+
+### 2026-11-03 云端配置记录
+
+配置目标仓库为 `pigq/OpenH3`，已通过阿里云和 GitHub API 回读核对：
+
+| 配置项                     | 当前值                                                        |
+| -------------------------- | ------------------------------------------------------------- |
+| RAM OIDC 提供商            | `GitHubActionsOpenH3`                                         |
+| `OSS_OIDC_PROVIDER_ARN`    | `acs:ram::1399142044079884:oidc-provider/GitHubActionsOpenH3` |
+| RAM 发布角色               | `OpenH3GitHubOssPublisher`                                    |
+| `OSS_ROLE_ARN`             | `acs:ram::1399142044079884:role/openh3githubosspublisher`     |
+| 角色唯一绑定策略           | `OpenH3OssUpdatePublish`，默认版本 `v1`                       |
+| 角色最大会话时长           | 3600 秒；工作流请求 1800 秒                                   |
+| GitHub OIDC subject 模板   | `repo`、`context`、`workflow_ref`，保留不可变 ID              |
+| GitHub Repository Variable | `PUBLISH_OSS_UPDATES=true`                                    |
+| OSS 更新前缀               | `bohuauhd/updates/stable/`                                    |
+| Bucket 原有 ACL            | `public-read`，保留                                           |
+
+角色只接受以下 subject 模式，issuer 和 audience 同时必须匹配上述配置：
+
+```text
+repo:pigq@95280402/OpenH3@1384742539:ref:refs/tags/v*:workflow_ref:pigq/OpenH3/.github/workflows/release-distribute.yml@refs/tags/v*
+```
+
+运行于其他仓库、分支或工作流的任务不在该信任范围；工作流自身还会拒绝非 `vMAJOR.MINOR.PATCH` 的稳定 tag。三个 GitHub Variables 均为标识或开关，无需将静态阿里云 AccessKey 保存为发布 Secret。
+
+本次未推送代码、创建 Release 或上传更新对象；核对时 GitHub `main` 仍不含新增 OSS job。因此，开关为 `true` 仅表示云端配置就绪，不表示线上更新已切换，也不代表真实 OIDC 换证、上传和客户端升级已经验收。
+
+首次配置使用专用 RAM 用户 `openh3-oss-setup` 及 `OpenH3OssBootstrap` 策略。“临时”指配置用途和使用周期，CSV 中的 AccessKey 不会因任务结束而自动失效。当前授权不包含自我撤权或删除 AccessKey 的权限；收尾需主账号解除该用户的 `OpenH3OssBootstrap` 授权，并禁用或删除其 AccessKey，确认后删除本机凭证 CSV。后续发布使用独立 OIDC 角色，不依赖该配置用户。原会话披露的其他 OSS/SMS AccessKey 仍需单独轮换。
 
 ## 客户端行为
 
@@ -92,7 +121,7 @@ v3.0.7 无法仅通过上传 OSS 文件切换更新源，因为已发布程序�
 
 ## 凭证与网络安全
 
-刚才对话中出现的 OSS/SMS AccessKey 应视为已暴露：立即轮换，检查调用记录和异常费用，并按实际用途拆分身份。发布工作流应使用专用 RAM 身份，通过 GitHub Actions OIDC/阿里云 RAM 角色获取短期凭证；如果环境无法使用 OIDC，则把专用 RAM AccessKey 保存在 CI Secret，仅授予 `updates/*` 写入权限并定期轮换。桌面安装包、公开仓库和发布资产均不得包含任何云凭证。
+刚才对话中出现的 OSS/SMS AccessKey 应视为已暴露：立即轮换，检查调用记录和异常费用，并按实际用途拆分身份。发布工作流应使用专用 RAM 身份，通过 GitHub Actions OIDC/阿里云 RAM 角色获取短期凭证；如果环境无法使用 OIDC，则把专用 RAM AccessKey 保存在 CI Secret，仅授予 `updates/stable/*` 写入权限并定期轮换。桌面安装包、公开仓库和发布资产均不得包含任何云凭证。
 
 匿名客户端只读公开更新对象，不持有签名 URL 或云凭证。若流量或跨地域成本后续需要 CDN，再配置备案域名和私有 OSS 回源；客户端更新源通过配置常量迁到域名，保持 OSS 目录结构不变。
 
@@ -104,7 +133,7 @@ v3.0.7 无法仅通过上传 OSS 文件切换更新源，因为已发布程序�
 - 手动检查显示正确版本、发布说明和架构对应的安装文件；无对应平台安装包时给出可理解的回退入口。
 - 清单缓存短于版本对象缓存；版本对象不能被同版本不同内容覆盖。
 - Windows 至少完成干净安装升级和已有用户配置升级；对支持的平台补齐 macOS/Linux 更新源检查及文件校验测试。
-- CI 日志不输出密钥；OSS 匿名读取仅覆盖更新前缀；上传身份不能修改更新前缀之外的对象。
+- CI 日志不输出密钥；新增 Bucket Policy 仅授权更新前缀匿名读取；上传身份不能修改更新前缀之外的对象。现有 Bucket 的 `public-read` ACL 保留，不据此宣称其他前缀已私有化。
 
 ## 参考
 
