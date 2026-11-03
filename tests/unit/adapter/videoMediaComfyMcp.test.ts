@@ -98,6 +98,17 @@ afterEach(() => {
 });
 
 describe('generic ComfyUI MCP tools', () => {
+  it('submits cloud video using the bound request and a stable submission UUID', async () => {
+    vi.stubEnv('OPENH3_CREATION_SOURCE', 'cloud');
+    vi.stubEnv('OPENH3_CREATION_KIND', 'video');
+    const submissionId = '12345678-1234-4234-8234-123456789abc';
+    respond({ id: 'cloud-job', status: 'queued' });
+    const reply = await invoke('openh3_cloud_video_generate', { submissionId, input: { prompt: 'fox' } });
+    expect(reply.isError).not.toBe(true);
+    expect(requestBody()).toMatchObject({ requestId, submissionId, input: { prompt: 'fox' } });
+    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:33009/api/cloud-video/jobs');
+    expect(reply.content[0].text).toContain('cloudVideoJobId');
+  });
   it('registers OpenH3 tool names and keeps legacy pending calls on the same handlers', () => {
     for (const [name, legacy] of registered) {
       if (!name.startsWith('aionui_')) continue;

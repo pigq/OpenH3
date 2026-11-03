@@ -1,6 +1,8 @@
 import type { IProvider } from '@/common/config/storage';
 import { isImageGenSupported } from '@/common/utils/imageModelAllowlist';
 import type { CreationKind, CreationModel } from './creation';
+import type { PublicVideoConnection } from './cloudVideo';
+import { H3_CLOUD_BASE_URL } from './cloudVideo';
 
 /** Public connection presets. Credentials are supplied by the user. */
 export const CLOUD_IMAGE_PRESETS = [
@@ -16,9 +18,39 @@ export const CLOUD_IMAGE_PRESETS = [
 ] as const;
 
 /** Merge the author's public directory with enabled user providers. */
-export function cloudCreationModels(providers: IProvider[], kind: CreationKind): CreationModel[] {
+export function cloudCreationModels(
+  providers: IProvider[],
+  kind: CreationKind,
+  videoConnections: PublicVideoConnection[] = []
+): CreationModel[] {
   if (kind === 'video')
-    return [{ id: 'cloud-video', name: '', kind, source: 'cloud', state: 'unsupported', available: false }];
+    return [
+      ...videoConnections.map(
+        (connection): CreationModel => ({
+          id: `cloud-video:${connection.id}`,
+          name: connection.name,
+          kind,
+          source: 'cloud',
+          state: 'configured',
+          available: true,
+        })
+      ),
+      ...(!videoConnections.some(
+        (connection) =>
+          connection.protocol === 'vllm-h3' && connection.baseUrl.replace(/\/+$/, '') === H3_CLOUD_BASE_URL
+      )
+        ? [
+            {
+              id: 'preset::cloud-video',
+              name: 'MiniMax H3',
+              kind: 'video' as const,
+              source: 'cloud' as const,
+              state: 'not-configured' as const,
+              available: false,
+            },
+          ]
+        : []),
+    ];
   const configured = providers
     .filter((provider) => provider.enabled !== false)
     .flatMap((provider) =>

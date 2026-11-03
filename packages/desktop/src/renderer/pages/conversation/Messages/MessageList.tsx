@@ -45,6 +45,7 @@ import CreationInstallResult from '../runtime/Creation/CreationInstallResult';
 import { creationTurnResults } from '../runtime/Creation/turnResults';
 import ComfyOperationResult, { comfyTurnResults } from '../runtime/Creation/ComfyOperationResult';
 import ComfyGenerationResult, { comfyGenerationTurnResults } from '../runtime/Creation/ComfyGenerationResult';
+import CloudVideoResult, { cloudVideoTurnResults } from '../runtime/Creation/CloudVideoResult';
 import MessageToolGroup from './components/MessageToolGroup';
 import MessageToolGroupSummary from './components/MessageToolGroupSummary';
 import MessageCronTrigger from './components/MessageCronTrigger';
@@ -475,6 +476,7 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
   const creationResultGroups = useMemo(() => creationTurnResults(processedList), [processedList]);
   const comfyResultGroups = useMemo(() => comfyTurnResults(processedList), [processedList]);
   const comfyGenerationGroups = useMemo(() => comfyGenerationTurnResults(processedList), [processedList]);
+  const cloudVideoGroups = useMemo(() => cloudVideoTurnResults(processedList), [processedList]);
   const h3KnownJobs = useMemo(() => [...h3ResultGroups.values()].flat(), [h3ResultGroups]);
 
   // An AI reply can be split into several messages (thinking / multiple text /
@@ -802,6 +804,12 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
                     comfyResultGroups.get(item.id)?.map((operationId) => (
                       <div key={operationId} className={rowWidthClass + ' min-w-0 px-8px'}>
                         <ComfyOperationResult id={operationId} conversationId={conversationContext.conversation_id} />
+                      </div>
+                    ))}
+                  {conversationContext?.conversation_id &&
+                    cloudVideoGroups.get(item.id)?.map((jobId) => (
+                      <div key={jobId} className={rowWidthClass + ' min-w-0 px-8px'}>
+                        <CloudVideoResult id={jobId} conversationId={conversationContext.conversation_id} />
                       </div>
                     ))}
                   {conversationContext?.conversation_id &&

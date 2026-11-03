@@ -381,6 +381,45 @@ describe('useGuidSend', () => {
     expect(deps.navigate).not.toHaveBeenCalled();
   });
 
+  it('starts cloud video without image credentials or a local ComfyUI skill', async () => {
+    const deps = createDeps();
+    deps.creationModel = {
+      id: 'cloud-video:connection',
+      name: 'Cloud H3',
+      kind: 'video',
+      source: 'cloud',
+      state: 'configured',
+      available: true,
+    };
+    const server = {
+      id: 'media',
+      name: 'openh3-video-media',
+      builtin: true,
+      transport: { type: 'stdio', command: 'node', args: ['media.js'] },
+    } as IMcpServer;
+    vi.mocked(ensureBackendMcpCatalog).mockResolvedValue({
+      allServers: [server],
+      userServers: [],
+      builtinServers: [server],
+    });
+    checkCreationToolsMock.mockResolvedValue({
+      success: true,
+      tools: [{ name: 'openh3_cloud_video_generate' }, { name: 'openh3_cloud_video_status' }],
+    });
+    const { result } = renderHook(() => useGuidSend(deps));
+    await act(async () => {
+      expect(await result.current.handleSend()).toBe(true);
+    });
+    const payload = createConversationInvokeMock.mock.calls[0][0];
+    expect(payload.assistant.conversation_overrides.skill_ids ?? []).not.toContain('comfyui-local');
+    expect(payload.extra.creation_request).toMatchObject({
+      id: 'cloud-video:connection',
+      source: 'cloud',
+      kind: 'video',
+    });
+    expect(JSON.stringify(payload.extra.selected_session_mcp_servers)).not.toContain('API_KEY');
+  });
+
   it('adds the required local tool with a scoped request and navigates to the existing conversation', async () => {
     const deps = createDeps();
     deps.creationModel = {

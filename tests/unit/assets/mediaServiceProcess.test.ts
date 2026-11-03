@@ -2,10 +2,25 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { MediaServiceProcess } from '@/process/services/media/MediaServiceProcess';
+import { MediaServiceProcess, mediaServiceCorsHeaders } from '@/process/services/media/MediaServiceProcess';
 
 describe('media service process', () => {
   afterEach(() => vi.unstubAllEnvs());
+
+  it('allows the actual development renderer without allowing arbitrary origins', () => {
+    expect(mediaServiceCorsHeaders('http://localhost:5173', 'http://localhost:5173/')).toMatchObject({
+      'access-control-allow-origin': 'http://localhost:5173',
+      vary: 'Origin',
+    });
+    expect(mediaServiceCorsHeaders('http://127.0.0.1:33001', 'http://localhost:5173')).toHaveProperty(
+      'access-control-allow-origin',
+      'http://127.0.0.1:33001'
+    );
+    expect(mediaServiceCorsHeaders('https://untrusted.example', 'http://localhost:5173')).not.toHaveProperty(
+      'access-control-allow-origin'
+    );
+    expect(mediaServiceCorsHeaders('http://localhost:5173')).not.toHaveProperty('access-control-allow-origin');
+  });
 
   it('starts the media process only after Core has published its actual backend port', () => {
     const source = fs.readFileSync(path.resolve('packages/desktop/src/index.ts'), 'utf8');
@@ -53,6 +68,7 @@ describe('media service process', () => {
   ])('starts a controlled child with system CA setting $configured → $expected', async ({ configured, expected }) => {
     vi.stubEnv('NODE_USE_SYSTEM_CA', configured);
     vi.stubEnv('NODE_EXTRA_CA_CERTS', 'custom-ca.pem');
+    vi.stubEnv('ELECTRON_RENDERER_URL', 'http://localhost:5173');
     vi.stubEnv('NODE_TLS_REJECT_UNAUTHORIZED', undefined);
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'media-service-process-'));
     const scriptPath = path.join(root, 'media-service.js');
@@ -77,6 +93,7 @@ describe('media service process', () => {
       expect(started?.env.AIONUI_DATA_DIR).toBe(root);
       expect(started?.env.OPENH3_RESOURCES_ROOT).toBe(path.resolve('resources'));
       expect(started?.env.OPENH3_MEDIA_BACKEND_PORT).toBe('13421');
+      expect(started?.env.OPENH3_MEDIA_UI_ORIGIN).toBe('http://localhost:5173');
       expect(started?.env.AIONUI_H3_BUNDLE_ROOT).toBe(path.join(root, 'h3-bundle'));
       expect(started?.env.NODE_USE_SYSTEM_CA).toBe(expected);
       expect(started?.env.NODE_EXTRA_CA_CERTS).toBe('custom-ca.pem');

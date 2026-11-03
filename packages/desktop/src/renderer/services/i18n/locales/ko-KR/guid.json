@@ -171,7 +171,21 @@
       "invalid": "이름, 유효한 URL, 키와 지원 이미지 모델(예: gpt-image-2.5-all)을 입력하세요.",
       "saveFailed": "저장하지 못했습니다. 다시 시도하세요."
     },
-    "toolsCheckFailed": "로컬 ComfyUI 도구를 사용할 수 없습니다({{reason}}). 앱/세션의 도구 연결 또는 주입 문제이며 기기 비호환을 뜻하지 않습니다. 하드웨어 확인이나 작업 전송은 시작되지 않았습니다. OpenH3를 재시작하거나 업데이트한 뒤 모델 카드에서 다시 시도하세요."
+    "toolsCheckFailed": "로컬 ComfyUI 도구를 사용할 수 없습니다({{reason}}). 앱/세션의 도구 연결 또는 주입 문제이며 기기 비호환을 뜻하지 않습니다. 하드웨어 확인이나 작업 전송은 시작되지 않았습니다. OpenH3를 재시작하거나 업데이트한 뒤 모델 카드에서 다시 시도하세요.",
+    "cloudVideoSetup": {
+      "hint": "Add a cloud video service. H3 supports text, first frame and first/last frames; other services must expose the OpenAI Videos API. Saved connections are checked when generating.",
+      "protocol": "Video API protocol",
+      "modelHint": "H3: leave empty to use the server default",
+      "keyHint": "H3: optional. Leave empty to keep the existing key on the same endpoint.",
+      "loraPath": "Server LoRA file path",
+      "invalid": "Check the service name, API URL and model. OpenAI Videos requires a model and API key.",
+      "uncertain": "The server may have received this request. Automatic resubmission is disabled to prevent duplicate generation.",
+      "retrying": "Waiting for the cloud service to respond. This task will be checked again automatically.",
+      "failed": "Video generation could not complete. Check the service status or task details before starting a new request."
+    },
+    "noLocalModels": "로컬 모델 없음",
+    "noLocalModelsHint": "로컬 모델을 찾을 수 없습니다. 먼저 설치하거나 추가하세요.",
+    "addCloud": "클라우드 API 추가"
   },
   "aiCreation": "AI 창작",
   "aiCreationSubtitle": "상상력을 작품으로 만들어 보세요",

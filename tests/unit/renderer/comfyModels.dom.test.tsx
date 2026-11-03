@@ -20,7 +20,7 @@ describe('local ComfyUI profile selection', () => {
     localStorage.clear();
   });
 
-  it('lists image profiles with their validation states and an installable family catalog', () => {
+  it('lists only discovered image profiles with their validation states', () => {
     mocks.profiles = [
       {
         id: 'qwen-bf16',
@@ -53,10 +53,28 @@ describe('local ComfyUI profile selection', () => {
           state: 'verified',
         }),
         expect.objectContaining({ id: 'qwen-fp8', available: false, state: 'downloaded' }),
-        expect.objectContaining({ id: 'z-image', family: 'z-image', available: false, state: 'not-installed' }),
       ])
     );
+    expect(result.current.models).toHaveLength(2);
     expect(result.current.models.some((item) => item.state === 'no-workflow')).toBe(false);
+  });
+
+  it('does not advertise H3 families as installed models in an empty inventory', () => {
+    localStorage.setItem('creation.selection', JSON.stringify({ source: 'local', kind: 'video', modelIds: {} }));
+    const { result } = renderHook(() => useCreationModels(true));
+    expect(result.current.models).toEqual([]);
+    expect(result.current.model).toMatchObject({ name: '', available: false, state: 'not-installed' });
+    expect(result.current.model.profileId).toBeUndefined();
+  });
+
+  it('clears an old family-only preference without treating it as a missing installed profile', () => {
+    localStorage.setItem(
+      'creation.selection',
+      JSON.stringify({ source: 'local', kind: 'video', modelIds: { 'local-video': 'h3' } })
+    );
+    const { result } = renderHook(() => useCreationModels(true));
+    expect(result.current.models).toEqual([]);
+    expect(result.current.model.profileId).toBeUndefined();
   });
 
   it('preserves the user profile choice when a new version appears and on remount', () => {

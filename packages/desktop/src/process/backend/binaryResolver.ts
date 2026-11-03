@@ -4,7 +4,8 @@
  * Search order:
  *  1. OPENH3_BACKEND_BIN, then the legacy AIONUI_BACKEND_BIN override
  *  2. The canonical bundled directory, then the legacy bundled directory
- *  3. `openh3-core` on PATH, then the legacy `aioncore` name
+ *  3. The repository resources bundle in development
+ *  4. `openh3-core` on PATH, then the legacy `aioncore` name
  */
 
 import { existsSync, readdirSync } from 'node:fs';
@@ -96,6 +97,11 @@ export function resolveBinaryPath(): string {
   const bundled = bundledPath(runtimeKey, diagnostics);
   if (bundled) return bundled;
 
+  if (process.env.NODE_ENV === 'development') {
+    const developmentBundle = bundledPath(runtimeKey, diagnostics, resolve('resources'));
+    if (developmentBundle) return developmentBundle;
+  }
+
   const fromPath = resolveFromSystemPATH(diagnostics);
   if (fromPath) return fromPath;
 
@@ -140,8 +146,11 @@ function envOverridePath(diagnostics: BackendBinaryResolveDiagnostics): string |
  * Layout: bundled-openh3-core/{platform}-{arch}/openh3-core[.exe]
  * Legacy packages use bundled-aioncore/{platform}-{arch}/aioncore[.exe].
  */
-function bundledPath(runtimeKey: string, diagnostics: BackendBinaryResolveDiagnostics): string | null {
-  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+function bundledPath(
+  runtimeKey: string,
+  diagnostics: BackendBinaryResolveDiagnostics,
+  resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath
+): string | null {
   if (!resourcesPath) return null;
   diagnostics.resourcesPath = resourcesPath;
 

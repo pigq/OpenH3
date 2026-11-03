@@ -59,4 +59,31 @@ describe('creation model selection', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: 'guid.creation.manageLocal' }));
     expect(onManageLocal).toHaveBeenCalledWith(existing);
   });
+
+  it('shows a clear local empty state with a management action and no invented model choices', async () => {
+    render(
+      <CreationControls
+        selection={{ kind: 'video', source: 'local', modelIds: {} }}
+        models={[]}
+        model={{
+          id: 'empty:local-video',
+          name: '',
+          kind: 'video',
+          source: 'local',
+          state: 'not-installed',
+          available: false,
+        }}
+        onChange={vi.fn()}
+        onManageLocal={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId('creation-model-selector')).toHaveTextContent('guid.creation.noLocalModels');
+    fireEvent.click(screen.getByTestId('creation-model-selector'));
+    expect(await screen.findByRole('menuitem', { name: 'guid.creation.noLocalModelsHint' })).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    );
+    expect(screen.getByRole('menuitem', { name: 'guid.creation.manageLocal' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /H3/ })).not.toBeInTheDocument();
+  });
 });

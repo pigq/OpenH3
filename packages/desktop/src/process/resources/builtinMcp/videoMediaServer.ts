@@ -12,6 +12,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { BUILTIN_VIDEO_MEDIA_NAME } from './constants';
+import { cloudVideoInputSchema } from '@/common/chat/document/creation/cloudVideo';
 
 const envValue = (canonical: string, legacy: string): string | undefined =>
   process.env[canonical] ?? process.env[legacy];
@@ -92,6 +93,52 @@ async function main() {
     startSeconds: z.number().nonnegative().optional(),
     endSeconds: z.number().positive().optional(),
   };
+  registerProductTool(
+    server,
+    'openh3_cloud_video_generate',
+    'Generate a cloud video using the connection selected in the client. Provide prompt, optional duration/width/height/seed, and ordered absolute imagePaths. H3 supports text, first frame or first+last frame (at most two images); deployed H3 does not support Ref2VA, video or audio inputs. H3 defaults to 4.4 seconds and 24fps; explicit sizes require short side 768 and multiples of 32. OpenAI video supports at most one image and seconds/size; omit seed/aspectRatio. Never install or start local ComfyUI for a cloud selection. Returns cloudVideoJobId; the UI monitors it. End the turn after submission; never poll in a loop or resubmit after an uncertain response.',
+    {
+      input: cloudVideoInputSchema,
+      submissionId: z
+        .string()
+        .uuid()
+        .describe(
+          'A new UUID for each user-requested generation. Reuse this exact UUID when recovering a lost response. Never create a replacement UUID to retry automatically.'
+        ),
+    },
+    async ({ input, submissionId }) => {
+      try {
+        if (
+          envValue('OPENH3_CREATION_SOURCE', 'AIONUI_CREATION_SOURCE') !== 'cloud' ||
+          envValue('OPENH3_CREATION_KIND', 'AIONUI_CREATION_KIND') !== 'video'
+        )
+          throw new Error('CLOUD_VIDEO_NOT_SELECTED');
+        const job = (await call(
+          '/api/cloud-video/jobs',
+          jsonRequest({ requestId: creationRequestId(), submissionId, input })
+        )) as { id: string };
+        return toolResult({ cloudVideoJobId: job.id, job, stopPolling: true, automaticRetryAllowed: false });
+      } catch (error) {
+        return toolError('Cloud video generation failed', error);
+      }
+    }
+  );
+  registerProductTool(
+    server,
+    'openh3_cloud_video_status',
+    'Read one existing cloud video job on explicit user request. The client monitors queued/running jobs automatically; do not poll in a loop.',
+    { jobId: z.string().uuid() },
+    async ({ jobId }) => {
+      try {
+        const job = await call(
+          `/api/cloud-video/jobs/${encodeURIComponent(jobId)}?${new URLSearchParams({ requestId: creationRequestId() })}`
+        );
+        return toolResult({ cloudVideoJobId: jobId, job, stopPolling: true });
+      } catch (error) {
+        return toolError('Cloud video query failed', error);
+      }
+    }
+  );
   registerProductTool(
     server,
     'openh3_comfy_environment',

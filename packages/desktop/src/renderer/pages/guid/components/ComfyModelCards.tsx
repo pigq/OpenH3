@@ -4,7 +4,7 @@ import { contentAssetUrl } from '@/common/contentCatalog/bridge';
 import React, { useEffect, useRef, useState } from 'react';
 import { Button, Select } from '@arco-design/web-react';
 import { useTranslation } from 'react-i18next';
-import { Movie, Picture, Play, Pause } from '@icon-park/react';
+import { Download, Movie, Picture, Play, Pause } from '@icon-park/react';
 import type { ComfyFamily, ComfyProfile } from '@/common/chat/document/creation/comfy';
 import { COMFY_FAMILIES, type ComfyDraftIntent } from '../Creation/comfyDraft';
 import styles from '../Creation/creation.module.css';
@@ -97,11 +97,13 @@ function ModelPreview({
   name,
   runtimeVersion,
   coverUrl,
+  children,
 }: {
   family: ComfyFamily;
   name: string;
   runtimeVersion?: string;
   coverUrl?: string;
+  children: React.ReactNode;
 }) {
   const { t } = useTranslation();
   const [failed, setFailed] = useState(false);
@@ -159,25 +161,28 @@ function ModelPreview({
           onPause={() => setPlaying(false)}
         />
       )}
-      {(!coverUrl || isVideo) && assets?.official ? (
-        <div className={styles.previewAttribution}>
-          <a href={assets.official.url} target='_blank' rel='noreferrer'>
-            {family === 'fasth3-omni'
-              ? t('guid.comfy.preview.officialSample')
-              : t('guid.comfy.preview.officialImageSample', { publisher: assets.official.publisher })}
-          </a>
-          <span>{t('guid.comfy.preview.sampleVersion', { version: assets.official.model })}</span>
-          {isVideo && (
-            <span>
-              {t('guid.comfy.preview.runtimeVersion', {
-                version: runtimeVersion || t('guid.comfy.preview.notInstalled'),
-              })}
-            </span>
-          )}
-        </div>
-      ) : (
-        (!coverUrl || isVideo) && <span className={styles.previewBadge}>{t('guid.comfy.preview.projectDemo')}</span>
-      )}
+      <div className={styles.familyBody}>
+        {children}
+        {(!coverUrl || isVideo) && assets?.official ? (
+          <div className={styles.previewAttribution}>
+            <a href={assets.official.url} target='_blank' rel='noreferrer'>
+              {family === 'fasth3-omni'
+                ? t('guid.comfy.preview.officialSample')
+                : t('guid.comfy.preview.officialImageSample', { publisher: assets.official.publisher })}
+            </a>
+            <span>{t('guid.comfy.preview.sampleVersion', { version: assets.official.model })}</span>
+            {isVideo && (
+              <span>
+                {t('guid.comfy.preview.runtimeVersion', {
+                  version: runtimeVersion || t('guid.comfy.preview.notInstalled'),
+                })}
+              </span>
+            )}
+          </div>
+        ) : (
+          (!coverUrl || isVideo) && <span className={styles.previewBadge}>{t('guid.comfy.preview.projectDemo')}</span>
+        )}
+      </div>
       {assets?.video && !failed && (
         <Button
           type='text'
@@ -239,85 +244,99 @@ export default function ComfyModelCards({
                     ? contentAssetUrl(catalog.releaseSequence, official.cover)
                     : undefined
                 }
-              />
-              <div className={styles.familyTop}>
-                <span className={styles.familyIcon}>
-                  {kind === 'video' ? <Movie size={20} /> : <Picture size={20} />}
-                </span>
-                <div>
-                  <div className={styles.familyName}>{name}</div>
-                  <div className={styles.familyDescription}>
-                    {official && catalog
-                      ? localize(official.description, i18n.language, catalog.defaultLocale)
-                      : t(`guid.comfy.families.${family as ComfyFamily}`)}
-                  </div>
-                </div>
-              </div>
-              <div className={styles.profileDetails}>
-                {versions.length > 1 ? (
-                  <Select
-                    className={styles.profileSelect}
-                    aria-label={t('guid.comfy.version', { family: name })}
-                    size='small'
-                    value={profile?.id}
-                    onChange={(id: string) => setDisplayed((previous) => ({ ...previous, [family]: id }))}
-                    options={versions.map((version) => ({
-                      value: version.id,
-                      label: `${version.name} · ${version.version} · ${version.quantization} · ${t(`guid.creation.states.${version.state}`)}`,
-                    }))}
-                  />
-                ) : profile ? (
-                  <span className={styles.profileName}>
-                    {profile.name} · {profile.version} · {profile.quantization}
+              >
+                <div className={styles.familyTop}>
+                  <span className={styles.familyIcon}>
+                    {kind === 'video' ? <Movie size={17} /> : <Picture size={17} />}
                   </span>
-                ) : (
-                  <span>{t('guid.comfy.noProfile')}</span>
-                )}
-                <span className={state === 'verified' ? styles.verified : styles.state} role='status'>
-                  {t(`guid.creation.states.${state}`)}
-                </span>
-              </div>
-              {profile?.validation?.error && <div className={styles.profileError}>{profile.validation.error}</div>}
-              <div className={styles.familyActions}>
-                {!compatible && <span>{t('update.content.requiresClientUpdate')}</span>}
-                {compatible && (
-                  <>
-                    {profile?.state === 'verified' && (
-                      <Button
-                        size='small'
-                        type={selectedProfileId === profile.id ? 'secondary' : 'primary'}
-                        aria-pressed={selectedProfileId === profile.id}
-                        disabled={loading || unavailable}
-                        onClick={() => onUseProfile(profile)}
-                      >
-                        {t(selectedProfileId === profile.id ? 'guid.comfy.selected' : 'guid.comfy.use')}
-                      </Button>
-                    )}
-                    <Button
-                      size='small'
-                      type={profile ? 'text' : 'primary'}
-                      onClick={() =>
-                        onAction({
-                          family: family as ComfyFamily,
-                          intent: profile ? 'repair' : 'install',
-                          profileId: profile?.id,
-                        })
+                  <div className={styles.familySummary}>
+                    <div className={styles.familyName}>{name}</div>
+                    <div
+                      className={styles.familyDescription}
+                      title={
+                        official && catalog
+                          ? localize(official.description, i18n.language, catalog.defaultLocale)
+                          : t(`guid.comfy.families.${family as ComfyFamily}`)
                       }
                     >
-                      {t(profile ? 'guid.comfy.actions.repair' : 'guid.comfy.actions.install')}
-                    </Button>
-                    {profile && (
-                      <Button
+                      {official && catalog
+                        ? localize(official.description, i18n.language, catalog.defaultLocale)
+                        : t(`guid.comfy.families.${family as ComfyFamily}`)}
+                    </div>
+                  </div>
+                </div>
+                {profile && (
+                  <div className={styles.profileDetails}>
+                    {versions.length > 1 ? (
+                      <Select
+                        className={styles.profileSelect}
+                        aria-label={t('guid.comfy.version', { family: name })}
                         size='small'
-                        type='text'
-                        onClick={() => onAction({ family: family as ComfyFamily, intent: 'install-other' })}
-                      >
-                        {t('guid.comfy.actions.install-other')}
-                      </Button>
+                        value={profile?.id}
+                        onChange={(id: string) => setDisplayed((previous) => ({ ...previous, [family]: id }))}
+                        options={versions.map((version) => ({
+                          value: version.id,
+                          label: `${version.name} · ${version.version} · ${version.quantization} · ${t(`guid.creation.states.${version.state}`)}`,
+                        }))}
+                      />
+                    ) : (
+                      <span className={styles.profileName}>
+                        {profile.name} · {profile.version} · {profile.quantization}
+                      </span>
                     )}
-                  </>
+                  </div>
                 )}
-              </div>
+                {profile?.validation?.error && <div className={styles.profileError}>{profile.validation.error}</div>}
+                <div className={styles.familyFooter}>
+                  <span
+                    className={`${styles.profileStatus} ${state === 'verified' ? styles.verified : styles.state}`}
+                    role='status'
+                  >
+                    {t(`guid.creation.states.${state}`)}
+                  </span>
+                  <div className={styles.familyActions}>
+                    {!compatible && <span>{t('update.content.requiresClientUpdate')}</span>}
+                    {compatible && (
+                      <>
+                        {profile?.state === 'verified' && (
+                          <Button
+                            size='small'
+                            type={selectedProfileId === profile.id ? 'secondary' : 'primary'}
+                            aria-pressed={selectedProfileId === profile.id}
+                            disabled={loading || unavailable}
+                            onClick={() => onUseProfile(profile)}
+                          >
+                            {t(selectedProfileId === profile.id ? 'guid.comfy.selected' : 'guid.comfy.use')}
+                          </Button>
+                        )}
+                        <Button
+                          size='small'
+                          type={profile ? 'text' : 'primary'}
+                          icon={profile ? undefined : <Download size='14' />}
+                          onClick={() =>
+                            onAction({
+                              family: family as ComfyFamily,
+                              intent: profile ? 'repair' : 'install',
+                              profileId: profile?.id,
+                            })
+                          }
+                        >
+                          {t(profile ? 'guid.comfy.actions.repair' : 'guid.comfy.actions.install')}
+                        </Button>
+                        {profile && (
+                          <Button
+                            size='small'
+                            type='text'
+                            onClick={() => onAction({ family: family as ComfyFamily, intent: 'install-other' })}
+                          >
+                            {t('guid.comfy.actions.install-other')}
+                          </Button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </ModelPreview>
             </section>
           );
         })}

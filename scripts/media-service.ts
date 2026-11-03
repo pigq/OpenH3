@@ -2,6 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Worker } from 'node:worker_threads';
+import { mediaServiceCorsHeaders } from '../packages/desktop/src/process/services/media/MediaServiceProcess';
 import { UpdateAdmissionGate } from '../packages/desktop/src/process/startup/updateInstallGuard';
 import { H3SetupTask } from '../packages/desktop/src/process/services/runtime/H3SetupTask';
 import { inspectCreationInventory } from '../packages/desktop/src/process/services/media/creation/inventory';
@@ -14,6 +15,8 @@ import {
   executeComfyInstall,
 } from '../packages/desktop/src/process/services/media/comfy/installExecutor';
 import { handleComfyRoute } from '../packages/desktop/src/process/services/media/comfy/routes';
+import { CloudVideoService } from '../packages/desktop/src/process/services/media/cloud/CloudVideoService';
+import { handleCloudVideoRoute } from '../packages/desktop/src/process/services/media/cloud/routes';
 import { defaultComfyInstallPlanner } from '../packages/desktop/src/process/services/media/comfy/planning/installPlanner';
 import { H3_PORTABLE_INSTALL_EVIDENCE } from '../packages/desktop/src/process/services/media/comfy/planning/legacyInstallPlan';
 import { createComfyProfileDiscovery } from '../packages/desktop/src/process/services/media/comfy/discovery';
@@ -55,6 +58,16 @@ const updateGate = new UpdateAdmissionGate();
 const updateControlToken = process.env.OPENH3_UPDATE_CONTROL_TOKEN;
 const dataDir = process.env.AIONUI_DATA_DIR ?? path.resolve('.runtime/dev-data');
 fs.mkdirSync(dataDir, { recursive: true });
+const cloudVideoService = new CloudVideoService({ root: path.join(dataDir, 'cloud-video') });
+const cloudVideoTimer = setInterval(() => {
+  const finish = updateGate.enter();
+  if (finish)
+    void cloudVideoService
+      .poll()
+      .catch(() => undefined)
+      .finally(finish);
+}, 2500);
+cloudVideoTimer.unref();
 let db: BetterSqlite3Driver | undefined;
 let store: MediaJobStore | JsonMediaJobStore;
 try {
@@ -392,9 +405,6 @@ function publishH3(job: H3Job): void {
 function json(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, {
     'content-type': 'application/json',
-    'access-control-allow-origin': 'http://127.0.0.1:33001',
-    'access-control-allow-methods': 'GET,POST,OPTIONS',
-    'access-control-allow-headers': 'content-type',
   });
   res.end(JSON.stringify(body));
 }
@@ -405,6 +415,10 @@ async function body(req: http.IncomingMessage): Promise<unknown> {
 }
 
 const server = http.createServer(async (req, res) => {
+  for (const [name, value] of Object.entries(
+    mediaServiceCorsHeaders(req.headers.origin, process.env.OPENH3_MEDIA_UI_ORIGIN)
+  ))
+    res.setHeader(name, value);
   let finish: (() => void) | null = null;
   try {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`);
@@ -435,6 +449,7 @@ const server = http.createServer(async (req, res) => {
           !h3Setup.status().error?.startsWith('H3_SETUP_STATE_') &&
           !runtimeStarting &&
           comfyService.updateIdle() &&
+          cloudVideoService.updateIdle() &&
           creationOperations.updateIdle(),
         payload.expiresAt
       );
@@ -465,6 +480,15 @@ const server = http.createServer(async (req, res) => {
     )
       return json(res, 409, { error: 'COMFY_RUNTIME_BUSY' });
     if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { status: 'ok' });
+    if (
+      await handleCloudVideoRoute(req, res, url, {
+        service: cloudVideoService,
+        uiToken: process.env.AIONUI_MEDIA_UI_TOKEN ?? '',
+        body,
+        json,
+      })
+    )
+      return;
     if (
       await handleComfyRoute(req, res, url, {
         service: comfyService,
@@ -665,7 +689,6 @@ const server = http.createServer(async (req, res) => {
         'content-type': 'text/event-stream',
         'cache-control': 'no-cache',
         connection: 'keep-alive',
-        'access-control-allow-origin': 'http://127.0.0.1:33001',
       });
       const set = h3Subscribers.get(h3Events[1]) ?? new Set<http.ServerResponse>();
       set.add(res);
@@ -715,7 +738,6 @@ const server = http.createServer(async (req, res) => {
         'content-type': 'text/event-stream',
         'cache-control': 'no-cache',
         connection: 'keep-alive',
-        'access-control-allow-origin': 'http://127.0.0.1:33001',
       });
       const set = subscribers.get(events[1]) ?? new Set<http.ServerResponse>();
       set.add(res);
@@ -742,7 +764,6 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, {
         'content-type': artifact.mimeType,
         'cache-control': 'private, max-age=3600',
-        'access-control-allow-origin': 'http://127.0.0.1:33001',
       });
       if (!upstream.body) return res.end();
       const reader = upstream.body.getReader();
@@ -774,11 +795,15 @@ const server = http.createServer(async (req, res) => {
 });
 server.listen(port, '127.0.0.1', () => console.log(`[media-service] listening on http://127.0.0.1:${port}`));
 process.on('SIGINT', () => {
+  clearInterval(cloudVideoTimer);
+  cloudVideoService.close();
   void comfyService.close();
   db?.close();
   server.close();
 });
 process.on('SIGTERM', () => {
+  clearInterval(cloudVideoTimer);
+  cloudVideoService.close();
   void comfyService.close();
   db?.close();
   server.close();

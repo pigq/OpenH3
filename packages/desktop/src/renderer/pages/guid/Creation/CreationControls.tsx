@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { Button, Dropdown, Menu } from '@arco-design/web-react';
-import { Down, Magic } from '@icon-park/react';
+import { Check, Down, Magic, Plus, SettingConfig } from '@icon-park/react';
 import { useTranslation } from 'react-i18next';
 import { CLOUD_IMAGE_PRESETS } from '@/common/chat/document/creation/cloudModels';
 import CloudModelSetup from './CloudModelSetup';
+import CloudVideoSetup from './CloudVideoSetup';
 import type {
   CreationKind,
   CreationModel,
@@ -24,8 +25,21 @@ export default function CreationControls({ selection, models, model, onChange, o
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [configuring, setConfiguring] = useState<CreationModel>();
+  const empty = !models.length;
+  const emptyLocal = empty && selection.source === 'local' && model.state === 'not-installed';
+  const manage = () => {
+    setOpen(false);
+    if (selection.source === 'local') onManageLocal(model);
+    else setConfiguring(model);
+  };
+  const Setup = configuring?.kind === 'video' ? CloudVideoSetup : CloudModelSetup;
   const modelName = (item: CreationModel) =>
-    item.name || t(`guid.creation.${item.source}${item.kind === 'image' ? 'Image' : 'Video'}`);
+    item.name ||
+    t(
+      emptyLocal
+        ? 'guid.creation.noLocalModels'
+        : `guid.creation.${item.source}${item.kind === 'image' ? 'Image' : 'Video'}`
+    );
   const providerName = (item: CreationModel) =>
     item.provider?.name ?? CLOUD_IMAGE_PRESETS.find((preset) => preset.id === item.presetId)?.name;
   return (
@@ -63,9 +77,14 @@ export default function CreationControls({ selection, models, model, onChange, o
         popupVisible={open}
         onVisibleChange={setOpen}
         position='bl'
-        triggerProps={{ autoAlignPopupWidth: true, popupStyle: { maxWidth: 'calc(100vw - 24px)' } }}
+        triggerProps={{ autoAlignPopupWidth: false, popupStyle: { maxWidth: 'calc(100vw - 24px)' } }}
         droplist={
-          <Menu className={styles.menu}>
+          <Menu className={styles.menu} selectedKeys={empty ? [] : [model.id]}>
+            {empty && (
+              <Menu.Item key='empty' disabled aria-disabled='true'>
+                {t(emptyLocal ? 'guid.creation.noLocalModelsHint' : `guid.creation.states.${model.state}`)}
+              </Menu.Item>
+            )}
             {models.map((item) => (
               <Menu.Item
                 key={item.id}
@@ -84,6 +103,9 @@ export default function CreationControls({ selection, models, model, onChange, o
                   if (item.source === 'local' && !item.profileId && !item.available) onManageLocal(item);
                 }}
               >
+                <span className={styles.menuCheck} aria-hidden='true'>
+                  {item.id === model.id && <Check theme='outline' size='14' />}
+                </span>
                 <span
                   className={styles.menuModel}
                   title={[modelName(item), providerName(item)].filter(Boolean).join(' · ')}
@@ -94,21 +116,27 @@ export default function CreationControls({ selection, models, model, onChange, o
                 <span className={styles.state}>{t(`guid.creation.states.${item.state}`)}</span>
               </Menu.Item>
             ))}
-            {!(selection.source === 'cloud' && selection.kind === 'video') && (
+            <Menu.Item key='manage' className={styles.manageItem} onClick={manage}>
+              <SettingConfig theme='outline' size='14' />
+              {t(selection.source === 'local' ? 'guid.creation.manageLocal' : 'guid.creation.configureCloud')}
+            </Menu.Item>
+            {selection.source === 'cloud' && selection.kind === 'video' && model.id.startsWith('cloud-video:') && (
               <Menu.Item
-                key='manage'
+                key='add-cloud'
                 onClick={() => {
                   setOpen(false);
-                  if (selection.source === 'local') onManageLocal(model);
-                  else setConfiguring(model);
+                  setConfiguring({
+                    id: 'preset::cloud-video',
+                    name: 'MiniMax H3',
+                    kind: 'video',
+                    source: 'cloud',
+                    state: 'not-configured',
+                    available: false,
+                  });
                 }}
               >
-                {t(selection.source === 'local' ? 'guid.creation.manageLocal' : 'guid.creation.configureCloud')}
-              </Menu.Item>
-            )}
-            {selection.source === 'cloud' && selection.kind === 'video' && (
-              <Menu.Item key='video-unsupported' disabled>
-                {t('guid.creation.cloudVideoUnsupported')}
+                <Plus theme='outline' size='14' />
+                {t('guid.creation.addCloud')}
               </Menu.Item>
             )}
           </Menu>
@@ -126,17 +154,20 @@ export default function CreationControls({ selection, models, model, onChange, o
           <span className={styles.modelContent}>
             <Magic theme='outline' size='14' />
             <span className={styles.modelName}>{modelName(model)}</span>
-            <span className={styles.state}>{t(`guid.creation.states.${model.state}`)}</span>
+            {!emptyLocal && <span className={styles.triggerState}>{t(`guid.creation.states.${model.state}`)}</span>}
             <Down theme='outline' size='14' strokeWidth={4} className={open ? styles.arrowOpen : styles.arrow} />
           </span>
         </Button>
       </Dropdown>
       {configuring && (
-        <CloudModelSetup
+        <Setup
           model={configuring}
           onClose={() => setConfiguring(undefined)}
           onSaved={(id) => {
-            onChange((previous) => ({ ...previous, modelIds: { ...previous.modelIds, 'cloud-image': id } }));
+            onChange((previous) => ({
+              ...previous,
+              modelIds: { ...previous.modelIds, [`cloud-${configuring.kind}`]: id },
+            }));
             setConfiguring(undefined);
           }}
         />

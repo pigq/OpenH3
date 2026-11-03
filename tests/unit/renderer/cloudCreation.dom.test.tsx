@@ -56,7 +56,22 @@ describe('cloud creation catalog and setup', () => {
       available: false,
       state: 'not-configured',
     });
-    expect(cloudCreationModels([], 'video')[0]).toMatchObject({ available: false, state: 'unsupported' });
+    expect(cloudCreationModels([], 'video')[0]).toMatchObject({ available: false, state: 'not-configured' });
+  });
+
+  it('replaces the documented H3 preset with its saved connection', () => {
+    const models = cloudCreationModels([], 'video', [
+      {
+        id: 'mine',
+        name: 'MiniMax H3',
+        protocol: 'vllm-h3',
+        baseUrl: 'http://10.1.1.32:8091/v1/',
+        model: '/home/huhq/h3/models/MiniMax-H3',
+        hasApiKey: false,
+      },
+    ]);
+    expect(models).toHaveLength(1);
+    expect(models[0]).toMatchObject({ id: 'cloud-video:mine', available: true, state: 'configured' });
   });
 
   it('merges the public catalog with user providers and honors disabled models', () => {

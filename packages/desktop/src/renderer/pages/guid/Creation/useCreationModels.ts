@@ -3,6 +3,7 @@ import useSWR from 'swr';
 import type { CreationModel, CreationSelection } from '@/common/chat/document/creation/creation';
 import { comfyApi } from '@/common/chat/document/creation/comfyApi';
 import { cloudCreationModels } from '@/common/chat/document/creation/cloudModels';
+import { cloudVideoApi } from '@/common/chat/document/creation/cloudVideoApi';
 import { getClientBusinessSetting } from '@/renderer/services/clientBusinessSettings';
 import useConfigModelListWithImage from '@/renderer/hooks/agent/useConfigModelListWithImage';
 import { COMFY_FAMILIES } from './comfyDraft';
@@ -69,6 +70,11 @@ export function useCreationModels(enabled: boolean) {
     enabled && selection.source === 'cloud' ? 'creation.cloud-image-default' : null,
     () => getClientBusinessSetting('tools.imageGenerationModel')
   );
+  const { data: videoConnections } = useSWR(
+    enabled && selection.source === 'cloud' && selection.kind === 'video' ? 'creation.cloud-video-connections' : null,
+    () => cloudVideoApi.connections(),
+    { shouldRetryOnError: false }
+  );
   useEffect(() => {
     if (!Array.isArray(profiles)) return;
     const slot = `${selection.source}-${selection.kind}` as const;
@@ -86,41 +92,28 @@ export function useCreationModels(enabled: boolean) {
     const { kind, source } = selection;
     if (source === 'local') {
       const matching = (Array.isArray(profiles) ? profiles : []).filter((profile) => profile.kind === kind);
-      return [
-        ...matching.map(
-          (profile): CreationModel => ({
-            id: profile.id,
-            name: profile.name,
-            profileId: profile.id,
-            family: profile.family,
-            kind,
-            source,
-            state: profile.state,
-            available: profile.state === 'verified',
-            intent: 'generate',
-          })
-        ),
-        ...COMFY_FAMILIES.filter(
-          (family) => family.kind === kind && !matching.some((profile) => profile.family === family.family)
-        ).map(
-          (family): CreationModel => ({
-            id: family.family,
-            name: family.name,
-            family: family.family,
-            kind,
-            source,
-            state: isLoading ? 'checking' : error ? 'unavailable' : 'not-installed',
-            available: false,
-          })
-        ),
-      ];
+      return matching.map(
+        (profile): CreationModel => ({
+          id: profile.id,
+          name: profile.name,
+          profileId: profile.id,
+          family: profile.family,
+          kind,
+          source,
+          state: profile.state,
+          available: profile.state === 'verified',
+          intent: 'generate',
+        })
+      );
     }
-    return cloudCreationModels(providers, kind);
-  }, [selection.kind, selection.source, providers, profiles, error, isLoading]);
+    return cloudCreationModels(providers, kind, videoConnections);
+  }, [selection.kind, selection.source, providers, profiles, error, isLoading, videoConnections]);
   const slot = `${selection.source}-${selection.kind}` as const;
   const savedModelId = selection.modelIds[slot];
   const unavailableSelection: CreationModel | undefined =
-    savedModelId && !models.some((item) => item.id === savedModelId)
+    savedModelId &&
+    !models.some((item) => item.id === savedModelId) &&
+    !(selection.source === 'local' && COMFY_FAMILIES.some((item) => item.family === savedModelId))
       ? {
           id: savedModelId,
           name: savedModelId,
@@ -137,7 +130,15 @@ export function useCreationModels(enabled: boolean) {
     models.find(
       (item) => item.provider?.id === configuredImage?.id && item.provider?.use_model === configuredImage?.use_model
     ) ??
-    models[0];
+    models[0] ??
+    ({
+      id: `empty:${slot}`,
+      name: '',
+      kind: selection.kind,
+      source: selection.source,
+      state: isLoading ? 'checking' : error ? 'unavailable' : 'not-installed',
+      available: false,
+    } satisfies CreationModel);
   return {
     selection,
     setSelection,
