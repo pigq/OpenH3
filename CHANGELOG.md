@@ -4,6 +4,14 @@ This file records OpenH3-specific changes. The project is currently in Alpha.
 
 ## Unreleased
 
+## 3.0.9
+
+- Integrate the previously branch-only creation interface changes: glass model cards, a fixed action dock and the transparent bottom toolbar.
+- Add configurable cloud video connections for vLLM-Omni MiniMax H3 and OpenAI Videos compatible endpoints, with separate protocol adapters and support for multiple saved providers.
+- Support H3 text-to-video, first-frame and first/last-frame generation, with persistent task identities, restart recovery, progress and local video playback.
+- Keep cloud credentials out of conversation and tool results, validate provider capabilities before submission, and avoid replaying submissions whose acceptance is uncertain.
+- Include all existing 3.0.8 OSS update distribution and 3.0.7 stream recovery, model installation guidance and ComfyUI coordination changes. Preserve the published 3.0.8 tag and installer so existing clients can upgrade normally.
+
 ## 3.0.8
 
 - Prefer Aliyun OSS for stable update checks and downloads, with a verified GitHub Releases fallback for the same version and file hashes.

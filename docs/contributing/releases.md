@@ -93,15 +93,15 @@ node scripts/content-catalog/preview.mjs --after .runtime/content-preview/catalo
 
 ## 左下角更新入口（3.0.1 起）
 
-桌面客户端启动后延迟 30 秒静默检查，此后每 6 小时检查；已有下载缓存可先验证并恢复。发现新版本后在设置旁显示更新入口，用户点击才下载，下载完成后确认安装。普通退出不会自动安装。WebUI 不挂载桌面更新控制器。
+桌面客户端启动后延迟 30 秒静默检查，此后每 6 小时检查；已有下载缓存可先验证并恢复。3.0.7 起，发现更高的稳定版本后由主进程后台下载，下载完成后等待 Core、媒体和内容服务全部空闲，再静默安装并重启。设置旁的更新入口显示状态；“稍后”仅收起提示，不暂停空闲安装。普通退出没有绑定安装回调；WebUI 不挂载桌面更新控制器。
 
 发布时须验证当前配置更新源能提供匹配版本、平台、架构的元数据与安装包，校验信息必须一致。无兼容安装包时回退到发布页，不显示无效下载操作。安装包回退明确显示“打开安装包”，不承诺自动重启。
 
 验收至少覆盖：无更新、发现更新但不弹窗、下载进度与失败重试、关闭详情保留入口、确认取消不安装、确认后升级、撤回版本后入口消失。单元测试通过不等同于安装包升级成功；仍需独立 Windows 安装环境实测。
 
-### 确认后的静默覆盖安装
+### 空闲后的静默覆盖安装
 
-正常自动更新调用 `quitAndInstall(true, true)`：Windows 安装器接收 `--updated /S --force-run`，在原安装位置替换程序并重启，不展示安装向导。首次安装仍保留向导；普通退出仍不安装更新。提权安装仍可能出现系统授权窗口。
+正常自动更新在获取跨服务空闲锁后调用 `quitAndInstall(true, true)`：Windows 安装器接收 `--updated /S --force-run`，在原安装位置替换程序并重启，不展示安装向导。手动安装入口也必须通过同一空闲检查。首次安装仍保留向导；提权安装仍可能出现系统授权窗口。
 
 NSIS 明确配置 `deleteAppDataOnUninstall: false`，保留现有安装 GUID 和用户资料目录，不通过卸载清数据再安装实现更新。自动更新不可用时，完整安装包入口标为“手动安装（备用）”，不冒充自动更新。
 
@@ -115,7 +115,23 @@ Publish the draft release after uploading the accepted installers, any genuine b
 
 The OSS role is restricted to the tagged `release-distribute.yml`. For a manual redistribution, select the release tag as the workflow run ref and supply the same tag input; dispatching from `main` is not authorized. See the [OSS distribution design and configuration record](../architecture/update-distribution-oss-design.zh-CN.md) for the configured identities and outstanding first-publication checks.
 
-The normal flow is: download in the background → confirm restart and update → silent replacement and restart. Existing configuration and user data are retained. Manual installer fallback remains a separately labelled action.
+The normal flow is: download in the background → wait for all local workers to be idle → acquire the update admission fences → silent replacement and restart. Existing configuration and user data are retained. Dismissing the notification does not suspend automatic installation. Manual installer fallback remains a separately labelled action.
+
+### 3.0.9 跨会话提交核对
+
+3.0.8 发布后复核发现，创作工作区分支已有三个推送提交尚未合入 `main`。3.0.9 保留这些提交历史并合并；不会覆盖 3.0.8 的标签、安装包或 OSS 版本目录，已安装 3.0.8 的客户端可以按更高版本正常升级。
+
+| 功能                                                               | 原始提交                 | 本次核对结果                                     |
+| ------------------------------------------------------------------ | ------------------------ | ------------------------------------------------ |
+| 玻璃质感模型卡和固定操作栏                                         | `5cf02aeeb`              | 合并到 3.0.9                                     |
+| 底部透明操作栏修复                                                 | `05beb66db`              | 合并到 3.0.9                                     |
+| 云端 H3 / OpenAI Videos 协议适配、连接配置、任务持久化和结果播放   | `5ff72637a`              | 合并到 3.0.9，详见云端生成指南                   |
+| Agent 计划、授权和长任务，迁移失败反馈                             | `052afad66`、`027b6df90` | 已通过 `b46758358` 合入，关键文件内容核对一致    |
+| 团队工具授权说明                                                   | `b7d9224ac`              | 已通过 `c08a9c2ca` 合入，同一文件内容一致        |
+| 官方内容目录、媒体打包、Windows 更新验收和历史迁移修复             | 历史内容、发布和迁移分支 | 已有主干集成及后续修复，未重复应用旧分支或 stash |
+| 视频预览、FastH3-Omni、ComfyUI 协调、SSE 恢复、空闲更新及 OSS 分发 | 3.0.7 / 3.0.8 源码       | 保留并纳入 3.0.9                                 |
+
+核对范围包括可读取的相关会话、所有登记的 Git worktree、本地和远端 OpenH3 分支及历史 stash。独立旧 Core 副本没有待提交源码；旧 upstream 工作区的删除状态、明确标为不发布的本地状态和构建 ZIP 保留原状，不作为产品功能提交。新增云端视频没有改动 Core 源码树；发行包复用相同源码树对应的已校验 Core 二进制，来源与限制记录在每版 `provenance.json`。
 
 ## Windows x64 3.0.1 安装升级验收
 
