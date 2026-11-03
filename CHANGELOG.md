@@ -4,6 +4,13 @@ This file records OpenH3-specific changes. The project is currently in Alpha.
 
 ## Unreleased
 
+## 3.0.8
+
+- Prefer Aliyun OSS for stable update checks and downloads, with a verified GitHub Releases fallback for the same version and file hashes.
+- Use one validated OSS release index for manual version checks, release notes and architecture-matched installer downloads.
+- Publish verified release assets through GitHub OIDC with permissions limited to the stable update prefix. Upload immutable installers before moving update metadata, and reject mismatched reruns or version rollbacks.
+- Support releases for a subset of platforms while requiring matching updater metadata and digest validation for every published installer.
+
 ## 3.0.7
 
 - Recover transient gateway errors delivered inside otherwise empty model streams, with at most two retries of the same provider request. Streams that already emitted text, reasoning or tool events are never replayed automatically.

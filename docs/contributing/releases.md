@@ -109,7 +109,11 @@ NSIS 明确配置 `deleteAppDataOnUninstall: false`，保留现有安装 GUID �
 
 ### Desktop update source
 
-Desktop updates use only GitHub Releases in `pigq/OpenH3`. Publish the draft release after uploading the accepted installers, any genuine blockmaps and matching `latest*.yml` files for the platforms actually being released. Version 3.0.1 ships Windows x64 only, with its original `latest.yml`; reuse the accepted bytes. The native GitHub updater reads these manifests; manual checks use the GitHub Releases API and preserve asset download URLs. Drafts are excluded, prereleases require opt-in, and older versions are not installed. GitHub failures can be retried; there is no upstream CDN fallback.
+Versions through 3.0.7 use GitHub Releases in `pigq/OpenH3`. Starting with 3.0.8, stable update checks and downloads prefer Aliyun OSS under `bohuauhd/updates/stable/`, with GitHub as a verified fallback. Manual checks use the same OSS release index. A download fallback must match the original version and file hashes. Drafts are excluded, prereleases require opt-in, and older versions are not installed.
+
+Publish the draft release after uploading the accepted installers, any genuine blockmaps and matching `latest*.yml` files for the platforms actually being released. Version 3.0.1 ships Windows x64 only, with its original `latest.yml`; reuse the accepted bytes. The OSS distribution job validates each published installer against its platform metadata and the GitHub asset digest, uploads immutable assets first, and publishes stable metadata last. It does not require installers for platforms absent from that release. Keep source archives in GitHub's generated tag archives or a `.tar.gz` release asset; `.zip` release assets are reserved for platform installers and require matching update metadata.
+
+The OSS role is restricted to the tagged `release-distribute.yml`. For a manual redistribution, select the release tag as the workflow run ref and supply the same tag input; dispatching from `main` is not authorized. See the [OSS distribution design and configuration record](../architecture/update-distribution-oss-design.zh-CN.md) for the configured identities and outstanding first-publication checks.
 
 The normal flow is: download in the background → confirm restart and update → silent replacement and restart. Existing configuration and user data are retained. Manual installer fallback remains a separately labelled action.
 
