@@ -54,6 +54,37 @@ describe('validateUpdateReleaseAssets', () => {
     });
   });
 
+  it('accepts a Windows x64-only release without requiring unpublished platform metadata', () => {
+    const directory = makeReleaseDirectory();
+    for (const name of fs.readdirSync(directory)) {
+      if (!['latest.yml', 'OpenH3-3.0.8-win-x64.exe'].includes(name)) fs.unlinkSync(path.join(directory, name));
+    }
+    expect(validateUpdateReleaseAssets({ directory, version: '3.0.8' })).toEqual({
+      valid: true,
+      version: '3.0.8',
+      metadataFiles: 1,
+      installerFiles: 1,
+    });
+  });
+
+  it('rejects an installer whose platform metadata is missing', () => {
+    const directory = makeReleaseDirectory();
+    fs.unlinkSync(path.join(directory, 'latest-win-arm64.yml'));
+    expect(() => validateUpdateReleaseAssets({ directory, version: '3.0.8' })).toThrow(/metadata/i);
+  });
+
+  it('rejects an additional installer that is not referenced by any platform metadata', () => {
+    const directory = makeReleaseDirectory();
+    fs.writeFileSync(path.join(directory, 'OpenH3-3.0.8-win-x64.msi'), 'unreferenced installer');
+    expect(() => validateUpdateReleaseAssets({ directory, version: '3.0.8' })).toThrow(/metadata/i);
+  });
+
+  it('rejects an empty release directory', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'openh3-release-assets-'));
+    roots.add(directory);
+    expect(() => validateUpdateReleaseAssets({ directory, version: '3.0.8' })).toThrow(/metadata/i);
+  });
+
   it('rejects channel files that all reference the same Windows x64 installer', () => {
     const directory = makeReleaseDirectory((manifest) => ({
       ...manifest,

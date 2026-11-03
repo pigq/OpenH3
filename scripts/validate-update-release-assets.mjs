@@ -176,12 +176,20 @@ export function validateUpdateReleaseAssets({ directory, version }) {
   }
 
   const installerNames = new Set();
+  let metadataFiles = 0;
   for (const manifestName of METADATA_FILES) {
+    if (!fs.existsSync(path.join(directory, manifestName))) continue;
     validateManifest(directory, version, manifestName, installerNames);
+    metadataFiles++;
   }
+  if (metadataFiles === 0) fail('Release has no updater metadata');
 
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.endsWith('.blockmap')) continue;
+    if (!entry.isFile()) continue;
+    if (INSTALLER_EXTENSIONS.has(path.extname(entry.name).toLowerCase()) && !installerNames.has(entry.name)) {
+      fail(`Installer is missing from updater metadata: ${entry.name}`);
+    }
+    if (!entry.name.endsWith('.blockmap')) continue;
     const installerName = entry.name.slice(0, -'.blockmap'.length);
     if (!isSafeAssetName(installerName) || !installerNames.has(installerName)) {
       fail(`Blockmap has no metadata-linked installer: ${entry.name}`);
@@ -190,7 +198,7 @@ export function validateUpdateReleaseAssets({ directory, version }) {
 
   validateReleaseIndex(directory, version);
 
-  return { valid: true, version, metadataFiles: METADATA_FILES.length, installerFiles: installerNames.size };
+  return { valid: true, version, metadataFiles, installerFiles: installerNames.size };
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
