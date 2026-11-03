@@ -133,6 +133,8 @@ The normal flow is: download in the background → wait for all local workers to
 
 核对范围包括可读取的相关会话、所有登记的 Git worktree、本地和远端 OpenH3 分支及历史 stash。独立旧 Core 副本没有待提交源码；旧 upstream 工作区的删除状态、明确标为不发布的本地状态和构建 ZIP 保留原状，不作为产品功能提交。新增云端视频没有改动 Core 源码树；发行包复用相同源码树对应的已校验 Core 二进制，来源与限制记录在每版 `provenance.json`。
 
+发布前截图复核补充修复：原透明底栏仍以普通文档流占用独立区域，现改为覆盖滚动内容的透明悬浮层。工具按钮正常接收点击，其余覆盖区域允许内容交互；列表末尾保留滚动余量，避免最后一张卡被按钮挡住。
+
 ## Windows x64 3.0.1 安装升级验收
 
 先审查并提交完整 `3.0.1` 源码，再在该提交触发 `🔨 Manual Build`，选择 `mode=windows-upgrade-acceptance` 并填写准确的完整 `reviewed_source_sha`。入口拒绝版本不符、SHA 不符和脏 tracked checkout。验收 job 仅有 `contents: read` / `actions: read`，不继承发布或签名 secret。仅 GitHub-hosted Windows x64 可运行安装动作；本机纯测试和注入 adapter 不算实际验收。

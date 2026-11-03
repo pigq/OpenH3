@@ -7,6 +7,7 @@ This file records OpenH3-specific changes. The project is currently in Alpha.
 ## 3.0.9
 
 - Integrate the previously branch-only creation interface changes: glass model cards, a fixed action dock and the transparent bottom toolbar.
+- Restore the creation toolbar as a transparent floating overlay so the gallery scrolls behind it instead of ending at a separate footer band; keep the controls clickable and the final cards reachable.
 - Add configurable cloud video connections for vLLM-Omni MiniMax H3 and OpenAI Videos compatible endpoints, with separate protocol adapters and support for multiple saved providers.
 - Support H3 text-to-video, first-frame and first/last-frame generation, with persistent task identities, restart recovery, progress and local video playback.
 - Keep cloud credentials out of conversation and tool results, validate provider capabilities before submission, and avoid replaying submissions whose acceptance is uncertain.
