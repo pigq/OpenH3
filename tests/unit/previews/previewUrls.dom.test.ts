@@ -50,6 +50,7 @@ describe('buildStreamUrl', () => {
 describe('buildPdfSrc', () => {
   it('builds a stream URL when a fileRef is present', () => {
     expect(buildPdfSrc({ kind: 'local', path: '/x.pdf' })).toContain('/api/fs/stream?kind=local');
+    expect(new URL(buildPdfSrc({ kind: 'local', path: '/x.pdf' }), 'http://host').hash).toBe('#view=FitH&navpanes=0');
   });
 
   it('falls back to inline content when no fileRef', () => {

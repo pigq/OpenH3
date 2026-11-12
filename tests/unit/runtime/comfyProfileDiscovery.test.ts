@@ -308,7 +308,8 @@ describe('incremental local Comfy profile discovery', () => {
       }
     }
     const profiles = await setup({ loadCatalog: () => ({ candidates, baselines: shipped.baselines }) })([]);
-    expect(profiles).toHaveLength(shipped.baselines.length);
+    // H3 bundle discovery uses its own layout. Other recipes register once; variants route from the catalog.
+    expect(profiles).toHaveLength(candidates.filter((candidate) => candidate.family !== 'h3').length);
     expect(new Set(profiles.map((profile) => profile.family))).toEqual(
       new Set(comfyFamilySchema.options.filter((family) => family !== 'h3'))
     );

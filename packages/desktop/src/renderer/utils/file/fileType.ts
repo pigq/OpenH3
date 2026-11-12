@@ -44,6 +44,13 @@ export const EXTENSION_MAP: Record<string, FileTypeInfo> = {
   patch: { contentType: 'diff', editable: false, language: 'diff' },
   // PDF
   pdf: { contentType: 'pdf', editable: false, language: 'pdf' },
+  zip: { contentType: 'archive', editable: false, language: 'zip' },
+  ...Object.fromEntries(
+    ['7z', 'bz2', 'gz', 'rar', 'tar', 'xz'].map((extension) => [
+      extension,
+      { contentType: 'unsupported' as const, editable: false, language: extension },
+    ])
+  ),
   // Office — only the OOXML formats officecli actually renders
   pptx: { contentType: 'ppt', editable: false, language: 'ppt' },
   docx: { contentType: 'word', editable: false, language: 'word' },

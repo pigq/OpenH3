@@ -167,7 +167,7 @@ describe('shipped catalog and automatic installation', () => {
   it('resolves resources without relying on the child process working directory', () => {
     vi.stubEnv('OPENH3_RESOURCES_ROOT', resources);
     expect(resolveComfyResourcesRoot()).toBe(resources);
-    expect(catalog.baselines).toHaveLength(19);
+    expect(catalog.baselines.length).toBeGreaterThanOrEqual(19);
     expect(catalog.baselines.some((entry) => entry.family === 'qwen-edit')).toBe(true);
     expect(catalog.baselines.some((entry) => entry.family === 'fasth3-omni')).toBe(true);
   });

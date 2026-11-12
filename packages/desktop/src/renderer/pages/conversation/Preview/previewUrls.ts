@@ -29,6 +29,6 @@ export const buildStreamUrl = (ref: ChatFileRef): string => {
  * URL) when no ref is available.
  */
 export const buildPdfSrc = (fileRef?: ChatFileRef, content?: string): string => {
-  if (fileRef) return buildStreamUrl(fileRef);
+  if (fileRef) return `${buildStreamUrl(fileRef)}#view=FitH&navpanes=0`;
   return content || '';
 };

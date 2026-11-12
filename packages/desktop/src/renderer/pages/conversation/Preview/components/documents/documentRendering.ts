@@ -14,7 +14,14 @@ export async function renderWord(bytes: ArrayBuffer): Promise<string> {
     useBase64URL: true,
     renderAltChunks: false,
   });
-  return documentHtml(body.innerHTML, styles.innerHTML);
+  const responsiveStyles = `<style>
+    .docx-wrapper{padding:0;background:transparent;align-items:stretch}
+    .docx-wrapper section.docx{width:100%!important;min-width:0;box-sizing:border-box;padding:20px!important}
+    .docx-wrapper table{width:100%!important;table-layout:fixed}
+    .docx-wrapper col{width:auto!important}
+    .docx-wrapper td,.docx-wrapper th{overflow-wrap:anywhere}
+  </style>`;
+  return documentHtml(body.innerHTML, styles.innerHTML + responsiveStyles);
 }
 
 export async function renderSpreadsheet(bytes: ArrayBuffer): Promise<Array<{ name: string; html: string }>> {

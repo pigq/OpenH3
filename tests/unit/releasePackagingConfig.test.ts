@@ -205,14 +205,15 @@ describe('manual build, official content and installed acceptance mode isolation
     expect(acceptance.results['acceptance-installed']).toBe('failure');
   });
 
-  it('requires six isolated hosted acceptance scenarios from the reviewed dispatch SHA without inherited secrets', () => {
+  it('requires six isolated hosted acceptance scenarios and inherits distribution credentials only for the build', () => {
     const workflow = manualWorkflow();
     const names = ['acceptance-contracts', 'acceptance-candidate', 'acceptance-installed', 'acceptance-gate'];
     expect(Object.keys(workflow.jobs).filter((name) => name.startsWith('acceptance-'))).toEqual(names);
     for (const name of names) {
       const job = workflow.jobs[name];
       expect(job.permissions, name).toEqual({ contents: 'read', actions: 'read' });
-      expect(job.secrets, name).toBeUndefined();
+      if (name === 'acceptance-candidate') expect(job.secrets).toBe('inherit');
+      else expect(job.secrets, name).toBeUndefined();
       expect(job.environment, name).toBeUndefined();
       expect(job.if, name).toContain("inputs.mode == 'windows-upgrade-acceptance'");
       expect(JSON.stringify(job), name).not.toContain('secrets.');
