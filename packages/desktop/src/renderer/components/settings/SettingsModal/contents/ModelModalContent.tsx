@@ -6,8 +6,9 @@
 
 import { ipcBridge } from '@/common';
 import type { IProvider } from '@/common/config/storage';
-import { supportsOpenAiApiMode } from '@/common/utils/modelCapabilities';
-import { Button, Divider, Message, Popconfirm, Collapse, Tag, Switch, Tooltip } from '@arco-design/web-react';
+import { supportsOpenAiApiMode, updateModelSettings } from '@/common/utils/modelCapabilities';
+import type { ModelOpenAiApiModeChoice } from '@/common/utils/modelCapabilities';
+import { Button, Divider, Message, Popconfirm, Collapse, Tag, Switch, Tooltip, Select } from '@arco-design/web-react';
 import {
   DeleteFour,
   Heartbeat,
@@ -522,8 +523,8 @@ const ModelModalContent: React.FC = () => {
 
                       return (
                         <div key={model}>
-                          <div className='flex items-center justify-between gap-8px px-8px py-12px transition-colors hover:bg-[var(--fill-0)]'>
-                            <div className='flex min-w-0 flex-1 items-center gap-8px'>
+                          <div className='flex flex-wrap items-center justify-between gap-8px px-8px py-12px transition-colors hover:bg-[var(--fill-0)]'>
+                            <div className='flex flex-wrap min-w-0 flex-1 items-center gap-8px'>
                               {/* 健康状态指示器 / Health status indicator */}
                               {healthStatus !== 'unknown' && (
                                 <Tooltip
@@ -599,13 +600,47 @@ const ModelModalContent: React.FC = () => {
                               </Tooltip>
 
                               {showOpenAiApiMode && (
-                                <Tag size='small' className='hidden shrink-0 md:inline-flex'>
-                                  {modelSettings?.openai_api_mode === 'responses'
-                                    ? t('settings.openAiApiModeResponses')
-                                    : modelSettings?.openai_api_mode === 'chat_completions'
-                                      ? t('settings.openAiApiModeChatCompletions')
-                                      : t('settings.openAiApiModeAuto')}
-                                </Tag>
+                                <Tooltip content={t('settings.openAiApiModeTip')}>
+                                  <Select
+                                    size='small'
+                                    className='w-156px shrink-0'
+                                    aria-label={`${model} · ${t('settings.openAiApiMode')}`}
+                                    value={modelSettings?.openai_api_mode ?? 'auto'}
+                                    options={[
+                                      { value: 'auto', label: t('settings.openAiApiModeAuto') },
+                                      {
+                                        value: 'chat_completions',
+                                        label: `${t('settings.openAiApiModeChatCompletions')} · /v1/chat/completions`,
+                                      },
+                                      {
+                                        value: 'responses',
+                                        label: `${t('settings.openAiApiModeResponses')} · /v1/responses`,
+                                      },
+                                    ]}
+                                    triggerProps={{ autoAlignPopupWidth: false, autoFitPosition: true }}
+                                    renderFormat={(option) =>
+                                      option.value === 'responses'
+                                        ? t('settings.openAiApiModeResponses')
+                                        : option.value === 'chat_completions'
+                                          ? t('settings.openAiApiModeChatCompletions')
+                                          : t('settings.openAiApiModeAuto')
+                                    }
+                                    onChange={(value: ModelOpenAiApiModeChoice) =>
+                                      updatePlatform(
+                                        {
+                                          ...platform,
+                                          model_settings: updateModelSettings(
+                                            platform.model_settings,
+                                            [model],
+                                            imageInput,
+                                            value
+                                          ),
+                                        },
+                                        () => {}
+                                      )
+                                    }
+                                  />
+                                </Tooltip>
                               )}
 
                               {/* 模型启用开关 / Model enable switch */}

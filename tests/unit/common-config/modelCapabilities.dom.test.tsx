@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IProvider } from '@/common/config/storage';
 
@@ -607,9 +607,45 @@ describe('configured model list', () => {
     expect(screen.getAllByTitle('settings.imageInputSupported')).toHaveLength(2);
     expect(screen.getByTitle('settings.imageInputUnsupported')).toBeInTheDocument();
     expect(screen.getByTitle('settings.imageInputAuto')).toBeInTheDocument();
-    expect(screen.getByText('settings.openAiApiModeResponses')).toBeInTheDocument();
-    expect(screen.getByText('settings.openAiApiModeChatCompletions')).toBeInTheDocument();
-    expect(screen.getByText('settings.openAiApiModeAuto')).toBeInTheDocument();
+    const modes = screen.getAllByTestId('api-mode-select');
+    expect(modes).toHaveLength(3);
+    expect(modes[0]).toHaveValue('responses');
+    expect(modes[1]).toHaveValue('chat_completions');
+    expect(modes[2]).toHaveValue('auto');
+    expect(within(modes[0]).getByText(/\/v1\/responses/)).toBeInTheDocument();
+    expect(within(modes[0]).getByText(/\/v1\/chat\/completions/)).toBeInTheDocument();
+  });
+
+  it('changes a model API in place while retaining vision and other models', async () => {
+    render(<ModelModalContent />);
+    fireEvent.change(screen.getAllByTestId('api-mode-select')[1], { target: { value: 'responses' } });
+
+    await waitFor(() => {
+      expect(mocks.updateProvider).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model_settings: {
+            ...configuredProvider.model_settings,
+            'gpt-chat': { image_input: 'unsupported', openai_api_mode: 'responses' },
+          },
+        })
+      );
+    });
+  });
+
+  it('returns to automatic API selection without removing vision settings', async () => {
+    render(<ModelModalContent />);
+    fireEvent.change(screen.getAllByTestId('api-mode-select')[0], { target: { value: 'auto' } });
+
+    await waitFor(() => {
+      expect(mocks.updateProvider).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model_settings: {
+            ...configuredProvider.model_settings,
+            'gpt-responses': { image_input: 'supported' },
+          },
+        })
+      );
+    });
   });
 
   it('opens the selected model in the configuration dialog', async () => {
@@ -620,7 +656,7 @@ describe('configured model list', () => {
     await waitFor(() => {
       expect(screen.getByRole('dialog')).toBeInTheDocument();
       expect(screen.getByTestId('vision-select')).toHaveValue('unsupported');
-      expect(screen.getByTestId('api-mode-select')).toHaveValue('chat_completions');
+      expect(within(screen.getByRole('dialog')).getByTestId('api-mode-select')).toHaveValue('chat_completions');
     });
   });
 

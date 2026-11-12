@@ -416,7 +416,7 @@
   "openAiApiModeAuto": "API · 자동",
   "openAiApiModeChatCompletions": "Chat Completions",
   "openAiApiModeResponses": "Responses",
-  "openAiApiModeTip": "OpenAI 호환 프로토콜을 사용하는 모델에만 제공됩니다.",
+  "openAiApiModeTip": "제공업체가 지원하는 API를 선택하세요. Chat Completions는 /v1/chat/completions, Responses는 /v1/responses를 사용합니다. 자동은 호환성 규칙을 따릅니다. 캐시 적중은 제공업체, 모델, 동일한 요청 접두부에도 달려 있으므로 API 변경만으로 적중률 향상을 보장하지 않습니다.",
   "modelSettingsApplyToSelected": "이 설정은 선택한 모든 모델에 적용되며 나중에 개별적으로 변경할 수 있습니다.",
   "platformBedrock": "AWS Bedrock",
   "bedrock": {

@@ -416,7 +416,7 @@
   "openAiApiModeAuto": "API · 自动",
   "openAiApiModeChatCompletions": "Chat Completions",
   "openAiApiModeResponses": "Responses",
-  "openAiApiModeTip": "仅对使用 OpenAI 兼容协议的模型显示。",
+  "openAiApiModeTip": "按服务商支持情况选择：Chat Completions 使用 /v1/chat/completions，Responses 使用 /v1/responses。自动沿用兼容规则。缓存命中还取决于服务商、模型和相同的请求前缀，切换接口不保证提高命中率。",
   "modelSettingsApplyToSelected": "这些设置会应用到全部已选模型，添加后仍可分别修改。",
   "platformBedrock": "AWS Bedrock",
   "bedrock": {

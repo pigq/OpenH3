@@ -416,7 +416,7 @@
   "openAiApiModeAuto": "API · Otomatik",
   "openAiApiModeChatCompletions": "Chat Completions",
   "openAiApiModeResponses": "Responses",
-  "openAiApiModeTip": "Yalnızca OpenAI uyumlu protokol kullanan modellerde kullanılabilir.",
+  "openAiApiModeTip": "Desteklenen bir API seçin: Chat Completions /v1/chat/completions, Responses ise /v1/responses kullanır. Otomatik, uyumluluk kurallarını izler. Önbellek isabetleri sağlayıcıya, modele ve aynı istek öneklerine de bağlıdır; API değiştirmek daha yüksek isabet oranını garanti etmez.",
   "modelSettingsApplyToSelected": "Bu ayarlar seçilen tüm modellere uygulanır ve daha sonra ayrı ayrı değiştirilebilir.",
   "platformBedrock": "AWS Bedrock",
   "bedrock": {

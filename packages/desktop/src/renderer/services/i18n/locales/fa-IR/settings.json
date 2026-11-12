@@ -416,7 +416,7 @@
   "openAiApiModeAuto": "API · خودکار",
   "openAiApiModeChatCompletions": "Chat Completions",
   "openAiApiModeResponses": "Responses",
-  "openAiApiModeTip": "فقط برای مدل‌هایی که از پروتکل سازگار با OpenAI استفاده می‌کنند در دسترس است.",
+  "openAiApiModeTip": "یک API پشتیبانی‌شده انتخاب کنید: Chat Completions از /v1/chat/completions و Responses از /v1/responses استفاده می‌کند. حالت خودکار قواعد سازگاری را دنبال می‌کند. استفاده از کش به ارائه‌دهنده، مدل و پیشوند یکسان درخواست‌ها نیز بستگی دارد؛ تغییر API افزایش نرخ استفاده از کش را تضمین نمی‌کند.",
   "modelSettingsApplyToSelected": "این تنظیمات برای همه مدل‌های انتخاب‌شده اعمال می‌شود و بعداً می‌توان هرکدام را جداگانه تغییر داد.",
   "platformBedrock": "AWS Bedrock",
   "bedrock": {

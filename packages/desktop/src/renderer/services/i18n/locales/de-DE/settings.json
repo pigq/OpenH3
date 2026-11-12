@@ -406,7 +406,7 @@
   "openAiApiModeAuto": "API · Automatisch",
   "openAiApiModeChatCompletions": "Chat Completions",
   "openAiApiModeResponses": "Responses",
-  "openAiApiModeTip": "Nur für Modelle mit OpenAI-kompatiblem Protokoll verfügbar.",
+  "openAiApiModeTip": "Wählen Sie eine unterstützte API: Chat Completions nutzt /v1/chat/completions, Responses nutzt /v1/responses. Automatisch folgt den Kompatibilitätsregeln. Cache-Treffer hängen auch vom Anbieter, Modell und identischen Anfragepräfixen ab; ein API-Wechsel garantiert keine höhere Trefferquote.",
   "modelSettingsApplyToSelected": "Diese Einstellungen gelten für alle ausgewählten Modelle und können später einzeln geändert werden.",
   "platformBedrock": "AWS Bedrock",
   "bedrock": {
