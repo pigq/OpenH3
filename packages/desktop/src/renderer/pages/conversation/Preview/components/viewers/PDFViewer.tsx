@@ -58,6 +58,7 @@ const PDFPreview: React.FC<PDFPreviewProps> = ({ tabId, fileRef, file_path, cont
   const webviewRef = useRef<ElectronWebView>(null);
   const [messageApi, messageContextHolder] = Message.useMessage();
   const toolbarExtrasContext = usePreviewToolbarExtras();
+  const pdfSrc = buildPdfSrc(fileRef, content);
 
   // Expose "reload this document" to the refresh control. Registered from an effect
   // and removed on unmount, so a closed tab cannot be reloaded through a stale entry.
@@ -84,43 +85,29 @@ const PDFPreview: React.FC<PDFPreviewProps> = ({ tabId, fileRef, file_path, cont
   }, [file_path, messageApi, t]);
 
   useEffect(() => {
-    try {
-      setLoading(true);
+    setLoading(Boolean(pdfSrc));
+    setError(pdfSrc ? null : t('preview.pdf.pathMissing'));
+    const webview = webviewRef.current;
+    if (!webview) return;
+
+    const handleStart = () => {
       setError(null);
-
-      if (!fileRef && !file_path && !content) {
-        setError(t('preview.pdf.pathMissing'));
-        setLoading(false);
-        return;
-      }
-
-      // webview 加载成功后隐藏 loading
-      // Hide loading after webview finishes loading
-      const webview = webviewRef.current;
-      if (webview) {
-        const handleLoad = () => {
-          setLoading(false);
-        };
-        const handleError = () => {
-          setError(t('preview.pdf.loadFailed'));
-          setLoading(false);
-        };
-
-        webview.addEventListener('did-finish-load', handleLoad);
-        webview.addEventListener('did-fail-load', handleError);
-
-        return () => {
-          webview.removeEventListener('did-finish-load', handleLoad);
-          webview.removeEventListener('did-fail-load', handleError);
-        };
-      } else {
-        setLoading(false);
-      }
-    } catch (err) {
-      setError(`${t('preview.pdf.loadFailed')}: ${err instanceof Error ? err.message : String(err)}`);
+      setLoading(true);
+    };
+    const handleLoad = () => setLoading(false);
+    const handleError = () => {
+      setError(t('preview.pdf.loadFailed'));
       setLoading(false);
-    }
-  }, [fileRef, file_path, content, t]);
+    };
+    webview.addEventListener('did-start-loading', handleStart);
+    webview.addEventListener('did-finish-load', handleLoad);
+    webview.addEventListener('did-fail-load', handleError);
+    return () => {
+      webview.removeEventListener('did-start-loading', handleStart);
+      webview.removeEventListener('did-finish-load', handleLoad);
+      webview.removeEventListener('did-fail-load', handleError);
+    };
+  }, [pdfSrc, t]);
 
   // 设置工具栏扩展（必须在所有条件返回之前调用）
   // Set toolbar extras (must be called before any conditional returns)
@@ -137,31 +124,6 @@ const PDFPreview: React.FC<PDFPreviewProps> = ({ tabId, fileRef, file_path, cont
     });
     return () => toolbarExtrasContext.setExtras(null);
   }, [usePortalToolbar, toolbarExtrasContext, t, loading, error]);
-
-  // 使用 Electron webview 加载本地 PDF 文件
-  // Use Electron webview to load local PDF files
-  const pdfSrc = buildPdfSrc(fileRef, content);
-
-  if (error) {
-    return (
-      <div className='flex items-center justify-center h-full'>
-        {messageContextHolder}
-        <div className='text-center'>
-          <div className='text-16px text-t-error mb-8px'>❌ {error}</div>
-          <div className='text-12px text-t-secondary'>{t('preview.pdf.unableDisplay')}</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className='flex items-center justify-center h-full'>
-        {messageContextHolder}
-        <div className='text-14px text-t-secondary'>{t('preview.loading')}</div>
-      </div>
-    );
-  }
 
   return (
     <div className='h-full w-full bg-bg-1 flex flex-col'>
@@ -185,15 +147,23 @@ const PDFPreview: React.FC<PDFPreviewProps> = ({ tabId, fileRef, file_path, cont
         </div>
       )}
       {/* PDF 内容区域 / PDF content area */}
-      <div className='flex-1 overflow-hidden bg-bg-1'>
-        {/* key 确保文件路径改变时 webview 重新挂载 / key ensures webview remounts when file path changes */}
-        <webview
-          key={pdfSrc}
-          ref={webviewRef}
-          src={pdfSrc}
-          className='w-full h-full'
-          style={{ display: 'inline-flex' }}
-        />
+      <div className='relative flex-1 min-h-0 overflow-hidden bg-bg-1'>
+        {/* Keep the guest mounted while loading so its completion and reload events can arrive. */}
+        {pdfSrc && (
+          <webview key={pdfSrc} ref={webviewRef} src={pdfSrc} className='w-full h-full' style={{ display: 'flex' }} />
+        )}
+        {(loading || error) && (
+          <div className='absolute inset-0 flex items-center justify-center bg-bg-1' role='status'>
+            {error ? (
+              <div className='text-center'>
+                <div className='text-16px text-t-error mb-8px'>{error}</div>
+                <div className='text-12px text-t-secondary'>{t('preview.pdf.unableDisplay')}</div>
+              </div>
+            ) : (
+              <div className='text-14px text-t-secondary'>{t('preview.loading')}</div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
