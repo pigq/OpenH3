@@ -202,5 +202,9 @@
   },
   "selectedCount": "{{count}} seçili",
   "selectedSkills": "Seçili beceriler",
-  "aiAssistant": "Yapay Zekâ Asistanı"
+  "aiAssistant": "Yapay Zekâ Asistanı",
+  "rendererRecovery": {
+    "title": "Sayfa hatası",
+    "description": "Bu sayfa görüntülenemedi. Devam etmek için yeniden yükleyin."
+  }
 }

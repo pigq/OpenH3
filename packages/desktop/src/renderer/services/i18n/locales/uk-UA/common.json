@@ -205,5 +205,9 @@
   },
   "selectedCount": "Вибрано {{count}}",
   "selectedSkills": "Вибрані навички",
-  "aiAssistant": "ШІ-асистент"
+  "aiAssistant": "ШІ-асистент",
+  "rendererRecovery": {
+    "title": "Помилка сторінки",
+    "description": "Не вдалося відобразити сторінку. Перезавантажте її, щоб продовжити."
+  }
 }

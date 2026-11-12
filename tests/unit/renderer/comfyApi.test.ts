@@ -21,6 +21,14 @@ describe('ComfyUI conversation-scoped client', () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
+  it('reads model recommendations for the selected directory without a mutation', async () => {
+    await comfyApi.modelCenter('E:\\OpenH3 Models');
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'http://127.0.0.1:33002/api/comfy/model-center?directory=E%3A%5COpenH3%20Models'
+    );
+    expect(fetchMock.mock.calls[0][1].method).toBe('GET');
+  });
+
   it('scopes operation and job reads to the current conversation', async () => {
     await comfyApi.operation('operation /+', conversationId);
     await comfyApi.job('job /+', conversationId);
@@ -28,6 +36,13 @@ describe('ComfyUI conversation-scoped client', () => {
       'http://127.0.0.1:33002/api/comfy/operations/operation%20%2F%2B?conversationId=conv%20%2F%2B',
       'http://127.0.0.1:33002/api/comfy/jobs/job%20%2F%2B?conversationId=conv%20%2F%2B',
     ]);
+  });
+
+  it('scopes an operation read to its current parent request as well as the conversation', async () => {
+    await comfyApi.operation('operation /+', conversationId, 'parent /+');
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'http://127.0.0.1:33002/api/comfy/operations/operation%20%2F%2B?conversationId=conv%20%2F%2B&requestId=parent%20%2F%2B'
+    );
   });
 
   it('scopes cancellations and authorization in their request bodies', async () => {
@@ -40,6 +55,17 @@ describe('ComfyUI conversation-scoped client', () => {
       { conversationId },
     ]);
     expect(fetchMock.mock.calls.map(([, options]) => options.method)).toEqual(['POST', 'POST', 'POST']);
+  });
+
+  it('sends the UI capability and exact epoch for continuation control', async () => {
+    vi.stubGlobal('window', { electronAPI: { getMediaServiceUiToken: vi.fn(async () => 'private-ui-token') } });
+    await comfyApi.continuationControl(conversationId, 'resume', 'stop-epoch');
+    expect(fetchMock.mock.calls[0][1].headers['x-openh3-ui-token']).toBe('private-ui-token');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      conversationId,
+      action: 'resume',
+      epoch: 'stop-epoch',
+    });
   });
 
   it('scopes every artifact preview URL to the current conversation', () => {
@@ -62,6 +88,17 @@ describe('ComfyUI conversation-scoped client', () => {
   it('recovers an existing installation without posting a replacement', async () => {
     fetchMock.mockResolvedValueOnce(response({ operations: [operation], jobs: [] }));
     expect(await comfyApi.requestInstall('request-1', conversationId, install)).toEqual(operation);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('does not recover an earlier installation targeting a different directory', async () => {
+    fetchMock.mockResolvedValueOnce(response({ operations: [operation], jobs: [] }));
+    await expect(
+      comfyApi.requestInstall('request-1', conversationId, {
+        ...install,
+        installContext: { checkedAt: 'now', installDirectory: 'E:/Models' },
+      })
+    ).rejects.toThrow('COMFY_INSTALL_REQUEST_ID_CONFLICT');
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 

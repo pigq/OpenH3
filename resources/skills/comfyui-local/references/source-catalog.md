@@ -1,11 +1,11 @@
 # Source catalog and mirror policy
 
-This reference describes source decisions normally owned by the backend planner and downloader. It is not a chat prerequisite for the managed route: use the existing operation or SKILL.md's identity-only request without repeating probes. In SKILL.md's general-tool fallback, use the same policy with available permitted HTTPS tools and retain the evidence in the installation journal. The candidate's upstream repository, immutable revision, filename, license, byte count, and SHA-256 remain the identity record.
+Use this source policy during Agent-led installation, repair and resume. The optional fixed executor performs equivalent checks for its saved plan. General HTTPS/download tools may apply the same identity checks directly. The upstream repository, immutable revision, filename, license, byte count and SHA-256 form the identity record.
 
 ## Preferred lookup order
 
 1. **ModelScope (魔搭)** — look for the same repository or an explicitly documented export. Record the ModelScope repository, revision, file path, and the evidence that it is an exact copy of the upstream artifact.
-2. **A reputable domestic mirror** — for example `hf-mirror.com` or another Hugging Face mirror that preserves the repository and revision path. Treat the mirror as transport only; compare the downloaded bytes and source metadata with upstream. The host must appear in the built-in trusted-host list or be explicitly approved by the product before probing.
+2. **A reputable domestic mirror** — for example `hf-mirror.com` or another Hugging Face mirror that preserves the repository and revision path. Treat the mirror as transport only; compare the downloaded bytes and source metadata with upstream. Managed probes enforce their trusted-host list. General tools may verify other authoritative sources or byte-identical transports under actual runtime permissions; a missing allowlist entry alone is not a permission denial.
 3. **Upstream host** — use the pinned Hugging Face, Git, Python index, or Comfy-Org URL when it is reachable and the first two sources do not provide equivalent evidence.
 
 The backend planner probes the exact immutable candidate URLs before selecting a source and records the per-source results. `openh3_comfy_environment.sources` can expose the same read-only evidence for a specific diagnosis when needed; the chat agent does not call it before every installation. A host page, search result, repository name, or same-size file is not sufficient evidence. Do not send credentials or signed query strings in a report; use a short-lived URL only for the actual approved download and keep the receipt local.
@@ -15,7 +15,7 @@ The backend planner probes the exact immutable candidate URLs before selecting a
 - Model weights, encoders, VAEs, and LoRAs may use ModelScope or a domestic mirror when the fixed revision and SHA-256 match. Keep the upstream identity in the plan even when the selected transport is a mirror.
 - Custom nodes and ComfyUI itself are Git or package artifacts. Use a pinned commit or package version from the appropriate host; never replace a Git repository with a model mirror.
 - Python wheels must match the selected OS, Python, Torch, CUDA/ROCm, and architecture. A faster package index is not evidence of ABI compatibility.
-- Official workflow templates are converted into the fixed API graph shipped in this Skill bundle. Do not download a fresh workflow during generation. Probe and pin a template URL only for a planned bundle update.
+- Reuse a compatible bundled API graph for ordinary generation. Installation, capability repair or compatibility diagnosis may require fetching an authoritative template at a fixed revision. Record its hash/conversion evidence, inspect actual runtime schemas and validate the resulting workflow variant before treating it as usable.
 
 ## Additional image model snapshot (2026-10-22)
 
@@ -28,4 +28,4 @@ For each selected component, the backend planner passes its ordered eligible `tr
 
 ## When no mirror is usable
 
-Try the pinned upstream identity URL next. A missing domestic transport entry is not proof that upstream is unavailable, and one failed mirror does not block a reachable eligible source. If no eligible source remains for a required component, report that exact component and its probe errors; ask only for the smallest needed source decision or a user-provided verified file. Do not silently downgrade the model, change quantization, use a moving `latest` snapshot, or switch to a cloud workflow.
+Try the pinned upstream identity URL next. A missing transport entry or failed probe calls for bounded source research and diagnosis, not a conclusion that the model is unavailable. For the optional managed executor, pass exact candidate file URLs as `sourceOverrides`; that API accepts only `modelscope.cn`, `hf-mirror.com`, and `huggingface.co` and still verifies pinned size/SHA-256. General tools may use an independently verified authoritative source or equivalent transport outside that list, preserving revisions, receipts, actual permissions and license/access requirements. Never bypass a real denial or identity/integrity check, or compete with active/unknown managed work. Only after available permitted routes are exhausted, report the exact component/blocker and ask for information or access that needs the user. Do not silently downgrade the model, change quantization, use a moving `latest` snapshot, or switch to a cloud workflow.

@@ -19,6 +19,8 @@ import { appendPromptToDraft } from '@/renderer/hooks/chat/useSendBoxDraft';
 import CreationTemplates from './components/CreationTemplates';
 import CreationControls from './Creation/CreationControls';
 import { useCreationModels } from './Creation/useCreationModels';
+import { useModelCenterEntry } from './Creation/useModelCenterEntry';
+import type { ModelCenterEntry } from './Creation/modelCenterEntry';
 import ComfyModelCards from './components/ComfyModelCards';
 import {
   comfyFamilyDetails,
@@ -40,6 +42,7 @@ import { useGuidInput } from './hooks/useGuidInput';
 import { useGuidModelSelection } from './hooks/useGuidModelSelection';
 import { useGuidSend } from './hooks/useGuidSend';
 import { useTypewriterPlaceholder } from './hooks/useTypewriterPlaceholder';
+import { useCreativePrompts } from './hooks/useCreativePrompts';
 import { ensureBackendMcpCatalog } from '@/renderer/hooks/mcp/catalog';
 import { resolveGuidAssistantDefaults } from './utils/assistantDefaults';
 import SpeechInputButton from '@/renderer/components/chat/SpeechInputButton';
@@ -48,7 +51,7 @@ import { useOpenFileSelector } from '@/renderer/hooks/file/useOpenFileSelector';
 import { appendSpeechTranscript } from '@/renderer/hooks/system/useSpeechInput';
 import { useLiveTranscriptInsertion } from '@/renderer/hooks/system/useLiveTranscriptInsertion';
 import { useAddEventListener } from '@/renderer/utils/emitter';
-import { ArrowRightUp } from '@icon-park/react';
+import { ArrowRightUp, Refresh } from '@icon-park/react';
 import { Button, ConfigProvider } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -57,6 +60,7 @@ import useSWR from 'swr';
 import styles from './index.module.css';
 
 type GuidNavigationState = {
+  modelCenterEntry?: ModelCenterEntry;
   resetAssistant?: boolean;
   selectedAssistantId?: string;
   prefillPrompt?: string;
@@ -277,6 +281,7 @@ const GuidPage: React.FC = () => {
     // Input state
     input: guidInput.input,
     creationModel: isAiCreationPage ? creation.model : undefined,
+    creationConstraint: creation.selection.modelConstraint,
     creationIntent,
     setInput: guidInput.setInput,
     files: guidInput.files,
@@ -322,7 +327,7 @@ const GuidPage: React.FC = () => {
       setCreationIntent(intent);
       guidInput.setInput(
         t(`guid.comfy.prompts.${intent.intent}`, {
-          family: comfyFamilyDetails(intent.family).name,
+          family: comfyFamilyDetails(intent.family, intent).name,
           profile: intent.profileId ?? '',
         })
       );
@@ -372,6 +377,7 @@ const GuidPage: React.FC = () => {
     const candidates = new Set([selectedId, `builtin-${strippedId}`, strippedId]);
     return agentSelection.assistants.find((item) => candidates.has(item.id));
   }, [agentSelection.assistants, selectedAssistantId, agentSelection.selectedAssistantId]);
+  const creativePrompts = useCreativePrompts(resetAssistantRequested ? location.key : undefined);
   const selectedAssistantPrompts = useMemo(() => {
     if (!selectedAssistantId) return [];
     const resolvedPrompts =
@@ -387,8 +393,13 @@ const GuidPage: React.FC = () => {
       return resolvedPrompts;
     }
 
-    return [t('guid.defaultPrompts.understand'), t('guid.defaultPrompts.cleanup'), t('guid.defaultPrompts.create')];
-  }, [localeKey, selectedAssistantDetail, selectedAssistantRecord, selectedAssistantId, t]);
+    return [];
+  }, [localeKey, selectedAssistantDetail, selectedAssistantRecord, selectedAssistantId]);
+  const promptSuggestions = selectedAssistantPrompts.length
+    ? selectedAssistantPrompts
+    : selectedAssistantId
+      ? creativePrompts.keys.map((key) => t(`guid.defaultPrompts.${key}`))
+      : [];
 
   // Sync disabledBuiltinSkills + enabledSkills from assistant detail defaults.
   useEffect(() => {
@@ -403,38 +414,44 @@ const GuidPage: React.FC = () => {
     setGuidEnabledSkills(resolvedDefaults.skillIds);
   }, [selectedAssistantDetail, selectedAssistantId]);
 
+  const assistantDefaultsSignature =
+    selectedAssistantId && selectedAssistantDetail
+      ? JSON.stringify({
+          assistantId: selectedAssistantId,
+          backend: agentSelection.selectedAssistantBackend,
+          defaults: selectedAssistantDetail.defaults,
+          availableMcpIds: availableMcpServers.filter((server) => server.enabled).map((server) => server.id),
+          preferences: {
+            last_model_id: selectedAssistantDetail.preferences.last_model_id,
+            last_permission_value: selectedAssistantDetail.preferences.last_permission_value,
+            last_thought_level_value: selectedAssistantDetail.preferences.last_thought_level_value,
+            last_mcp_ids: selectedAssistantDetail.preferences.last_mcp_ids,
+          },
+          availableModels: {
+            acp: agentSelection.currentAcpCachedModelInfo?.available_models.map((model) => model.id) ?? [],
+            aionrs: modelSelection.modelList.map((provider) => ({
+              id: provider.id,
+              models: provider.models,
+            })),
+          },
+          availableModes: agentSelection.currentAgentModeOptions.map((mode) => mode.value),
+          availableThoughtLevels: agentSelection.currentThoughtLevelOption?.options.map((option) => option.value) ?? [],
+        })
+      : null;
+  const [appliedAssistantDefaultsKey, setAppliedAssistantDefaultsKey] = useState<string | null>(null);
   const appliedAssistantDefaultsKeyRef = useRef<string | null>(null);
   const manualModelSelectionAssistantRef = useRef<string | null>(null);
   const manualThoughtLevelSelectionAssistantRef = useRef<string | null>(null);
   useEffect(() => {
     if (!selectedAssistantId || !selectedAssistantDetail) {
       appliedAssistantDefaultsKeyRef.current = null;
+      setAppliedAssistantDefaultsKey(null);
       manualModelSelectionAssistantRef.current = null;
       manualThoughtLevelSelectionAssistantRef.current = null;
       return;
     }
 
-    const signature = JSON.stringify({
-      assistantId: selectedAssistantId,
-      backend: agentSelection.selectedAssistantBackend,
-      defaults: selectedAssistantDetail.defaults,
-      availableMcpIds: availableMcpServers.filter((server) => server.enabled).map((server) => server.id),
-      preferences: {
-        last_model_id: selectedAssistantDetail.preferences.last_model_id,
-        last_permission_value: selectedAssistantDetail.preferences.last_permission_value,
-        last_thought_level_value: selectedAssistantDetail.preferences.last_thought_level_value,
-        last_mcp_ids: selectedAssistantDetail.preferences.last_mcp_ids,
-      },
-      availableModels: {
-        acp: agentSelection.currentAcpCachedModelInfo?.available_models.map((model) => model.id) ?? [],
-        aionrs: modelSelection.modelList.map((provider) => ({
-          id: provider.id,
-          models: provider.models,
-        })),
-      },
-      availableModes: agentSelection.currentAgentModeOptions.map((mode) => mode.value),
-      availableThoughtLevels: agentSelection.currentThoughtLevelOption?.options.map((option) => option.value) ?? [],
-    });
+    const signature = assistantDefaultsSignature;
     if (appliedAssistantDefaultsKeyRef.current === signature) {
       return;
     }
@@ -501,12 +518,14 @@ const GuidPage: React.FC = () => {
         }
       }
       setGuidSelectedMcpServerIds(resolvedDefaults.mcpIds);
+      if (appliedAssistantDefaultsKeyRef.current === signature) setAppliedAssistantDefaultsKey(signature);
     };
 
     void applyAssistantDefaults().catch((error) => {
       console.error('[GuidPage] Failed to apply assistant defaults:', error);
     });
   }, [
+    assistantDefaultsSignature,
     availableMcpServers,
     agentSelection.currentAcpCachedModelInfo?.available_models,
     agentSelection.currentAgentModeOptions,
@@ -635,6 +654,54 @@ const GuidPage: React.FC = () => {
     navigate(`${location.pathname}${location.search}${location.hash}`, { replace: true, state: null });
   }, [resetAssistantRequested, preselectAssistantId, location.pathname, location.search, location.hash, navigate]);
 
+  const centerEntry = navState?.modelCenterEntry;
+  const centerIntent = centerEntry?.action === 'install' ? centerEntry.intent : undefined;
+  const centerPrompt = centerIntent
+    ? t(`guid.comfy.prompts.${centerIntent.intent}`, {
+        family: comfyFamilyDetails(centerIntent.family, centerIntent).name,
+        profile: centerIntent.profileId ?? '',
+      }) +
+      (centerIntent.installContext
+        ? '\n\n' +
+          t('guid.localModels.installContext', {
+            directory: centerIntent.installContext.installDirectory,
+            checkedAt: centerIntent.installContext.checkedAt,
+            candidate: centerIntent.installContext.candidateId ?? t('guid.localModels.automaticCandidate'),
+          })
+        : '')
+    : '';
+  useModelCenterEntry({
+    entry: centerEntry,
+    intent: creationIntent,
+    input: guidInput.input,
+    prompt: centerPrompt,
+    ready:
+      !send.isButtonDisabled &&
+      assistantDefaultsSignature !== null &&
+      appliedAssistantDefaultsKey === assistantDefaultsSignature &&
+      (agentSelection.selectedAssistantBackend !== 'aionrs' || Boolean(modelSelection.current_model)),
+    setIntent: setCreationIntent,
+    setInput: guidInput.setInput,
+    resetAttachments: () => {
+      guidInput.setFiles([]);
+      guidInput.setDir('');
+      setGuidTemplateSnapshot(undefined);
+    },
+    selectProfile: (profileId, kind) =>
+      creation.setSelection((prior) => ({
+        ...prior,
+        kind,
+        source: 'local',
+        modelIds: { ...prior.modelIds, [`local-${kind}`]: profileId },
+        modelConstraint: undefined,
+      })),
+    consume: () => {
+      const { modelCenterEntry: _entry, ...remaining } = navState ?? {};
+      navigate(`${location.pathname}${location.search}`, { replace: true, state: remaining });
+    },
+    send: send.sendMessageHandler,
+  });
+
   // Agents that use configured model providers instead of ACP probe-based models.
   // Only aionrs now — Gemini runs as a regular ACP backend with ACP-cached models.
   const PROVIDER_BASED_AGENTS = new Set(['aionrs']);
@@ -668,22 +735,25 @@ const GuidPage: React.FC = () => {
   const actionRowNode = (
     <GuidActionRow
       creationControls={
-        isAiCreationPage ? (
+        isAiCreationPage && creationIntent ? (
+          <div className='flex items-center flex-wrap gap-8px text-13px' data-testid='creation-install-target'>
+            <span className='text-t-secondary'>{t(`guid.comfy.actions.${creationIntent.intent}`)}</span>
+            <strong>{comfyFamilyDetails(creationIntent.family, creationIntent).name}</strong>
+            <Button size='mini' type='text' onClick={() => handleInputChange('')}>
+              {t('common.cancel')}
+            </Button>
+          </div>
+        ) : isAiCreationPage ? (
           <CreationControls
             selection={creation.selection}
             models={creation.models}
             model={creation.model}
+            inventoryError={creation.inventoryError}
             onChange={(update) => {
               setCreationIntent(undefined);
               creation.setSelection(update);
             }}
-            onManageLocal={(model) =>
-              handleComfyAction({
-                family: model.family ?? (model.kind === 'video' ? 'h3' : 'qwen-edit'),
-                intent: model.profileId ? (model.available ? 'install-other' : 'repair') : 'install',
-                profileId: model.available ? undefined : model.profileId,
-              })
-            }
+            onManageLocal={(model) => navigate(`/local-models?kind=${model.kind}`)}
           />
         ) : undefined
       }
@@ -801,9 +871,11 @@ const GuidPage: React.FC = () => {
               <ComfyModelCards
                 catalog={content.current}
                 profiles={creation.profiles}
+                workflowPreparations={creation.workflowPreparations}
                 selectedProfileId={creation.selection.source === 'local' ? creation.model.profileId : undefined}
                 loading={creation.isLoading}
                 unavailable={!!creation.error}
+                incomplete={Boolean(creation.inventoryError)}
                 onAction={handleComfyAction}
                 onUseProfile={(profile) => {
                   setCreationIntent(undefined);
@@ -835,28 +907,29 @@ const GuidPage: React.FC = () => {
                 }}
               />
             </>
-          ) : selectedAssistantPrompts.length > 0 ? (
-            <div className='mt-18px w-full animate-fade-in ps-20px'>
-              <div className={`${styles.assistantPromptHint} mb-10px text-start`}>
-                {t('guid.promptExamplesHint', { defaultValue: 'Try these example prompts:' })}
+          ) : promptSuggestions.length > 0 ? (
+            <div className={styles.promptExamples}>
+              <div className={styles.promptHeader}>
+                <span className={styles.assistantPromptHint}>{t('guid.promptExamplesHint')}</span>
+                {!selectedAssistantPrompts.length && (
+                  <Button type='text' size='mini' icon={<Refresh size={13} />} onClick={creativePrompts.refresh}>
+                    {t('guid.refreshPrompts')}
+                  </Button>
+                )}
               </div>
-              <div className='flex flex-col gap-9px'>
-                {selectedAssistantPrompts.map((prompt, index) => (
+              <div className={styles.promptGrid}>
+                {promptSuggestions.map((prompt, index) => (
                   <Button
                     key={`${index}-${prompt}`}
                     type='text'
-                    className='group !h-auto !w-full !border-none !bg-transparent !px-0 !py-6px !text-start !text-12.5px !text-t-secondary !whitespace-normal !break-words transition-colors hover:!bg-transparent hover:!text-t-primary'
+                    className={`${styles.promptSuggestion} !whitespace-normal !break-words`}
                     onClick={() => {
                       guidInput.setInput(prompt);
                       guidInput.handleTextareaFocus();
                     }}
                   >
                     <span>{prompt}</span>
-                    <ArrowRightUp
-                      theme='outline'
-                      size='13'
-                      className='ms-6px inline-flex flex-shrink-0 align-[-1px] text-t-primary opacity-0 transition-opacity group-hover:opacity-100'
-                    />
+                    <ArrowRightUp theme='outline' size='13' className={styles.promptArrow} />
                   </Button>
                 ))}
               </div>

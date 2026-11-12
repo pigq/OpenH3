@@ -13,6 +13,36 @@ use crate::protocol::send_error::classify_upstream_detail;
 /// event has escaped to the engine. Never rerun an agent turn or its tools.
 pub(crate) struct RecoveringProvider(pub(crate) Arc<dyn LlmProvider>);
 
+/// Apply the resolved provider's capability contract to every call, including
+/// the embedded engine's compaction requests. Unsupported is omitted, not an
+/// explicit disabled field that an OpenAI-compatible gateway may reject.
+struct RequestCompatibilityProvider {
+    inner: Arc<dyn LlmProvider>,
+    supports_thinking: bool,
+}
+
+#[async_trait::async_trait]
+impl LlmProvider for RequestCompatibilityProvider {
+    async fn stream(&self, request: &LlmRequest) -> Result<mpsc::Receiver<LlmEvent>, ProviderError> {
+        if self.supports_thinking || request.thinking.is_none() {
+            return self.inner.stream(request).await;
+        }
+        let mut compatible = request.clone();
+        compatible.thinking = None;
+        tracing::info!(model = %request.model, "Omitted thinking configuration unsupported by resolved provider capabilities");
+        self.inner.stream(&compatible).await
+    }
+}
+
+impl RecoveringProvider {
+    pub(crate) fn from_config(config: &aion_config::config::Config) -> Self {
+        Self(Arc::new(RequestCompatibilityProvider {
+            inner: aion_providers::create_provider(config),
+            supports_thinking: config.compat.supports_thinking(),
+        }))
+    }
+}
+
 fn retry_empty_stream(detail: &str) -> bool {
     let lower = detail.to_ascii_lowercase();
     classify_upstream_detail(detail).code() == Some(AgentErrorCode::UserLlmProviderGatewayError)

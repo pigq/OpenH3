@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { prepareComfyWorkflowVariants } from '../packages/desktop/src/process/services/media/comfy/routing/preparation';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Worker } from 'node:worker_threads';
@@ -8,7 +9,9 @@ import { H3SetupTask } from '../packages/desktop/src/process/services/runtime/H3
 import { inspectCreationInventory } from '../packages/desktop/src/process/services/media/creation/inventory';
 import { CreationOperations } from '../packages/desktop/src/process/services/media/creation/CreationOperations';
 import { createComfyApprovalResolver } from '../packages/desktop/src/process/services/media/creation/installApproval';
+import { ComfyInstallContinuation } from '../packages/desktop/src/process/services/media/creation/installContinuation';
 import { ComfyService } from '../packages/desktop/src/process/services/media/comfy/ComfyService';
+import { ComfyPromptObserver } from '../packages/desktop/src/process/services/media/creation/ComfyPromptObserver';
 import { ComfyWorkflowEngine } from '../packages/desktop/src/process/services/media/comfy/workflowEngine';
 import {
   assertComfyInstallPlan,
@@ -20,6 +23,11 @@ import { handleCloudVideoRoute } from '../packages/desktop/src/process/services/
 import { defaultComfyInstallPlanner } from '../packages/desktop/src/process/services/media/comfy/planning/installPlanner';
 import { H3_PORTABLE_INSTALL_EVIDENCE } from '../packages/desktop/src/process/services/media/comfy/planning/legacyInstallPlan';
 import { createComfyProfileDiscovery } from '../packages/desktop/src/process/services/media/comfy/discovery';
+import { applicationComfyRoots } from '../packages/desktop/src/process/services/media/comfy/discovery/applicationPaths';
+import {
+  H3ArtifactArchive,
+  serveH3ArtifactFile,
+} from '../packages/desktop/src/process/services/media/creation/h3ArtifactArchive';
 import {
   importLegacyH3,
   startLegacyH3Runtime,
@@ -106,6 +114,10 @@ const h3Runtime = new H3RuntimeManager(h3Client, {
     pythonDevRoot: process.env.AIONUI_PYTHON_DEV_ROOT,
   },
 });
+const h3Artifacts = new H3ArtifactArchive({
+  directory: path.join(dataDir, 'h3-artifacts'),
+  outputRoots: () => [path.join(h3Runtime.installStatus().runtimeRoot, 'ComfyUI', 'output')],
+});
 const h3Runner = new H3JobRunner(
   h3Store,
   {
@@ -122,7 +134,15 @@ const h3Runner = new H3JobRunner(
     confirmStopped: (promptId, requireKnown) => h3Client.confirmStopped(promptId, requireKnown),
     confirmIdle: () => h3Client.confirmIdle(),
   },
-  new H3ReferencePreflight()
+  new H3ReferencePreflight(),
+  undefined,
+  async (id, result) => {
+    await Promise.all(
+      result.artifacts.map((artifact, index) =>
+        h3Artifacts.resolve(id, index, artifact, () => h3Client.fetchArtifact(artifact, AbortSignal.timeout(60_000)))
+      )
+    );
+  }
 );
 const h3Setup = new H3SetupTask(
   path.join(dataDir, 'h3-setup.json'),
@@ -233,19 +253,25 @@ const comfyEngine = new ComfyWorkflowEngine({
 });
 let approvalBackendPort = Number(process.env.OPENH3_MEDIA_BACKEND_PORT);
 const comfyService = new ComfyService({
+  prepareWorkflows: (profile, profiles) =>
+    prepareComfyWorkflowVariants(profile, path.join(dataDir, 'comfy-workflows'), undefined, profiles),
   filename: comfyManifest,
   engine: comfyEngine,
   preparePlan: defaultComfyInstallPlanner(dataDir, {
     resourcesRoot: process.env.OPENH3_RESOURCES_ROOT,
+    applicationRoots: () => applicationComfyRoots(dataDir, process.env.OPENH3_RESOURCES_ROOT),
     roots: () => [h3Runtime.installStatus().bundleRoot, h3Runtime.installStatus().runtimeRoot, dataDir],
     h3BundleRoot: () => h3Runtime.installStatus().bundleRoot,
+    endpoints: () => [h3Client.getBaseUrl()],
   }),
   discover: createComfyProfileDiscovery({
     cacheFile: path.join(dataDir, 'comfy-discovery.json'),
     workflowDirectory: path.join(dataDir, 'comfy-discovered-workflows'),
     resourcesRoot: process.env.OPENH3_RESOURCES_ROOT,
+    applicationRoots: () => applicationComfyRoots(dataDir, process.env.OPENH3_RESOURCES_ROOT),
     roots: () => [h3Runtime.installStatus().bundleRoot, h3Runtime.installStatus().runtimeRoot, dataDir],
-    legacyProfiles: () => importLegacyH3(h3Runtime.installStatus(), h3Client.getBaseUrl()),
+    legacyProfiles: () =>
+      importLegacyH3(h3Runtime.installStatus(), h3Client.getBaseUrl(), path.join(dataDir, 'comfy-legacy-workflows')),
     endpoints: () => [h3Client.getBaseUrl()],
   }),
   checkPlan: assertComfyInstallPlan,
@@ -306,13 +332,43 @@ const comfyService = new ComfyService({
   },
 });
 // Discovery preserves existing files; only an explicit validation request starts ComfyUI.
-for (const profile of importLegacyH3(h3Runtime.installStatus(), h3Client.getBaseUrl())) {
+for (const profile of importLegacyH3(
+  h3Runtime.installStatus(),
+  h3Client.getBaseUrl(),
+  path.join(dataDir, 'comfy-legacy-workflows')
+)) {
   if (!comfyService.profiles().some((existing) => existing.id === profile.id)) comfyService.register(profile);
 }
 comfyService.recoverJobs();
+const comfyObserver = new ComfyPromptObserver({
+  filename: path.join(dataDir, 'comfy-observed-prompts.json'),
+  outputRoot: path.join(dataDir, 'comfy-observed-output'),
+});
+const comfyObserverTimer = setInterval(() => {
+  const finish = updateGate.enter();
+  if (finish)
+    void comfyObserver
+      .tick()
+      .catch(() => console.warn('[comfy] COMFY_OBSERVER_UNAVAILABLE'))
+      .finally(finish);
+}, 1500);
+comfyObserverTimer.unref();
+void comfyObserver.tick().catch(() => console.warn('[comfy] COMFY_OBSERVER_UNAVAILABLE'));
 void comfyService.refreshProfiles().catch((error: unknown) => {
   console.warn('[comfy] startup discovery failed', error instanceof Error ? error.message : String(error));
 });
+const comfyContinuation = new ComfyInstallContinuation({
+  filename: path.join(dataDir, 'comfy-agent-continuations.json'),
+  backendPort: () => approvalBackendPort,
+  operations: () => comfyService.installationUpdates(),
+  validations: () => comfyService.installationValidationUpdates(),
+  captureSelection: (requestId, conversationId) => comfyService.captureContinuationSelection(requestId, conversationId),
+});
+const comfyContinuationTimer = setInterval(() => {
+  void comfyContinuation.pump().catch(() => console.warn('[comfy] COMFY_CONTINUATION_UNAVAILABLE'));
+}, 3000);
+comfyContinuationTimer.unref();
+
 function pumpH3Jobs(): void {
   if (h3Dispatching || h3Runner.blocked()) return;
   if (comfyService.runtimeBusy(path.join(h3Runtime.installStatus().runtimeRoot, 'ComfyUI'), h3Client.getBaseUrl()))
@@ -492,6 +548,8 @@ const server = http.createServer(async (req, res) => {
     if (
       await handleComfyRoute(req, res, url, {
         service: comfyService,
+        observer: comfyObserver,
+        continuation: comfyContinuation,
         uiToken: process.env.AIONUI_MEDIA_UI_TOKEN ?? '',
         setBackendPort: (backendPort) => {
           approvalBackendPort = backendPort;
@@ -538,7 +596,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/api/h3/models') {
       const inventory = inspectCreationInventory(h3Runtime.installStatus(), false);
-      inventory.profiles = comfyService.profiles();
+      inventory.profiles = await comfyService.refreshProfiles();
       try {
         await h3Client.systemStats();
         inventory.h3.runtimeRunning = true;
@@ -760,23 +818,15 @@ const server = http.createServer(async (req, res) => {
       const index = Number(artifactMatch[2]);
       const artifact = job?.artifacts[index];
       if (!job || job.status !== 'succeeded' || !artifact) return json(res, 404, { error: 'H3_ARTIFACT_NOT_FOUND' });
-      const upstream = await h3Client.fetchArtifact(artifact);
-      res.writeHead(200, {
-        'content-type': artifact.mimeType,
-        'cache-control': 'private, max-age=3600',
-      });
-      if (!upstream.body) return res.end();
-      const reader = upstream.body.getReader();
       try {
-        while (true) {
-          const chunk = await reader.read();
-          if (chunk.done) break;
-          if (!res.write(Buffer.from(chunk.value))) await new Promise<void>((resolve) => res.once('drain', resolve));
-        }
-      } finally {
-        await reader.cancel().catch(() => undefined);
+        const filename = await h3Artifacts.resolve(job.id, index, artifact, () =>
+          h3Client.fetchArtifact(artifact, AbortSignal.timeout(30_000))
+        );
+        serveH3ArtifactFile(req, res, filename, artifact.mimeType);
+      } catch {
+        console.warn('[h3] historical artifact unavailable', { jobId: job.id, artifactIndex: index });
+        json(res, 404, { error: 'H3_ARTIFACT_UNAVAILABLE' });
       }
-      res.end();
       return;
     }
     json(res, 404, { error: 'NOT_FOUND' });
@@ -795,6 +845,10 @@ const server = http.createServer(async (req, res) => {
 });
 server.listen(port, '127.0.0.1', () => console.log(`[media-service] listening on http://127.0.0.1:${port}`));
 process.on('SIGINT', () => {
+  clearInterval(comfyObserverTimer);
+  comfyObserver.close();
+  clearInterval(comfyContinuationTimer);
+  comfyContinuation.close();
   clearInterval(cloudVideoTimer);
   cloudVideoService.close();
   void comfyService.close();
@@ -802,6 +856,10 @@ process.on('SIGINT', () => {
   server.close();
 });
 process.on('SIGTERM', () => {
+  clearInterval(comfyObserverTimer);
+  comfyObserver.close();
+  clearInterval(comfyContinuationTimer);
+  comfyContinuation.close();
   clearInterval(cloudVideoTimer);
   cloudVideoService.close();
   void comfyService.close();

@@ -15,11 +15,15 @@ import {
   MarkdownTd,
   SANITIZED_HTML_REHYPE_PLUGINS,
 } from '@/renderer/components/Markdown/markdownComponents';
-import { resolveLocalFileLinkReference } from '@/renderer/components/Markdown/markdownUtils';
+import {
+  resolveLocalFileLinkReference,
+  resolveLocalFileLinkPath,
+  safeDecodeURIComponent,
+} from '@/renderer/components/Markdown/markdownUtils';
 import { useTextSelection } from '@/renderer/hooks/ui/useTextSelection';
 import 'katex/dist/katex.min.css';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import MarkdownEditor from '../editors/MarkdownEditor';
 import SelectionToolbar from '../renderers/SelectionToolbar';
 import { useContainerScroll, useContainerScrollTarget } from '../../hooks/useScrollSyncHelpers';
@@ -40,12 +44,12 @@ interface MarkdownPreviewProps {
 
 const isDataOrRemoteUrl = (value?: string): boolean => {
   if (!value) return false;
-  return /^(https?:|data:|blob:|file:)/i.test(value);
+  return /^(https?:|data:|blob:)/i.test(value);
 };
 
 const isAbsoluteLocalPath = (value?: string): boolean => {
   if (!value) return false;
-  return /^([a-zA-Z]:\\|\\\\|\/)/.test(value);
+  return /^([a-zA-Z]:[\\/]|\\\\|\/)/.test(value);
 };
 
 // Join a project-relative directory with a relative image src, resolving `.`/`..`
@@ -138,7 +142,7 @@ const MarkdownImage: React.FC<MarkdownImageProps> = ({ src, alt, baseDir, worksp
         return;
       }
 
-      const cleanedSrc = src.replace(/\\/g, '/');
+      const cleanedSrc = (resolveLocalFileLinkPath(src) || safeDecodeURIComponent(src)).replace(/\\/g, '/');
 
       // Project doc: resolve the image as a sibling project ref and read it via
       // /api/fs/content (backend does pe_id → absolute). The renderer never builds
@@ -229,10 +233,6 @@ const rewriteExternalMediaUrls = (markdown: string): string => {
   });
 };
 
-const normalizeLocalFileSchemeLinks = (markdown: string): string => {
-  return markdown.replace(/file:\/\//gi, '');
-};
-
 // Plain heading overrides that apply consistent spacing/size classes and always
 // render the current text. Defining them once (memoized at module scope) keeps a
 // stable component identity across re-renders so React does not remount headings.
@@ -292,10 +292,7 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
   const viewMode = externalViewMode ?? 'preview';
 
   // 预览源：转换 LaTeX 分隔符并重写外部媒体 URL / Preview source: convert LaTeX delimiters and rewrite external media URLs
-  const previewSource = useMemo(
-    () => convertLatexDelimiters(normalizeLocalFileSchemeLinks(rewriteExternalMediaUrls(content))),
-    [content]
-  );
+  const previewSource = useMemo(() => convertLatexDelimiters(rewriteExternalMediaUrls(content)), [content]);
 
   // 监听文本选择 / Monitor text selection
   const { selectedText, selectedUrl, selectionPosition, clearSelection } = useTextSelection(containerRef);
@@ -319,7 +316,11 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
         <CodeBlock {...(props as Parameters<typeof CodeBlock>[0])} diagramPanZoom />
       ),
       a({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
-        const localFileReference = resolveLocalFileLinkReference(typeof href === 'string' ? href : '');
+        const localFileReference = resolveLocalFileLinkReference(
+          typeof href === 'string' ? href : '',
+          undefined,
+          baseDir ?? workspace
+        );
         if (localFileReference) {
           return (
             <LocalFileLink reference={localFileReference} onOpen={handleLocalFileLink}>
@@ -372,6 +373,9 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
               remarkPlugins={MARKDOWN_REMARK_PLUGINS}
               rehypePlugins={SANITIZED_HTML_REHYPE_PLUGINS}
               components={components}
+              urlTransform={(url) =>
+                resolveLocalFileLinkReference(url, undefined, baseDir ?? workspace) ? url : defaultUrlTransform(url)
+              }
             >
               {previewSource}
             </ReactMarkdown>

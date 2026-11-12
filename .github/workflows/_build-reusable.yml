@@ -108,6 +108,8 @@ jobs:
 
   build:
     name: Build ${{ matrix.platform }}
+    env:
+      OPENH3_DISTRIBUTION_DEFAULTS_JSON: ${{ secrets.OPENH3_DISTRIBUTION_DEFAULTS_JSON }}
     runs-on: ${{ matrix.os }}
     needs: [code-quality, linux-core]
     if: ${{ always() && (inputs.skip_code_quality || needs.code-quality.result == 'success') && (needs.linux-core.result == 'success' || needs.linux-core.result == 'skipped') }}

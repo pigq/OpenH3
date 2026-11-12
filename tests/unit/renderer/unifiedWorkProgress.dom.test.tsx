@@ -6,6 +6,25 @@ import type { TMessage } from '@/common/chat/chatLib';
 import type { ComfyGenerationJob, ComfyOperation } from '@/common/chat/document/creation/comfy';
 import { createH3Job, type H3Job } from '@/common/chat/document/h3Job';
 import type { CreationOperation } from '@/common/chat/document/creation/operation';
+import type { CloudVideoJob } from '@/common/chat/document/creation/cloudVideo';
+
+it('keeps cloud generation active after the agent submission turn ends', () => {
+  const job = { id: '12345678-1234-1234-1234-123456789abc', model: 'H3', status: 'running' } as CloudVideoJob;
+  const snapshot = projectWorkProgress(
+    [],
+    { isProcessing: false, hydrated: true, pendingConfirmations: 0 },
+    [],
+    [],
+    [],
+    [],
+    undefined,
+    { jobs: [job], unavailable: [] }
+  );
+  expect(snapshot.tasks).toContainEqual(
+    expect.objectContaining({ id: 'cloud:' + job.id, kind: 'generation', status: 'running' })
+  );
+  expect(snapshot.isProcessing).toBe(false);
+});
 
 const mocks = vi.hoisted(() => ({
   activity: vi.fn(),
@@ -498,6 +517,95 @@ describe('unified work projection', () => {
 });
 
 describe('work progress right-panel integration', () => {
+  it('follows real Agent runtime activity after a failed attempt and restores the failure when the Agent stops', async () => {
+    setCurrentConversation('c1');
+    const messages = [
+      tool('failed-attempt', 'Bash', 'error', { description: 'Validate output', error: 'Dependency missing' }),
+    ];
+    const cache = new Map();
+    const content = () => (
+      <SWRConfig value={{ provider: () => cache, dedupingInterval: 0 }}>
+        <MessageListProvider value={messages}>
+          <WorkProgressBridge conversationId='c1' />
+        </MessageListProvider>
+        <ConversationWorkProgress conversationId='c1' />
+      </SWRConfig>
+    );
+    const view = render(content());
+    await waitFor(() => expect(screen.getByRole('status')).toHaveAttribute('data-status', 'failed'));
+    const failedRow = document.querySelector('[data-work-task="background"]');
+    expect(failedRow).toHaveAttribute('data-status', 'failed');
+    mocks.runtime.isProcessing = true;
+    view.rerender(content());
+    await waitFor(() => expect(screen.getByRole('status')).toHaveAttribute('data-status', 'running'));
+    expect(failedRow).toHaveAttribute('data-status', 'failed');
+    expect(screen.getByText('Dependency missing')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'conversation.workProgress.prepareResume' })).not.toBeInTheDocument();
+    mocks.runtime.view.pendingConfirmations = 1;
+    view.rerender(content());
+    await waitFor(() => expect(screen.getByRole('status')).toHaveAttribute('data-status', 'waiting'));
+    expect(screen.getByText('conversation.workProgress.waitingHint')).toBeInTheDocument();
+    mocks.runtime.isProcessing = false;
+    mocks.runtime.view.pendingConfirmations = 0;
+    view.rerender(content());
+    await waitFor(() => expect(screen.getByRole('status')).toHaveAttribute('data-status', 'failed'));
+    expect(screen.getByText('Dependency missing')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'conversation.workProgress.prepareResume' })).toBeInTheDocument();
+  });
+
+  it('keeps the overview running for a live detached task alongside an earlier failed workflow child', () => {
+    const snapshot = projectWorkProgress(
+      [
+        {
+          id: 'workflow-history',
+          conversation_id: 'c1',
+          type: 'tool_group',
+          content: [
+            {
+              call_id: 'workflow:failed',
+              name: 'Inspect output',
+              description: 'Earlier attempt failed',
+              status: 'Error',
+              render_output_as_markdown: false,
+            },
+          ],
+        },
+        tool('detached-process', 'Bash', 'running', { args: { run_in_background: true } }),
+      ],
+      runtime
+    );
+    publishWorkProgress('c1', snapshot);
+    render(<ConversationWorkProgress conversationId='c1' />);
+    expect(snapshot.isProcessing).toBe(false);
+    expect(screen.getByRole('status')).toHaveAttribute('data-status', 'running');
+    expect(document.querySelector('[data-work-task="workflow"]')).toHaveAttribute('data-status', 'failed');
+    expect(document.querySelector('[data-work-task="background"]')).toHaveAttribute('data-status', 'running');
+    const stopped = structuredClone(snapshot);
+    stopped.tasks[1].status = 'cancelled';
+    act(() => publishWorkProgress('c1', stopped));
+    expect(screen.getByRole('status')).toHaveAttribute('data-status', 'failed');
+    expect(document.querySelector('[data-work-task="background"]')).toHaveAttribute('data-status', 'cancelled');
+  });
+
+  it.each(['cancelled', 'waiting', 'interrupted', 'pending', 'completed'] as const)(
+    'preserves idle %s state and respects actual runtime work without rewriting the task',
+    (status) => {
+      const snapshot = {
+        tasks: [{ id: 'task', title: 'Existing task', kind: 'task' as const, status }],
+        isProcessing: false,
+        pendingConfirmations: 0,
+      };
+      publishWorkProgress('c1', snapshot);
+      render(<ConversationWorkProgress conversationId='c1' />);
+      expect(screen.getByRole('status')).toHaveAttribute('data-status', status);
+      act(() => publishWorkProgress('c1', { ...snapshot, isProcessing: true }));
+      expect(screen.getByRole('status')).toHaveAttribute('data-status', 'running');
+      expect(document.querySelector('[data-work-task="task"]')).toHaveAttribute('data-status', status);
+      act(() => publishWorkProgress('c1', snapshot));
+      expect(screen.getByRole('status')).toHaveAttribute('data-status', status);
+    }
+  );
+
   it('continues tracking a job submitted automatically after model installation without a new tool message', async () => {
     setCurrentConversation('c1');
     const installing: CreationOperation = {
@@ -745,7 +853,70 @@ describe('work progress right-panel integration', () => {
       </SWRConfig>
     );
     await waitFor(() => expect(screen.getByText('conversation.workProgress.detecting')).toBeInTheDocument());
-    expect(screen.getByText('qwen-edit')).toBeInTheDocument();
     expect(screen.queryByText('private-family')).not.toBeInTheDocument();
   });
+});
+
+it('does not count a preparation and its created operation twice', () => {
+  const preparation = {
+    requestId: 'r1',
+    conversationId: 'c1',
+    family: 'qwen-edit' as const,
+    intent: 'install' as const,
+    status: 'detecting' as const,
+    updatedAt: 'now',
+  };
+  const prepared = projectWorkProgress([], runtime, [], [], [], [preparation]);
+  const active = projectWorkProgress([], runtime, [operation('running')], [], [], [preparation]);
+  expect(prepared.tasks).toHaveLength(1);
+  expect(active.tasks).toHaveLength(1);
+  expect(active.tasks[0]).toMatchObject({ id: operationId, kind: 'install', status: 'running' });
+});
+
+it('keeps independent generation and installation work visible together', () => {
+  const installed = {
+    ...operation('completed'),
+    installRequest: { action: 'request' as const, family: 'qwen-edit' as const, intent: 'install' as const },
+  };
+  const snapshot = projectWorkProgress([], runtime, [installed], [job('running')]);
+  expect(snapshot.tasks).toHaveLength(2);
+  expect(snapshot.tasks).toContainEqual(expect.objectContaining({ id: jobId, kind: 'generation', status: 'running' }));
+});
+
+it('excludes an explicitly recovered failure from progress once its successful retry is available', () => {
+  const failed = { ...job('failed'), id: operationId, recoveredBy: jobId, error: 'COMFY_PROFILE_CHANGED' };
+  const snapshot = projectWorkProgress([], runtime, [], [failed, job()]);
+  expect(snapshot.tasks).toHaveLength(1);
+  expect(snapshot.tasks[0]).toMatchObject({ id: jobId, status: 'completed' });
+  publishWorkProgress('c1', snapshot);
+  render(<ConversationWorkProgress conversationId='c1' />);
+  expect(screen.getByRole('status')).toHaveTextContent('conversation.workProgress.statuses.completed');
+  expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '1');
+  expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuemax', '1');
+});
+
+it.each(['missing', 'failed', 'running', 'uncertain'])(
+  'preserves a recovered failure when the referenced success is %s',
+  (state) => {
+    const failed = { ...job('failed'), id: operationId, recoveredBy: jobId };
+    const successor =
+      state === 'missing'
+        ? []
+        : [
+            {
+              ...job(state === 'failed' ? 'failed' : state === 'running' ? 'running' : 'succeeded'),
+              submissionUncertain: state === 'uncertain',
+            },
+          ];
+    const snapshot = projectWorkProgress([], runtime, [], [failed, ...successor]);
+    expect(snapshot.tasks).toContainEqual(expect.objectContaining({ id: operationId, status: 'failed' }));
+  }
+);
+
+it('preserves an independent failure alongside an explicitly recovered failure', () => {
+  const failed = { ...job('failed'), id: operationId, recoveredBy: jobId };
+  const independent = { ...job('failed'), id: 'independent', error: 'different user task' };
+  const snapshot = projectWorkProgress([], runtime, [], [failed, job(), independent]);
+  expect(snapshot.tasks).toHaveLength(2);
+  expect(snapshot.tasks).toContainEqual(expect.objectContaining({ id: 'independent', status: 'failed' }));
 });

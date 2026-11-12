@@ -2,10 +2,17 @@ import type { ContentCatalog } from '@/common/contentCatalog/schema';
 import { localize, supportsEntry, CONTENT_CAPABILITIES } from '@/common/contentCatalog/policy';
 import { contentAssetUrl } from '@/common/contentCatalog/bridge';
 import React, { useEffect, useRef, useState } from 'react';
-import { Button, Select } from '@arco-design/web-react';
+import { Button, Collapse, Modal, Select } from '@arco-design/web-react';
 import { useTranslation } from 'react-i18next';
 import { Download, Movie, Picture, Play, Pause } from '@icon-park/react';
-import type { ComfyFamily, ComfyProfile } from '@/common/chat/document/creation/comfy';
+import {
+  comfyFamilySchema,
+  type ComfyFamily,
+  type ComfyInventory,
+  type ComfyProfile,
+} from '@/common/chat/document/creation/comfy';
+import { workflowTaskSchema } from '@/common/chat/document/creation/workflows/contracts';
+import { comfyWorkflowStatus, groupComfyModels } from '@/common/chat/document/creation/workflows/identity';
 import { COMFY_FAMILIES, type ComfyDraftIntent } from '../Creation/comfyDraft';
 import styles from '../Creation/creation.module.css';
 // Maintainer-provided real H3/ComfyUI result demo (source: docs/assets/openh3-demo.gif).
@@ -22,9 +29,8 @@ import mossBaseCover from '@/renderer/assets/creation/model-previews/moss/moss-i
 import mossSftCover from '@/renderer/assets/creation/model-previews/moss/moss-image-sft-official.webp?url';
 import kreaCover from '@/renderer/assets/creation/model-previews/krea2-official.webp?url';
 
-const previewAssets: Record<
-  ComfyFamily,
-  { video?: string; poster: string; official?: { publisher: string; url: string; model: string } }
+const previewAssets: Partial<
+  Record<ComfyFamily, { video?: string; poster: string; official?: { publisher: string; url: string; model: string } }>
 > = {
   h3: { video: h3Video, poster: h3Poster },
   'fasth3-omni': {
@@ -85,9 +91,11 @@ const previewAssets: Record<
 type Props = {
   catalog?: ContentCatalog;
   profiles: ComfyProfile[];
+  workflowPreparations?: ComfyInventory['workflowPreparations'];
   selectedProfileId?: string;
   loading?: boolean;
   unavailable?: boolean;
+  incomplete?: boolean;
   onAction: (intent: ComfyDraftIntent) => void;
   onUseProfile: (profile: ComfyProfile) => void;
 };
@@ -95,13 +103,13 @@ type Props = {
 function ModelPreview({
   family,
   name,
-  runtimeVersion,
+  kind,
   coverUrl,
   children,
 }: {
   family: ComfyFamily;
   name: string;
-  runtimeVersion?: string;
+  kind: 'image' | 'video';
   coverUrl?: string;
   children: React.ReactNode;
 }) {
@@ -139,7 +147,11 @@ function ModelPreview({
 
   return (
     <div className={styles.familyCover} onMouseEnter={play} onMouseLeave={pause}>
-      {failed || !isVideo ? (
+      {!assets && !coverUrl ? (
+        <div className='flex h-full items-center justify-center text-t-tertiary' aria-hidden='true'>
+          {kind === 'video' ? <Movie size={64} /> : <Picture size={64} />}
+        </div>
+      ) : failed || !isVideo ? (
         <img
           src={isVideo ? assets?.poster : (coverUrl ?? assets?.poster)}
           alt={t(isVideo ? 'guid.comfy.preview.poster' : 'guid.comfy.preview.image', { family: name })}
@@ -165,21 +177,19 @@ function ModelPreview({
         {children}
         {(!coverUrl || isVideo) && assets?.official ? (
           <div className={styles.previewAttribution}>
-            <a href={assets.official.url} target='_blank' rel='noreferrer'>
+            <a
+              href={assets.official.url}
+              target='_blank'
+              rel='noreferrer'
+              title={t('guid.comfy.preview.sampleVersion', { version: assets.official.model })}
+            >
               {family === 'fasth3-omni'
                 ? t('guid.comfy.preview.officialSample')
                 : t('guid.comfy.preview.officialImageSample', { publisher: assets.official.publisher })}
             </a>
-            <span>{t('guid.comfy.preview.sampleVersion', { version: assets.official.model })}</span>
-            {isVideo && (
-              <span>
-                {t('guid.comfy.preview.runtimeVersion', {
-                  version: runtimeVersion || t('guid.comfy.preview.notInstalled'),
-                })}
-              </span>
-            )}
           </div>
         ) : (
+          assets &&
           (!coverUrl || isVideo) && <span className={styles.previewBadge}>{t('guid.comfy.preview.projectDemo')}</span>
         )}
       </div>
@@ -201,21 +211,27 @@ function ModelPreview({
 export default function ComfyModelCards({
   catalog,
   profiles,
+  workflowPreparations = [],
   selectedProfileId,
   loading,
   unavailable,
+  incomplete,
   onAction,
   onUseProfile,
 }: Props) {
   const { t, i18n } = useTranslation();
-  const [displayed, setDisplayed] = useState<Partial<Record<ComfyFamily, string>>>({});
-  const cards = COMFY_FAMILIES.map((base) => {
+  const [details, setDetails] = useState<string>();
+  const [displayed, setDisplayed] = useState<Record<string, string>>({});
+  const customModels = [
+    ...new Map(
+      profiles
+        .filter((profile) => !comfyFamilySchema.safeParse(profile.family).success)
+        .map((profile) => [profile.family, { family: profile.family, name: profile.name, kind: profile.kind }])
+    ).values(),
+  ];
+  const cards = [...COMFY_FAMILIES, ...customModels].map((base) => {
     const official = catalog?.models.find((model) => model.family === base.family);
-    return {
-      base,
-      official,
-      card: official ? { ...base, ...official } : base,
-    };
+    return { official, card: official ? { ...base, ...official } : base };
   });
   return (
     <div className={styles.familySection}>
@@ -223,22 +239,54 @@ export default function ComfyModelCards({
       <div className={styles.familyGrid}>
         {cards.map(({ official, card }) => {
           const { family, name, kind } = card;
+          const builtin = comfyFamilySchema.safeParse(family);
+          const description =
+            official && catalog
+              ? localize(official.description, i18n.language, catalog.defaultLocale)
+              : builtin.success
+                ? t(`guid.comfy.families.${builtin.data}`)
+                : t(`guid.creation.local${kind === 'video' ? 'Video' : 'Image'}`);
           const compatible =
             !official || supportsEntry(official, { version: __APP_VERSION__, capabilities: CONTENT_CAPABILITIES });
-          const versions = profiles.filter((profile) => profile.family === family);
+          const groups = groupComfyModels(profiles.filter((profile) => profile.family === family));
+          const versions = groups.map(
+            (group) =>
+              group.profiles.find((item) => item.id === selectedProfileId) ??
+              group.profiles.find((item) => comfyWorkflowStatus(item) === 'verified') ??
+              group.profiles[0]
+          );
           const profile =
-            versions.find((item) => item.id === displayed[family as ComfyFamily]) ??
+            versions.find((item) => item.id === displayed[family]) ??
             versions.find((item) => item.id === selectedProfileId) ??
             versions.find((item) => item.state === 'verified') ??
             versions[0];
-          const state = loading ? 'checking' : unavailable ? 'unavailable' : (profile?.state ?? 'not-installed');
+          const group = groups.find((item) => item.profiles.includes(profile));
+          const routes = group?.profiles ?? [];
+          const pendingRoutes = workflowPreparations.filter((route) => route.modelSetId === group?.modelSetId);
+          const selectedModel = routes.some((route) => route.id === selectedProfileId);
+          const usableProfile = routes.find((route) => comfyWorkflowStatus(route) === 'verified') ?? profile;
+          const state = loading
+            ? 'checking'
+            : unavailable
+              ? 'unavailable'
+              : routes.some((route) => comfyWorkflowStatus(route) === 'verified')
+                ? 'verified'
+                : profile
+                  ? 'installed'
+                  : incomplete
+                    ? 'unavailable'
+                    : 'not-installed';
+          const action = (intent: ComfyDraftIntent['intent'], target?: ComfyProfile) => {
+            onAction({ family, intent, profileId: target?.id, ...(!builtin.success ? { name, kind } : {}) });
+            setDetails(undefined);
+          };
           return (
-            <section key={official?.id ?? family} role='region' aria-label={name} className={styles.familyCard}>
+            <section key={family} role='region' aria-label={name} className={styles.familyCard}>
               <ModelPreview
                 key={`${catalog?.releaseSequence ?? 0}:${official?.cover ?? family}`}
-                family={family as ComfyFamily}
+                family={family}
                 name={name}
-                runtimeVersion={profile?.version}
+                kind={kind}
                 coverUrl={
                   official && catalog && catalog.releaseSequence > 0
                     ? contentAssetUrl(catalog.releaseSequence, official.cover)
@@ -251,42 +299,11 @@ export default function ComfyModelCards({
                   </span>
                   <div className={styles.familySummary}>
                     <div className={styles.familyName}>{name}</div>
-                    <div
-                      className={styles.familyDescription}
-                      title={
-                        official && catalog
-                          ? localize(official.description, i18n.language, catalog.defaultLocale)
-                          : t(`guid.comfy.families.${family as ComfyFamily}`)
-                      }
-                    >
-                      {official && catalog
-                        ? localize(official.description, i18n.language, catalog.defaultLocale)
-                        : t(`guid.comfy.families.${family as ComfyFamily}`)}
+                    <div className={styles.familyDescription} title={description}>
+                      {description}
                     </div>
                   </div>
                 </div>
-                {profile && (
-                  <div className={styles.profileDetails}>
-                    {versions.length > 1 ? (
-                      <Select
-                        className={styles.profileSelect}
-                        aria-label={t('guid.comfy.version', { family: name })}
-                        size='small'
-                        value={profile?.id}
-                        onChange={(id: string) => setDisplayed((previous) => ({ ...previous, [family]: id }))}
-                        options={versions.map((version) => ({
-                          value: version.id,
-                          label: `${version.name} · ${version.version} · ${version.quantization} · ${t(`guid.creation.states.${version.state}`)}`,
-                        }))}
-                      />
-                    ) : (
-                      <span className={styles.profileName}>
-                        {profile.name} · {profile.version} · {profile.quantization}
-                      </span>
-                    )}
-                  </div>
-                )}
-                {profile?.validation?.error && <div className={styles.profileError}>{profile.validation.error}</div>}
                 <div className={styles.familyFooter}>
                   <span
                     className={`${styles.profileStatus} ${state === 'verified' ? styles.verified : styles.state}`}
@@ -295,48 +312,125 @@ export default function ComfyModelCards({
                     {t(`guid.creation.states.${state}`)}
                   </span>
                   <div className={styles.familyActions}>
-                    {!compatible && <span>{t('update.content.requiresClientUpdate')}</span>}
-                    {compatible && (
-                      <>
-                        {profile?.state === 'verified' && (
-                          <Button
-                            size='small'
-                            type={selectedProfileId === profile.id ? 'secondary' : 'primary'}
-                            aria-pressed={selectedProfileId === profile.id}
-                            disabled={loading || unavailable}
-                            onClick={() => onUseProfile(profile)}
-                          >
-                            {t(selectedProfileId === profile.id ? 'guid.comfy.selected' : 'guid.comfy.use')}
-                          </Button>
-                        )}
-                        <Button
-                          size='small'
-                          type={profile ? 'text' : 'primary'}
-                          icon={profile ? undefined : <Download size='14' />}
-                          onClick={() =>
-                            onAction({
-                              family: family as ComfyFamily,
-                              intent: profile ? 'repair' : 'install',
-                              profileId: profile?.id,
-                            })
-                          }
-                        >
-                          {t(profile ? 'guid.comfy.actions.repair' : 'guid.comfy.actions.install')}
-                        </Button>
-                        {profile && (
-                          <Button
-                            size='small'
-                            type='text'
-                            onClick={() => onAction({ family: family as ComfyFamily, intent: 'install-other' })}
-                          >
-                            {t('guid.comfy.actions.install-other')}
-                          </Button>
-                        )}
-                      </>
+                    {profile && (
+                      <Button size='small' type='text' onClick={() => setDetails(family)}>
+                        {t('guid.comfy.workflows.details')}
+                      </Button>
+                    )}
+                    {!compatible ? (
+                      <span>{t('update.content.requiresClientUpdate')}</span>
+                    ) : usableProfile ? (
+                      <Button
+                        size='small'
+                        type={selectedModel ? 'secondary' : 'primary'}
+                        aria-pressed={selectedModel}
+                        disabled={loading || unavailable}
+                        onClick={() => onUseProfile(usableProfile)}
+                      >
+                        {t(selectedModel ? 'guid.comfy.selected' : 'guid.comfy.use')}
+                      </Button>
+                    ) : (
+                      <Button
+                        size='small'
+                        type='primary'
+                        icon={<Download size='14' />}
+                        onClick={() => action('install')}
+                      >
+                        {t('guid.comfy.actions.install')}
+                      </Button>
                     )}
                   </div>
                 </div>
               </ModelPreview>
+              <Modal visible={details === family} title={name} footer={null} onCancel={() => setDetails(undefined)}>
+                {details === family && profile && (
+                  <div className='flex flex-col gap-12px text-12px select-text break-words'>
+                    {versions.length > 1 ? (
+                      <Select
+                        aria-label={t('guid.comfy.version', { family: name })}
+                        value={profile.id}
+                        onChange={(id: string) => setDisplayed((previous) => ({ ...previous, [family]: id }))}
+                        options={versions.map((version) => ({
+                          value: version.id,
+                          label: `${version.name} · ${version.version} · ${version.quantization}`,
+                        }))}
+                      />
+                    ) : (
+                      <span>
+                        {profile.version} · {profile.quantization}
+                      </span>
+                    )}
+                    <Collapse>
+                      {routes.map((route) => (
+                        <Collapse.Item
+                          key={route.id}
+                          name={route.id}
+                          header={
+                            <span>
+                              {(route.workflowMetadata?.tasks ?? route.capabilities ?? [])
+                                .map((task) => {
+                                  const known = workflowTaskSchema.safeParse(task);
+                                  return known.success ? t(`guid.comfy.workflows.tasks.${known.data}`) : task;
+                                })
+                                .join(' · ')}{' '}
+                              · {t(`guid.comfy.workflows.states.${comfyWorkflowStatus(route)}`)}
+                            </span>
+                          }
+                        >
+                          <div className='flex flex-col gap-8px break-all'>
+                            <strong>{route.name}</strong>
+                            <span>
+                              {t('guid.comfy.workflows.environment')}: {route.environment?.root}
+                            </span>
+                            <span>{route.environment?.python}</span>
+                            <span>{route.environment?.baseUrl}</span>
+                            <span>
+                              {t('guid.comfy.workflows.workflow')}: {route.workflowPath}
+                            </span>
+                            {route.validation?.error && <span role='alert'>{route.validation.error}</span>}
+                            <Button size='small' onClick={() => action('repair', route)}>
+                              {t('guid.comfy.actions.repair')}
+                            </Button>
+                          </div>
+                        </Collapse.Item>
+                      ))}
+                      {pendingRoutes.map((route) => (
+                        <Collapse.Item
+                          key={`${route.profileId}:${route.workflowId}`}
+                          name={`pending:${route.profileId}:${route.workflowId}`}
+                          header={`${route.tasks
+                            .map((task) => {
+                              const known = workflowTaskSchema.safeParse(task);
+                              return known.success ? t(`guid.comfy.workflows.tasks.${known.data}`) : task;
+                            })
+                            .join(' · ')} · ${t('guid.comfy.workflows.states.needs-preparation')}`}
+                        >
+                          <div className='flex flex-col gap-8px break-all'>
+                            <strong>{route.workflowId}</strong>
+                            <span>{route.reason}</span>
+                            <span>
+                              {t('guid.comfy.operation.download')}:{' '}
+                              {new Intl.NumberFormat(i18n.language, {
+                                style: 'unit',
+                                unit: 'megabyte',
+                                maximumFractionDigits: 1,
+                              }).format(route.additionalBytes / 1_000_000)}
+                            </span>
+                          </div>
+                        </Collapse.Item>
+                      ))}
+                    </Collapse>
+                    <div className='flex gap-8px'>
+                      <Button size='small' onClick={() => action('repair', profile)}>
+                        {t('guid.comfy.actions.repair')}
+                      </Button>
+                      <Button size='small' type='text' onClick={() => action('install-other')}>
+                        {t('guid.comfy.actions.install-other')}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </Modal>
             </section>
           );
         })}

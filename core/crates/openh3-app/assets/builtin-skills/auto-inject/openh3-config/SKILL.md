@@ -12,7 +12,7 @@ not call raw backend paths, and do not depend on tools outside the bundled
 ## Rules
 
 1. First run `"$OPENH3_HELPER_BIN" config capabilities` and `config context`; this Skill is not a same-named MCP tool.
-2. Use only `"$OPENH3_HELPER_BIN" config ...`.
+2. Use only `"$OPENH3_HELPER_BIN" config ...` in POSIX shells, or the equivalent direct invocation `& $env:OPENH3_HELPER_BIN config ...` in PowerShell.
 2. Never pass, inline, export, echo, or set any `OPENH3_...` environment variable.
 3. Put all command input in stdin JSON.
 4. Do not use flags for business fields.
@@ -27,6 +27,22 @@ not call raw backend paths, and do not depend on tools outside the bundled
 14. After assistant changes, explain both persistence and effect timing. Saving and read-back do not mean the current running conversation has reloaded the changed runtime behavior.
 
 ## Output
+
+Examples marked `bash` require a POSIX shell. In PowerShell, use `& $env:OPENH3_HELPER_BIN` with the same subcommands; discover with `& $env:OPENH3_HELPER_BIN config capabilities` and `& $env:OPENH3_HELPER_BIN config context`. Reading the helper path for invocation is allowed; never print or change runtime environment values. For JSON stdin on Windows PowerShell 5.1 or PowerShell 7, keep the payload in memory and temporarily use UTF-8 (without a BOM). Do not save a command containing secrets to a script or payload file.
+
+```powershell
+$openh3Payload = @'
+{"assistant_id":"current"}
+'@
+$previousOutputEncoding = $OutputEncoding
+try {
+    $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $openh3Payload | & $env:OPENH3_HELPER_BIN config assistants get
+    if ($LASTEXITCODE -ne 0) { throw "OpenH3 helper failed with exit code $LASTEXITCODE" }
+} finally { $OutputEncoding = $previousOutputEncoding }
+```
+
+Use this pattern for every JSON payload below, changing only the subcommands and JSON fields. This does not change authorization or read-back requirements.
 
 Successful commands print a JSON envelope:
 

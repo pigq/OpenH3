@@ -34,7 +34,8 @@ export class H3JobRunner {
     private readonly store: H3JobStore,
     private readonly client: RunnerClient = new H3ComfyClient(),
     private readonly preflight: H3ReferencePreflightLike = new H3ReferencePreflight(),
-    private readonly coordinator: ComfyRuntimeCoordinator = sharedComfyRuntimeCoordinator
+    private readonly coordinator: ComfyRuntimeCoordinator = sharedComfyRuntimeCoordinator,
+    private readonly archive?: (id: string, result: H3GenerationResult) => Promise<void>
   ) {}
 
   blocked(): boolean {
@@ -52,8 +53,8 @@ export class H3JobRunner {
     return this.store.create(job);
   }
 
-  private succeed(id: string, result: H3GenerationResult): H3Job {
-    return this.store.update(id, {
+  private async succeed(id: string, result: H3GenerationResult): Promise<H3Job> {
+    const job = this.store.update(id, {
       status: 'succeeded',
       finishedAt: new Date().toISOString(),
       progress: 1,
@@ -68,6 +69,16 @@ export class H3JobRunner {
         resourcePath: `/api/h3/jobs/${encodeURIComponent(id)}/artifacts/${index}`,
       })),
     });
+    try {
+      await this.archive?.(id, result);
+    } catch (error) {
+      // Generation has completed. A persistence error must never resubmit it.
+      console.warn('[h3] artifact archive pending', {
+        jobId: id,
+        error: error instanceof Error ? error.name : 'Error',
+      });
+    }
+    return job;
   }
 
   private stopRemote(job: H3Job): Promise<H3GenerationResult | void> {
@@ -233,7 +244,7 @@ export class H3JobRunner {
         }
       });
       if (this.store.get(id)?.status === 'cancelled') return this.store.get(id)!;
-      job = this.succeed(id, result);
+      job = await this.succeed(id, result);
       onProgress?.(job);
       return job;
     } catch (error) {
@@ -255,7 +266,7 @@ export class H3JobRunner {
         try {
           const result = await this.stopRemote(job);
           job = result
-            ? this.succeed(id, result)
+            ? await this.succeed(id, result)
             : this.store.update(id, { remoteUncertain: false, submissionPending: false });
           if (this.client.runtimeResourceKey)
             await this.coordinator.confirmSettled(await this.client.runtimeResourceKey(), id);
@@ -307,7 +318,7 @@ export class H3JobRunner {
       const latest = this.store.get(id)!;
       if (latest.status === 'succeeded') return latest;
       const settled = result
-        ? this.succeed(id, result)
+        ? await this.succeed(id, result)
         : this.store.update(id, {
             status: job.status === 'failed' ? 'failed' : 'cancelled',
             error: job.status === 'failed' ? job.error : 'H3_JOB_CANCELLED',
@@ -334,7 +345,7 @@ export class H3JobRunner {
         if (!job.promptId || !this.client.confirmStopped) continue;
         const result = await this.client.confirmStopped(job.promptId, job.submissionPending);
         const settled = result
-          ? this.succeed(job.id, result)
+          ? await this.succeed(job.id, result)
           : this.store.update(job.id, { remoteUncertain: false, submissionPending: false });
         if (this.client.runtimeResourceKey)
           await this.coordinator.confirmSettled(await this.client.runtimeResourceKey(), job.id);

@@ -7,6 +7,7 @@ import { exportBuiltin } from '../../../scripts/content-catalog/export-builtin.m
 import { createContentRuntime } from '@/process/services/contentCatalog/builtin';
 import { buildSpawnEnv } from '../../../packages/web-host/src/backend-launcher';
 import { COMFY_FAMILIES } from '@/renderer/pages/guid/Creation/comfyDraft';
+import { comfyFamilyKind, comfyFamilySchema } from '@/common/chat/document/creation/comfy';
 import { CONTENT_CAPABILITIES } from '@/common/contentCatalog/policy';
 it('exports all 52 bundled templates and serves their offline digest-addressed media without changing user data', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'builtin-content-'));
@@ -16,7 +17,9 @@ it('exports all 52 bundled templates and serves their offline digest-addressed m
     const catalog = await exportBuiltin(dir);
     expect(catalog.entries).toHaveLength(52);
     expect(catalog.models.map((model) => model.family)).toEqual(COMFY_FAMILIES.map((model) => model.family));
+    expect(catalog.models.map((model) => model.family).toSorted()).toEqual(comfyFamilySchema.options.toSorted());
     for (const model of catalog.models) {
+      expect(model.kind, model.family).toBe(comfyFamilyKind(comfyFamilySchema.parse(model.family)));
       expect(CONTENT_CAPABILITIES).toEqual(expect.arrayContaining(model.requiredCapabilities));
     }
     for (const e of catalog.entries) {

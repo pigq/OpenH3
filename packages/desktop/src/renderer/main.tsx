@@ -79,6 +79,7 @@ import './styles/arco-override.css';
 import './styles/themes/index.css';
 import './styles/markdown.css';
 import { migrateLegacyStorageKeys } from '@/common/config/storageKeys';
+import RendererErrorBoundary from './components/RendererErrorBoundary';
 
 // Move browser-only preferences to the OpenH3 namespace without deleting the
 // old keys. Existing profiles remain readable and future writes use canonical
@@ -368,13 +369,15 @@ const Main = () => {
   }
 
   return (
-    <Router
-      layout={
-        <ConversationHistoryProvider>
-          <Layout sider={<Sider />} />
-        </ConversationHistoryProvider>
-      }
-    />
+    <RendererErrorBoundary>
+      <Router
+        layout={
+          <ConversationHistoryProvider>
+            <Layout sider={<Sider />} />
+          </ConversationHistoryProvider>
+        }
+      />
+    </RendererErrorBoundary>
   );
 };
 

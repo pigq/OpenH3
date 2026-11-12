@@ -3,8 +3,44 @@ export type ComfyGraph = Record<string, { class_type?: string; inputs?: Record<s
 export type ComfyNodeInfo = {
   input?: { required?: Record<string, unknown[]>; optional?: Record<string, unknown[]> };
   output?: string[];
+  output_node?: boolean;
 };
 export type ComfyRegistry = Record<string, ComfyNodeInfo>;
+
+/** Require used reference nodes to participate in an output path; this does not establish semantic fidelity. */
+export function validateComfyReferenceOutputPaths(
+  graph: ComfyGraph,
+  registry: ComfyRegistry,
+  referenceNodeIds: string[]
+): void {
+  if (!referenceNodeIds.length) return;
+  const outputs = Object.entries(graph)
+    .filter(([, node]) => registry[node.class_type ?? '']?.output_node === true)
+    .map(([id]) => id);
+  const fail = (code: string, nodeId?: string): never => {
+    throw new H3ComfyError(code, {
+      category: 'INVALID_INPUT',
+      nodeId: nodeId && /^[\w:.-]{1,100}$/.test(nodeId) ? nodeId : undefined,
+      retryable: false,
+      action: 'CHECK_WORKFLOW_INPUTS',
+    });
+  };
+  if (!outputs.length) fail('COMFY_REFERENCE_OUTPUT_UNCONFIRMED');
+  const reachable = new Set<string>();
+  const pending = [...outputs];
+  while (pending.length) {
+    const id = pending.pop()!;
+    if (reachable.has(id) || !Object.hasOwn(graph, id)) continue;
+    reachable.add(id);
+    for (const value of Object.values(graph[id].inputs ?? {})) {
+      if (Array.isArray(value) && value.length === 2 && typeof value[0] === 'string' && Number.isInteger(value[1]))
+        pending.push(value[0]);
+    }
+  }
+  for (const id of new Set(referenceNodeIds)) {
+    if (!reachable.has(id)) fail('COMFY_REFERENCE_INPUT_DISCONNECTED', id);
+  }
+}
 
 export function validateComfyWorkflow(graph: ComfyGraph, registry: ComfyRegistry): void {
   const fail = (nodeId: string, missing = false): never => {

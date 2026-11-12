@@ -25,9 +25,11 @@ export default function ConversationWorkProgress({ conversationId }: { conversat
   const overallStatus: WorkStatus =
     snapshot.pendingConfirmations > 0
       ? 'waiting'
-      : ((['failed', 'waiting', 'running', 'interrupted', 'pending', 'cancelled'] as const).find((status) =>
-          entries.some((entry) => entry.status === status)
-        ) ?? 'completed');
+      : snapshot.isProcessing || entries.some((entry) => entry.status === 'running')
+        ? 'running'
+        : ((['failed', 'waiting', 'interrupted', 'pending', 'cancelled'] as const).find((status) =>
+            entries.some((entry) => entry.status === status)
+          ) ?? 'completed');
   const toggleOperation = (id: string) =>
     setOpenedOperations((current) => {
       const next = new Set(current);

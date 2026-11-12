@@ -69,7 +69,7 @@ function generateI18nKeysDtsContent() {
 }
 
 function formatOutputFile(filePath) {
-  const commands = [`bunx prettier --write "${filePath}"`];
+  const commands = [`bunx prettier --single-quote --write "${filePath}"`];
 
   if (fs.existsSync(OXFMT_BIN)) {
     commands.push(`"${OXFMT_BIN}" "${filePath}"`);

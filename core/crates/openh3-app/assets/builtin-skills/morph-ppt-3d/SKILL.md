@@ -45,7 +45,7 @@ Verify with `officecli --version` (open a new terminal if PATH hasn't picked up)
 
 1. The deck requires `.glb`. If the user supplies another format, first check available authorized conversion tools (for example an installed Blender importer/exporter), their actual format support, and required textures. When conversion is supported, create a separate `.glb`, preserve the original, and verify geometry/materials before insertion. Do not require the user to perform a conversion the agent can complete. Ask for a compatible file or a specific fidelity decision only when no permitted conversion route works; do not silently discard animation, materials, or geometry.
 2. If user has no model, follow the **Model Discovery Flow** below.
-3. All files (`.glb`, `.pptx`, build script) must be in the same working directory.
+3. Keep model assets, deck, and build script in an organized task directory with resolvable relative paths; QA subdirectories and requested extra outputs are allowed.
 
 ---
 
@@ -105,9 +105,9 @@ Tell the user: "Your topic is [X]. I suggest using a 3D model of [description]. 
    curl -s "https://poly.pizza/api/search/[keyword]" 2>/dev/null
    ```
 
-4. **Khronos glTF-Sample-Assets** (guaranteed to work, always available):
+4. **Khronos glTF-Sample-Assets** (public sample fallback; verify availability and suitability):
    ```bash
-   # Direct download — no auth, no API, always works
+   # Public sample URL — check HTTP status and downloaded file before using it
    curl -L -o model.glb "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/[ModelName]/glTF-Binary/[ModelName].glb"
    ```
    Available models: Duck, Fox, Avocado, BrainStem, CesiumMan, DamagedHelmet, FlightHelmet, Lantern, Suzanne, WaterBottle, etc.
@@ -155,7 +155,7 @@ Download the model selected by the user or under their delegated selection:
 # For Sketchfab (if user has the download URL)
 curl -L -o model.glb "[download_url]"
 
-# For Khronos samples (always works)
+# For a public Khronos sample (verify network/download result)
 curl -L -o model.glb "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Fox/glTF-Binary/Fox.glb"
 ```
 
@@ -237,7 +237,7 @@ Choose a palette that matches the **topic mood** — don't default to generic bl
 - One color dominates (60-70% visual weight), 1-2 supporting tones, one accent
 - On light backgrounds: use Body Text color for copy, Muted for captions
 - On dark backgrounds: use Secondary or `FFFFFF` for copy, Muted for captions
-- For additional inspiration, browse `../morph-ppt/reference/styles/INDEX.md` — 50+ visual styles organized by mood (dark, light, warm, vivid, bw). Read `style.md` for design philosophy, `build.sh` for implementation reference. **Learn the approach, do not copy coordinates verbatim**
+- For additional inspiration, browse `../morph-ppt/reference/styles/INDEX.md`. Read `style.md` for design guidance and `build.sh` only when present. A style without a build script is valid; adapt the approach without copying coordinates verbatim.
 
 ### Font Pairings (pick one per deck)
 
@@ -286,18 +286,17 @@ Text-only slides are only allowed for: quotes, code examples, pure tables.
 
 ## 3D Model Insertion Rules
 
-### Add model fresh on every slide — NEVER clone
+### Fresh-model recipe — avoid unintended duplicate instances
 
-`morph_clone_slide` copies the model as frozen XML. The cloned model cannot Morph.
-Each slide must call `add --type 3dmodel` independently with the **same `name`** prop.
+This recipe adds the model independently to each planned slide with the same intended pair name. Do not assume cloning support or playback behavior from the helper's name; verify the installed tool and target viewer if choosing a clone-based workflow.
 
-**⚠️ CRITICAL: If you clone a slide that already has a 3D model, the old model XML is copied too. This creates TWO model3d elements with the same name on the new slide. PowerPoint cannot handle this conflict and will delete the model content during repair.**
+**Check model inventory after cloning.** A clone can already contain the source model. Adding another with the same name would create unintended duplicates. Inspect the new slide before deciding whether an add or removal is needed; duplicate names also make the planned pair ambiguous.
 
-If you must clone a slide for scene actors, **immediately remove the cloned model before adding a new one:**
+If you clone a slide for scene actors and the plan requires replacing its copied model, first confirm which element is the copied model. This example assumes that confirmed element is `/model3d[1]`:
 
 ```bash
 # After cloning slide 1 to slide 2:
-officecli remove deck.pptx '/slide[2]/model3d[1]'  # remove the frozen clone
+officecli remove deck.pptx '/slide[2]/model3d[1]'  # only after identifying this copied model
 officecli add deck.pptx '/slide[2]' --type 3dmodel ...  # add fresh model
 ```
 
@@ -344,12 +343,12 @@ officecli add deck.pptx '/slide[2]' --type 3dmodel \
 The model must feel like the **protagonist** of the presentation, not a sidebar decoration.
 Text supports the model; the model does not decorate the text.
 
-### Size Contrast Rule (MANDATORY)
+### Size contrast options
 
-Adjacent slides must have a model area ratio >= 1.5x or <= 0.67x.
-Compute area as `width × height`. If slide N model is 16×15=240 cm², slide N+1 must be >= 360 or <= 160.
+A model area ratio near 1.5x or 0.67x can create a clear push-in or pull-back. It is a design option, not a required change on every adjacent pair.
+Compute area as `width × height` when planning scale changes. For a 16×15=240 cm² frame, 360 or 160 cm² are example endpoints; rotation, translation, or a hold may serve the content better.
 
-**Never use similar sizes on consecutive slides.** This is the single most important rule for visual energy.
+**Keep framing purposeful.** Similar sizes and repeated layouts can preserve continuity. Change scale when it supports the narrative; do not force visual churn to pass a threshold.
 
 | Size tier      | Width   | Height  | Area (approx) | When to use                                |
 | -------------- | ------- | ------- | ------------- | ------------------------------------------ |
@@ -405,7 +404,7 @@ officecli add deck.pptx '/slide[N]' --type 3dmodel \
 
 ### Layout Progression
 
-Never repeat the same pattern on consecutive slides. Example:
+Vary patterns where it helps the story; consecutive repetitions are valid when intentional. One possible progression:
 
 ```
 Slide 1: C (centered hero, L)
@@ -419,18 +418,18 @@ Slide 7: C (centered closing, L)     ← push in
 
 ### Text Layout Safety (MANDATORY)
 
-**Text boxes must never overlap each other or the model frame.**
+**Prevent unintended text collisions.** Separate content and model frames in side-by-side layouts. **Pattern E exception:** intentional text over a model backdrop is valid when the text remains readable, avoids important model details, and has suitable contrast or a scrim/card as needed. A model bounding-box intersection alone is not an error for this pattern.
 
 Rules:
 
 1. **Title and body must not collide.** If a title wraps to 2 lines, the body `y` must account for the title's actual height, not the planned height. Safe formula: `body_y = title_y + title_height + 0.5cm`
 2. **Fixed-height text boxes are dangerous.** If text content is longer than expected, it will overflow invisibly. Use generous heights: title `3-4cm`, body `6-8cm`, bullets `8-10cm`.
-3. **Model frame and text boxes: gap >= 1cm.** Calculate: if model is at `x=15cm`, text `x + width` must be <= `14cm`.
+3. **Side-by-side model and text:** aim for a gap of at least 1cm, adjusted to the actual layout and brief. For Pattern E, assess readability and obscured model details in the rendered result instead of enforcing a frame gap.
 4. **On Pattern C (centered model + text overlay):** text goes at slide top (`y=0.5-2cm`) or bottom (`y=14-17cm`), NOT in the vertical middle where the model lives (`y=3-13cm`).
 5. **After building each slide, verify coordinates:**
    ```bash
    officecli get deck.pptx '/slide[N]' --depth 1
-   # Check: no two shapes share overlapping x/y/width/height ranges
+   # Compare geometry with the planned layout; review intentional Pattern E overlap visually.
    ```
 
 ### Model Bleed Guidelines
@@ -477,24 +476,23 @@ Match the shot to what the slide talks about:
 - "Power/authority" → Low angle, `roty=20, rotx=-20`, L
 - "Data & specs" → Over-the-shoulder, `roty=60`, S in corner
 
-### Rotation Rules
+### Rotation guidance
 
-1. Adjacent roty delta: 30-90° (< 30 = jitter, > 90 = disorienting)
-2. Overall roty direction must be consistent (no back-and-forth)
-3. rotx range: -25 to +40. Adjacent rotx delta <= 20
-4. Total arc across deck: 180-360° (show the model from all sides)
+Use a coherent camera arc that explains the content. Gentle adjacent rotations are a useful default, not a universal hard limit: deliberate reversals, close-ups, holds, or larger angle changes can serve a planned reveal. For an ordinary continuous sweep, prefer one direction and modest tilt changes; inspect target-viewer playback for disorientation. A short deck does not need a forced 180–360° rotation.
+
+The example below uses a consistent positive roty sweep and adjacent rotx changes no larger than 20°. This is one possible plan, not an acceptance threshold.
 
 ### Example Shot Plan
 
 | Slide | Shot                 | roty | rotx | Size     | Pattern |
 | ----- | -------------------- | ---- | ---- | -------- | ------- |
 | 1     | Three-quarter beauty | 30   | 8    | L 20×17  | C       |
-| 2     | Close-up             | 0    | 5    | XL 30×24 | E       |
-| 3     | Side profile         | 80   | 0    | M 15×14  | A       |
-| 4     | Bird's eye           | 120  | 35   | M 14×13  | B       |
-| 5     | Low angle            | 170  | -20  | L 20×18  | F       |
+| 2     | Close-up             | 60   | 5    | XL 30×24 | E       |
+| 3     | Side profile         | 90   | 0    | M 15×14  | A       |
+| 4     | Elevated angle       | 120  | 15   | M 14×13  | B       |
+| 5     | Low angle            | 170  | -5  | L 20×18  | F       |
 | 6     | Over-the-shoulder    | 220  | 10   | S 8×7    | D       |
-| 7     | Establishing         | 320  | 5    | L 20×17  | C       |
+| 7     | Establishing         | 300  | 5    | L 20×17  | C       |
 
 ---
 
@@ -507,25 +505,25 @@ In `brief.md`, add a **Model Choreography Table**:
 | Slide | Pattern | Size Tier | Model x,y,w,h | roty | rotx |
 | ----- | ------- | --------- | ------------- | ---- | ---- |
 | 1     | C       | L         | 7,0.5,20,17   | 30   | 8    |
-| 2     | E       | XL        | -2,-2,38,24   | 0    | 5    |
+| 2     | E       | XL        | -2,-2,38,24   | 60    | 5    |
 | ...   | ...     | ...       | ...           | ...  | ...  |
 
-Verify the area ratio rule (>= 1.5x between adjacent rows) before proceeding to build.
+Review planned framing and motion between adjacent rows. A large area change is one way to create a reveal; rotation, translation, and intentional holds can also be appropriate. Validate the intended sequence rather than forcing an area ratio on every pair.
 
 ### Phase 3 additions (Build)
 
-Since models cannot be cloned, the build script differs from standard morph-ppt:
+For the fresh-model recipe, build from model-free slide scaffolding so a clone does not accidentally introduce a second model. Confirm behavior in the installed tool and target viewer:
 
-1. Create all slides first (with background + morph transition)
-2. Add scene actors (`!!scene-*`) on slide 1, then clone slides for morph continuity
-3. Add 3D model fresh on EACH slide (same name, different roty/position)
-4. Add content shapes per slide, ghost previous content
+1. Plan the actual slide count and create model-free slides, adding Morph only on planned destination slides.
+2. Add or copy the needed scene actors between the planned slides; avoid creating a second set of slides after the target pages already exist.
+3. Add the intended model instances to each applicable slide, reusing exact names only for planned pairs; inspect the inventory to avoid accidental duplicates.
+4. Add content per slide and manage retained outgoing shapes according to their lifecycle.
 
 ```python
 model_positions = [
     {"slide": 1, "x": "7cm",  "y": "0.5cm", "w": "20cm", "h": "17cm", "roty": 30},
-    {"slide": 2, "x": "-2cm", "y": "-2cm",  "w": "38cm", "h": "24cm", "roty": 0},
-    {"slide": 3, "x": "16cm", "y": "1cm",   "w": "15cm", "h": "14cm", "roty": 80},
+    {"slide": 2, "x": "-2cm", "y": "-2cm",  "w": "38cm", "h": "24cm", "roty": 60},
+    {"slide": 3, "x": "16cm", "y": "1cm",   "w": "15cm", "h": "14cm", "roty": 90},
     # ...
 ]
 for pos in model_positions:
@@ -540,24 +538,24 @@ for pos in model_positions:
 
 After standard morph verification, additionally check:
 
-- Each slide has exactly one `model3d` element
-- All models share the same `name` prop
-- Adjacent slides have model area ratio >= 1.5x or <= 0.67x
-- No two consecutive slides use the same layout pattern
+- Each slide contains the planned model instances; the single-hero recipe uses one model, but follow the actual brief.
+- Each intended cross-slide model pair has the exact same readback name and the intended model asset.
+- Adjacent framing, position, rotation, and scale match the choreography. Check actual target-viewer playback; structural metadata cannot prove 3D Morph animation.
+- Repeated layout or framing is acceptable when it serves continuity; check readability, intentional overlays, and camera motion against the brief.
 
 ---
 
 ## File Placement Rule
 
-All files must be in the same working directory.
+Keep the deck, model assets, build script, and planning in one task output directory or a clear relative subdirectory structure.
 
-**Deliverables (exactly 4 files, no more):**
+**Default delivery set (adapt to the user's requested outputs):**
 
 - `.glb` model file (the 3D model used in the deck)
 - Output `.pptx`
 - Build script (re-runnable)
 - `brief.md`
 
-**Do NOT create additional files** such as outline.md, quality-report.md, test-report.md, etc. All planning goes in `brief.md`, all verification output goes to stdout. Extra files confuse users.
+Keep planning concise in `brief.md` by default. QA screenshots, temporary render files, reports, and additional user-requested artifacts are allowed; distinguish review artifacts from the final delivery set and keep paths organized.
 
 Do not scatter model files across unrelated paths.

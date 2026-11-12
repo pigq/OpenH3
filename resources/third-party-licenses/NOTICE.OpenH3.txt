@@ -46,3 +46,17 @@ preview. H3 weights, derived LoRAs and converted checkpoints are not bundled.
 The embedded workflow graphs are distinct from those model files and retain
 their upstream terms, including applicable territorial restrictions. No
 standalone 7-Zip or Bun executable is included in the application runtime.
+
+Windows packages include MinGit 2.54.0.windows.1 (Git for Windows).
+Upstream source and release: https://github.com/git-for-windows/git/releases/tag/v2.54.0.windows.1
+Git license: GPL-2.0; accompanying components retain their upstream licenses.
+The unmodified distribution license is installed at resources/bundled-git/LICENSE.txt.
+
+Windows packages include CPython 3.12.12 from python-build-standalone (20251014).
+Source/build scripts: https://github.com/astral-sh/python-build-standalone/releases/tag/20251014
+Python Software Foundation License and embedded third-party notices are retained at resources/bundled-python/LICENSE.txt.
+
+Document preview includes docx-preview 0.3.7 (Apache-2.0), JSZip 3.10.1
+(MIT option), and xlsx-republish 0.20.3 (Apache-2.0). License texts are in
+THIRD-PARTY-NOTICES.txt. Documents are rendered locally; no remote conversion
+service is required for DOCX or XLSX previews.

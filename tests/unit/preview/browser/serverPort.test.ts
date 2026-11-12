@@ -5,6 +5,10 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { resolveBuiltinNodeRuntime } from '@/process/resources/builtinMcp/browserRuntime';
 import {
   buildMcpSpawnCommand,
   resolveBridgeToken,
@@ -113,6 +117,71 @@ describe('buildMcpSpawnCommand — issue #3883', () => {
     expect(command).toBe('cmd.exe');
     expect(args.slice(0, 2)).toEqual(['/c', 'npx']);
     expect(args).toContain(`chrome-devtools-mcp@${version}`);
+  });
+
+  it('runs the pinned npx cli through the selected Node executable without searching PATH', () => {
+    const { command, args } = buildMcpSpawnCommand({
+      platform: 'win32',
+      version,
+      browserUrl,
+      nodeExecutable: 'C:\\OpenH3\\node.exe',
+      npmCliPath: 'C:\\OpenH3\\node_modules\\npm\\bin\\npx-cli.js',
+    });
+    expect(command).toBe('C:\\OpenH3\\node.exe');
+    expect(args).toEqual([
+      'C:\\OpenH3\\node_modules\\npm\\bin\\npx-cli.js',
+      '-y',
+      `chrome-devtools-mcp@${version}`,
+      '--browser-url',
+      browserUrl,
+    ]);
+  });
+
+  it('resolves Node and npm from the architecture-matched managed runtime manifest', () => {
+    const resources = fs.mkdtempSync(path.join(os.tmpdir(), 'openh3-browser-runtime-'));
+    try {
+      const managed = path.join(
+        resources,
+        'bundled-openh3-core',
+        `${process.platform}-${process.arch}`,
+        'managed-resources'
+      );
+      const nodeRoot = path.join(managed, 'node', `node-v24.11.0-${process.platform}-${process.arch}`);
+      fs.mkdirSync(path.join(nodeRoot, 'node_modules', 'npm', 'bin'), { recursive: true });
+      const executable = path.join(
+        nodeRoot,
+        process.platform === 'win32' ? 'node.exe' : 'bin',
+        ...(process.platform === 'win32' ? [] : ['node'])
+      );
+      fs.mkdirSync(path.dirname(executable), { recursive: true });
+      fs.writeFileSync(executable, 'node');
+      const npxCli = path.join(nodeRoot, 'node_modules', 'npm', 'bin', 'npx-cli.js');
+      fs.writeFileSync(npxCli, 'npx');
+      fs.writeFileSync(
+        path.join(managed, 'manifest.json'),
+        JSON.stringify({
+          schemaVersion: 2,
+          runtimeKey: `${process.platform}-${process.arch}`,
+          node: {
+            root: `node/node-v24.11.0-${process.platform}-${process.arch}`,
+            executable: process.platform === 'win32' ? 'node.exe' : 'bin/node',
+          },
+        })
+      );
+      expect(resolveBuiltinNodeRuntime([resources])).toEqual({ executable, npxCli });
+      fs.rmSync(path.join(managed, 'manifest.json'));
+      fs.writeFileSync(
+        path.join(managed, 'manifest.json'),
+        JSON.stringify({
+          schemaVersion: 2,
+          runtimeKey: `${process.platform}-${process.arch}`,
+          node: { root: '../../../../../escape', executable: 'node.exe' },
+        })
+      );
+      expect(resolveBuiltinNodeRuntime([resources])).toBeUndefined();
+    } finally {
+      fs.rmSync(resources, { recursive: true, force: true });
+    }
   });
 
   it('passes --browser-url as its own argv entry, never concatenated into one string', () => {

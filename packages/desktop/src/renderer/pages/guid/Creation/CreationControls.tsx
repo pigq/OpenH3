@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Button, Dropdown, Menu } from '@arco-design/web-react';
+import { Button, Dropdown, Menu, Modal } from '@arco-design/web-react';
 import { Check, Down, Magic, Plus, SettingConfig } from '@icon-park/react';
 import { useTranslation } from 'react-i18next';
 import { CLOUD_IMAGE_PRESETS } from '@/common/chat/document/creation/cloudModels';
@@ -19,9 +19,10 @@ type Props = {
   model: CreationModel;
   onChange: React.Dispatch<React.SetStateAction<CreationSelection>>;
   onManageLocal: (model: CreationModel) => void;
+  inventoryError?: string;
 };
 
-export default function CreationControls({ selection, models, model, onChange, onManageLocal }: Props) {
+export default function CreationControls({ selection, models, model, onChange, onManageLocal, inventoryError }: Props) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [configuring, setConfiguring] = useState<CreationModel>();
@@ -80,6 +81,25 @@ export default function CreationControls({ selection, models, model, onChange, o
         triggerProps={{ autoAlignPopupWidth: false, popupStyle: { maxWidth: 'calc(100vw - 24px)' } }}
         droplist={
           <Menu className={styles.menu} selectedKeys={empty ? [] : [model.id]}>
+            {selection.source === 'local' && inventoryError && (
+              <Menu.Item
+                key='inventory-diagnostics'
+                onClick={() => {
+                  setOpen(false);
+                  Modal.info({
+                    title: t('guid.creation.inventoryIncomplete'),
+                    content: (
+                      <div>
+                        <p>{t('guid.creation.inventoryIncompleteHint')}</p>
+                        <pre className='whitespace-pre-wrap break-all text-12px select-text'>{inventoryError}</pre>
+                      </div>
+                    ),
+                  });
+                }}
+              >
+                {t('guid.creation.inventoryIncomplete')}
+              </Menu.Item>
+            )}
             {empty && (
               <Menu.Item key='empty' disabled aria-disabled='true'>
                 {t(emptyLocal ? 'guid.creation.noLocalModelsHint' : `guid.creation.states.${model.state}`)}
@@ -113,7 +133,9 @@ export default function CreationControls({ selection, models, model, onChange, o
                   <span className={styles.modelName}>{modelName(item)}</span>
                   {providerName(item) && <span className={styles.providerName}>{providerName(item)}</span>}
                 </span>
-                <span className={styles.state}>{t(`guid.creation.states.${item.state}`)}</span>
+                {item.source === 'cloud' && (
+                  <span className={styles.state}>{t(`guid.creation.states.${item.state}`)}</span>
+                )}
               </Menu.Item>
             ))}
             <Menu.Item key='manage' className={styles.manageItem} onClick={manage}>
@@ -154,7 +176,9 @@ export default function CreationControls({ selection, models, model, onChange, o
           <span className={styles.modelContent}>
             <Magic theme='outline' size='14' />
             <span className={styles.modelName}>{modelName(model)}</span>
-            {!emptyLocal && <span className={styles.triggerState}>{t(`guid.creation.states.${model.state}`)}</span>}
+            {!emptyLocal && (model.source === 'cloud' || !model.profileId) && (
+              <span className={styles.triggerState}>{t(`guid.creation.states.${model.state}`)}</span>
+            )}
             <Down theme='outline' size='14' strokeWidth={4} className={open ? styles.arrowOpen : styles.arrow} />
           </span>
         </Button>

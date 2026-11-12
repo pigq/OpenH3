@@ -47,11 +47,12 @@ pub(crate) fn install_command_for_platform(platform: OfficecliInstallPlatform) -
             program: OsString::from("powershell.exe"),
             args: vec![
                 OsString::from("-NoProfile"),
+                OsString::from("-NonInteractive"),
                 OsString::from("-ExecutionPolicy"),
                 OsString::from("Bypass"),
                 OsString::from("-Command"),
                 OsString::from(format!(
-                    "$ErrorActionPreference='Stop'; try {{ $s = irm {OFFICECLI_INSTALL_PS1_MIRROR_URL} }} catch {{ $s = irm {OFFICECLI_INSTALL_PS1_URL} }}; iex $s"
+                    "$ErrorActionPreference='Stop'; $PSDefaultParameterValues['Invoke-WebRequest:UseBasicParsing']=$true; try {{ $s = irm {OFFICECLI_INSTALL_PS1_MIRROR_URL} -TimeoutSec 30 }} catch {{ $s = irm {OFFICECLI_INSTALL_PS1_URL} -TimeoutSec 30 }}; iex $s"
                 )),
             ],
         },

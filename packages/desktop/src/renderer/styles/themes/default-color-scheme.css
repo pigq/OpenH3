@@ -117,3 +117,37 @@
   --fill-white-to-black: #171b23;
   --border-special: #465163;
 }
+
+/* Local model workspace: warm paper surfaces, terracotta actions and separate memory colors. */
+:root {
+  --model-center-canvas: #faf9f6;
+  --model-center-surface: #ffffff;
+  --model-center-ink: #302e2a;
+  --model-center-muted: #716b63;
+  --model-center-border: #e9e5df;
+  --model-center-feature-border: #dfc5b9;
+  --model-center-accent: #b94f32;
+  --model-center-accent-hover: #a34229;
+  --model-center-on-accent: #ffffff;
+  --model-center-tint: #f8ece5;
+  --model-center-memory: #5d7e9f;
+  --model-center-memory-track: #e8eef3;
+  --model-center-success: #367262;
+  --model-center-success-bg: #eaf3ed;
+}
+[data-theme='dark'] {
+  --model-center-canvas: #1e1e1d;
+  --model-center-surface: #272726;
+  --model-center-ink: #f1ece5;
+  --model-center-muted: #b8b1a7;
+  --model-center-border: #3d3a35;
+  --model-center-feature-border: #705345;
+  --model-center-accent: #e79572;
+  --model-center-accent-hover: #f1aa8c;
+  --model-center-on-accent: #2c1a12;
+  --model-center-tint: #463229;
+  --model-center-memory: #89adcf;
+  --model-center-memory-track: #313e49;
+  --model-center-success: #a3ceba;
+  --model-center-success-bg: #2d3d34;
+}

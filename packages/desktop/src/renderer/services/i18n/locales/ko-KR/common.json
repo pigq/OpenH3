@@ -202,5 +202,9 @@
   },
   "selectedCount": "선택됨 {{count}}",
   "selectedSkills": "선택된 스킬",
-  "aiAssistant": "AI 어시스턴트"
+  "aiAssistant": "AI 어시스턴트",
+  "rendererRecovery": {
+    "title": "페이지 오류",
+    "description": "이 페이지를 표시할 수 없습니다. 다시 불러와 계속하세요."
+  }
 }

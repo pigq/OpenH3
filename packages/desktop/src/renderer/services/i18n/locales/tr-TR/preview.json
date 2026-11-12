@@ -221,5 +221,9 @@
   "zoomIn": "Yakınlaştır",
   "zoomOut": "Uzaklaştır",
   "zoomReset": "Görünümü sıfırla",
-  "diagramZoomHint": "Yakınlaştırmak için kaydırın • Taşımak için sürükleyin • ESC ile kapatın"
+  "diagramZoomHint": "Yakınlaştırmak için kaydırın • Taşımak için sürükleyin • ESC ile kapatın",
+  "archive": {
+    "entries": "{{count}} dosya ve klasör",
+    "loadFailed": "Bu arşiv önizlenemiyor"
+  }
 }

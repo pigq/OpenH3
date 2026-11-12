@@ -78,6 +78,7 @@ export type ConversationRowProps = {
 };
 
 export type WorkspaceGroupedHistoryProps = {
+  onNewChat?: () => void;
   onSessionClick?: () => void;
   collapsed?: boolean;
   tooltipEnabled?: boolean;

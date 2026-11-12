@@ -202,5 +202,9 @@
   "goBack": "Zurück",
   "selectedCount": "{{count}} ausgewählt",
   "selectedSkills": "Ausgewählte Skills",
-  "aiAssistant": "KI-Assistent"
+  "aiAssistant": "KI-Assistent",
+  "rendererRecovery": {
+    "title": "Seitenfehler",
+    "description": "Diese Seite konnte nicht angezeigt werden. Laden Sie sie neu."
+  }
 }

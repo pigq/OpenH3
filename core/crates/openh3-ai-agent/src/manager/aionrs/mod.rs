@@ -1,3 +1,4 @@
+mod capabilities;
 mod content;
 mod error;
 

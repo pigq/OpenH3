@@ -248,6 +248,13 @@ const AionrsConversationPanel: React.FC<{ conversation: AionrsConversation; slid
     <ChatLayout {...chatLayoutProps} conversation_id={conversation.id}>
       <ComfySessionProfile conversation={conversation} />
       <AionrsChat
+        creationRequest={
+          (
+            conversation.extra as {
+              creation_request?: import('@/common/chat/document/creation/creation').CreationRequest;
+            }
+          ).creation_request
+        }
         conversation_id={conversation.id}
         workspace={conversation.extra.workspace}
         emptySlot={emptySlot}
@@ -339,6 +346,13 @@ const ChatConversation: React.FC<{
             }
             assistantId={acpAssistantId}
             forkCapability={conversation.fork_capability}
+            creationRequest={
+              (
+                conversation.extra as {
+                  creation_request?: import('@/common/chat/document/creation/creation').CreationRequest;
+                }
+              ).creation_request
+            }
             promptCapability={conversation.prompt_capability}
           ></AcpChat>
         );

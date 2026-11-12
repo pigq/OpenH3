@@ -202,5 +202,9 @@
   },
   "selectedCount": "{{count}} انتخاب‌شده",
   "selectedSkills": "مهارت‌های انتخاب‌شده",
-  "aiAssistant": "دستیار هوش مصنوعی"
+  "aiAssistant": "دستیار هوش مصنوعی",
+  "rendererRecovery": {
+    "title": "خطای صفحه",
+    "description": "این صفحه نمایش داده نشد. برای ادامه آن را بارگیری مجدد کنید."
+  }
 }

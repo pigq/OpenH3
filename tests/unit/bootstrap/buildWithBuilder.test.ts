@@ -5,6 +5,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import * as fs from 'node:fs';
 import {
   existsSync,
   mkdirSync,
@@ -52,6 +53,32 @@ function resolveAppBuilderInstallUtil(): string {
 }
 
 describe('build-with-builder', () => {
+  it('loads the same distribution defaults for stable and beta builds without overwriting explicit environment settings', () => {
+    const source = readFileSync(resolve(repoRoot, 'scripts/build-with-builder.js'), 'utf8');
+    const functionText = source.match(
+      /function loadDistributionDefaults\(\) \{[\s\S]*?(?=\nloadDistributionDefaults\(\);)/
+    )?.[0];
+    expect(functionText).toBeTruthy();
+    for (const version of ['3.0.10', '3.0.10-beta.29']) {
+      const env = {
+        CI: 'true',
+        OPENH3_DEFAULT_MODEL: 'explicit-model',
+        OPENH3_DISTRIBUTION_DEFAULTS_JSON: JSON.stringify({
+          OPENH3_GATEWAY_URL: 'https://gateway.example/v1',
+          OPENH3_DEFAULT_MODEL: 'distribution-model',
+          OPENH3_DEFAULT_API_KEY: 'fixture-key',
+          OPENH3_EMBED_DEFAULT_API_KEY: '1',
+        }),
+        npm_package_version: version,
+      };
+      runInNewContext(`${functionText}; loadDistributionDefaults()`, { process: { env }, fs, path });
+      expect(env).toMatchObject({
+        OPENH3_GATEWAY_URL: 'https://gateway.example/v1',
+        OPENH3_DEFAULT_MODEL: 'explicit-model',
+        OPENH3_DEFAULT_API_KEY: 'fixture-key',
+      });
+    }
+  });
   it('invalidates the cached bundle when distribution defaults or credentials change', () => {
     const source = readFileSync(resolve(repoRoot, 'scripts/build-with-builder.js'), 'utf8');
     const functionText = source.match(/function computeSourceHash\(\) \{[\s\S]*?(?=\nfunction loadCachedHash)/)?.[0];
@@ -93,12 +120,14 @@ childProcess.execSync = function mockedExecSync(command) {
     );
 
     let movedExistingOut = false;
+    let createdTestOut = false;
     try {
       if (existsSync(outDir)) {
         renameSync(outDir, backupOutDir);
         movedExistingOut = true;
       }
       mkdirSync(resolve(outDir, 'main'), { recursive: true });
+      createdTestOut = true;
       mkdirSync(resolve(outDir, 'renderer'), { recursive: true });
       writeFileSync(resolve(outDir, 'main/index.js'), 'console.log("main placeholder");\n', 'utf8');
       writeFileSync(
@@ -123,7 +152,7 @@ childProcess.execSync = function mockedExecSync(command) {
       expect(result.status).not.toBe(0);
       expect(result.stderr + result.stdout).toContain('Renderer build output is incomplete');
     } finally {
-      rmSync(outDir, { recursive: true, force: true });
+      if (createdTestOut) rmSync(outDir, { recursive: true, force: true });
       if (movedExistingOut) {
         renameSync(backupOutDir, outDir);
       }
@@ -365,6 +394,7 @@ childProcess.execSync = function mockedExecSync(command) {
     );
 
     let movedExistingOut = false;
+    const hadExistingOut = existsSync(outDir);
     try {
       if (existsSync(outDir)) {
         renameSync(outDir, backupOutDir);
@@ -396,7 +426,7 @@ childProcess.execSync = function mockedExecSync(command) {
       const calls = JSON.parse(readFileSync(callsPath, 'utf8')) as Array<{ arch?: string } | null>;
       expect(calls).toContainEqual(expect.objectContaining({ arch: expectedArch }));
     } finally {
-      rmSync(outDir, { recursive: true, force: true });
+      if (movedExistingOut || !hadExistingOut) rmSync(outDir, { recursive: true, force: true });
       if (movedExistingOut) {
         renameSync(backupOutDir, outDir);
       }

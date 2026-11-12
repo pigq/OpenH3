@@ -75,7 +75,7 @@ export const useAcpInitialMessage = ({
         const initialMessage = JSON.parse(storedMessage);
         const guidDraftScope = getGuidDraftScope();
         if (!isGuidDraftScopeCurrent(initialMessage.guidDraftScope)) return;
-        let input = typeof initialMessage.input === 'string' ? initialMessage.input : '';
+        const input = typeof initialMessage.input === 'string' ? initialMessage.input : '';
         // Guid-page initial files are source-tagged ChatFileRefs (`local` for
         // backend-machine picks, `upload` for device uploads). Body stays plain
         // text; the backend resolves each ref and injects the [[AION_FILES]]
@@ -102,15 +102,7 @@ export const useAcpInitialMessage = ({
             request.source !== 'cloud' &&
             Boolean(request.family) &&
             (request.intent === 'install' || request.intent === 'repair' || request.intent === 'install-other');
-          const operation = await prepareCreationEntry(initialMessage.creationRequestId, conversation_id, request);
-          if (operation) {
-            input += `\n\n${t('guid.comfy.operation.submittedContext', {
-              id: operation.id,
-              state: t(`guid.comfy.operation.states.${operation.state}`),
-            })}`;
-            void mutate(['comfy.activity', conversation_id]).catch((): void => undefined);
-            emitter.emit('chat.history.refresh');
-          }
+          await prepareCreationEntry(initialMessage.creationRequestId, conversation_id, request);
           bindingPending = false;
         } else if (typeof initialMessage.creationRequestId === 'string') {
           bindingPending = true;

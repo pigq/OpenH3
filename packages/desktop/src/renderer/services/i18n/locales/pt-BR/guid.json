@@ -1,9 +1,18 @@
 {
-  "promptExamplesHint": "Experimente estas instruções",
+  "promptExamplesHint": "Comece com uma ideia criativa",
   "defaultPrompts": {
-    "understand": "Conheça este projeto e explique em palavras simples o que ele faz e por onde começar",
-    "cleanup": "Encontre arquivos duplicados e inúteis nesta pasta e liste-os para minha confirmação",
-    "create": "Crie uma página pessoal bonita para mim e abra-a quando estiver pronta"
+    "image": "Gere uma rua à noite com chuva e estilo cinematográfico, vertical 3:4",
+    "reference": "Crie um pôster de retrato com minha foto enviada, preservando a identidade da pessoa",
+    "story": "Crie uma história curta sobre o dia de um entregador, com edição e música",
+    "models": "Verifique meu computador, instale modelos locais adequados e valide a geração de imagens",
+    "product": "Crie um anúncio minimalista de café no formato horizontal 16:9",
+    "portrait": "Transforme meu retrato em capa de revista com luz natural, preservando os traços do rosto",
+    "travel": "Crie um filme de viagem à beira-mar com planejamento de cenas, edição e música",
+    "repair": "Verifique meus modelos locais, repare configurações e teste a geração",
+    "poster": "Crie um pôster floral “Cartas entre Flores” no formato vertical 3:4",
+    "restyle": "Transforme minha foto em aquarela, mantendo o tema e a composição",
+    "storyboard": "Conte “uma padaria abre antes do amanhecer” em três atos com estilo visual consistente",
+    "edit": "Edite meus vídeos em um curta dinâmico com legendas e música"
   },
   "selectAssistantHint": "Selecione um assistente para iniciar uma tarefa",
   "workspace": {
@@ -33,18 +42,19 @@
       "moss-image-sft": "Geração de texto e composição chineses (SFT)"
     },
     "actions": {
-      "install": "Instalação guiada",
+      "install": "Iniciar instalação",
       "repair": "Verificar / reparar",
       "install-other": "Outra versão",
       "generate": "Gerar"
     },
     "intentSummary": "Modelo local: {{model}} · {{intent}} · {{profile}}.",
     "prompts": {
-      "install": "Use comfyui-local para detectar o dispositivo, escolher uma versão local compatível de {{family}}, baixá-la e instalá-la com o fluxo de trabalho correspondente.",
-      "repair": "Use comfyui-local para diagnosticar e reparar o perfil local {{profile}} de {{family}}, preservando os outros perfis funcionais.",
-      "install-other": "Use comfyui-local para detectar o dispositivo e instalar outra versão compatível e independente de {{family}} com seu fluxo de trabalho, preservando as versões funcionais."
+      "install": "Instale {{family}} localmente com o fluxo de trabalho correspondente. Reutilize ambientes e arquivos compatíveis, escolha uma configuração adequada, corrija os erros e valide uma geração real antes de concluir.",
+      "repair": "Diagnostique e repare o perfil local {{family}} {{profile}}, preservando os outros ambientes e modelos funcionais. Valide uma geração real.",
+      "install-other": "Instale separadamente outra versão local de {{family}} com seu fluxo de trabalho, preservando as versões funcionais. Corrija os erros e valide uma geração real."
     },
     "operation": {
+      "recovering": "O Agent está diagnosticando e corrigindo esta tarefa.",
       "title": "Plano de modelo ComfyUI",
       "authorize": "Confirmar plano e pedir ao assistente para continuar",
       "continue": "Pedir ao assistente para continuar",
@@ -68,9 +78,11 @@
       },
       "snapshotDirectory": "Snapshot de recuperação",
       "submittedContext": "O aplicativo enviou a instalação {{id}} ({{state}}); o painel de progresso é atualizado automaticamente. Explique o estado da operação existente sem enviar outra instalação nem pedir confirmação no chat.",
-      "preparationFailed": "A preparação da instalação não foi concluída: {{reason}}. A solicitação foi mantida; confira os detalhes no progresso do trabalho."
+      "preparationFailed": "A preparação da instalação não foi concluída: {{reason}}. A solicitação foi mantida; confira os detalhes no progresso do trabalho.",
+      "agentPreparing": "Enviado ao Agent; aguardando a verificação do ambiente de instalação.",
+      "agentRetry": "Continue instalando {{model}}. Verifique as tarefas e os erros salvos e use comfyui-local para diagnosticar e retomar sem criar uma instalação duplicada."
     },
-    "profileSummary": "Perfil local selecionado: {{profile}}. Use exatamente este perfil.",
+    "profileSummary": "Perfil local selecionado: {{profile}}. Preserve o modelo, a precisão e os parâmetros solicitados; uma variante de reparo validada pode ser adotada para concluir o reparo.",
     "session": {
       "title": "Perfil de geração local",
       "hint": "Aplica-se à próxima geração. Os trabalhos enviados mantêm o perfil salvo.",
@@ -90,7 +102,9 @@
       },
       "adjusted": "Os parâmetros foram ajustados dentro dos limites aprovados deste perfil.",
       "actualInput": "Parâmetros reais de geração",
-      "submissionUncertain": "O envio não foi confirmado. Verifique a fila atual do ComfyUI antes de enviar novamente."
+      "submissionUncertain": "O envio não foi confirmado. Verifique a fila atual do ComfyUI antes de enviar novamente.",
+      "recovered": "Recuperado · ver falha anterior",
+      "elapsed": "Tempo decorrido: {{seconds}} segundos"
     },
     "illustrativeCover": "Imagem ilustrativa",
     "preview": {
@@ -112,7 +126,34 @@
       "krea2": "comfyui-local: references/z-image.md#krea2 — BF16 / FP8 / INT8-ConvRot / NVFP4; Turbo steps=8, CFG=1; CLIPLoader.type=krea2. Use Turbo por padrão, sem misturar Raw nem adicionar LoRA de estilo automaticamente. Esta base valida apenas texto para imagem; referências de estilo exigem um fluxo compatível separado.",
       "moss-image-sft": "comfyui-local: references/z-image.md#moss-image-sft — MOSS-Image-SFT, BF16 / INT8-ConvRot / INT8-ConvRot+W4A8; steps=50, CFG=3; CLIPLoader.type=moss_image. Keep SFT separate from Base and use the fixed native moss_image ComfyUI route with shift=5 and negative-branch SLG layer=22. Prefer ModelScope, then verified domestic mirror, then upstream with fixed revision, size and SHA-256; only real generation verification marks the profile usable."
     },
-    "imageRecipeRequirements": "Use openh3_comfy_environment para verificar SO, arquitetura GPU, driver, Python/Torch, kernels reais de precisão/atenção, VRAM/RAM livre, offload e disco. Diferencie requisitos do dispositivo não atendidos de detecção incompleta e liste o que falta; não escolha só pela VRAM. NVFP4 exige Blackwell compatível. Prefira arquivos verificados do ModelScope, depois hf-mirror.com com SHA-256 idêntico e a fonte oficial; fixe revision, tamanho e SHA-256 e retome downloads. Explique fontes não verificadas ou com autorização; não invente versões. Marque disponível apenas após gerar uma imagem real com sucesso."
+    "imageRecipeRequirements": "Use openh3_comfy_environment para verificar SO, arquitetura GPU, driver, Python/Torch, kernels reais de precisão/atenção, VRAM/RAM livre, offload e disco. Diferencie requisitos do dispositivo não atendidos de detecção incompleta e liste o que falta; não escolha só pela VRAM. NVFP4 exige Blackwell compatível. Prefira arquivos verificados do ModelScope, depois hf-mirror.com com SHA-256 idêntico e a fonte oficial; fixe revision, tamanho e SHA-256 e retome downloads. Explique fontes não verificadas ou com autorização; não invente versões. Marque disponível apenas após gerar uma imagem real com sucesso.",
+    "workflows": {
+      "advanced": "Fluxos avançados",
+      "mode": "Seleção de fluxo",
+      "auto": "Escolher fluxo automaticamente",
+      "fixed": "Fluxo fixo",
+      "autoHint": "Escolhe um fluxo para a tarefa dentro do modelo selecionado. Fixe um fluxo para sempre usar essa rota.",
+      "details": "Detalhes",
+      "environment": "Ambiente",
+      "workflow": "Fluxo de trabalho",
+      "states": {
+        "verified": "Verificado",
+        "pending-validation": "Validação pendente",
+        "needs-preparation": "Requer preparação",
+        "needs-repair": "Requer reparo"
+      },
+      "tasks": {
+        "text-to-image": "Texto para imagem",
+        "image-to-image": "Imagem para imagem",
+        "image-edit": "Edição de imagem",
+        "multi-reference-image": "Várias imagens de referência",
+        "inpaint": "Retoque localizado",
+        "text-to-video": "Texto para vídeo",
+        "image-to-video": "Imagem para vídeo",
+        "reference-to-video": "Referência para vídeo",
+        "first-last-frame-video": "Quadros inicial e final para vídeo"
+      }
+    }
   },
   "creation": {
     "states": {
@@ -140,7 +181,7 @@
     "cloudVideo": "Modelo de vídeo na nuvem",
     "manageLocal": "Gerenciar modelos locais",
     "configureCloud": "Configurar API na nuvem",
-    "requestSummary": "Configurações de criação: {{kind}} · {{source}} · {{model}} ({{state}}). Use o modelo selecionado; se estiver indisponível, peça para eu instalá-lo ou configurá-lo. Nunca mude automaticamente para outro modelo ou serviço em nuvem.",
+    "requestSummary": "Configurações de criação (contexto do aplicativo; as instruções do usuário têm prioridade): {{kind}} · {{source}} · {{model}} ({{state}}). Preserve o modelo selecionado e os parâmetros solicitados. Se estiver indisponível, diagnostique, configure ou repare conforme o modo de aprovação atual e continue a tarefa. O modo totalmente automático dispensa confirmação adicional no chat; as permissões reais das ferramentas continuam valendo. Pergunte apenas por dados obrigatórios ausentes ou por uma decisão de alterar um modelo ou parâmetro que o usuário tenha exigido preservar explicitamente.",
     "toolsUnavailable": "As ferramentas de criação ainda não estão prontas. Tente novamente em breve.",
     "install": {
       "states": {
@@ -181,11 +222,25 @@
       "invalid": "Check the service name, API URL and model. OpenAI Videos requires a model and API key.",
       "uncertain": "The server may have received this request. Automatic resubmission is disabled to prevent duplicate generation.",
       "retrying": "Waiting for the cloud service to respond. This task will be checked again automatically.",
-      "failed": "Video generation could not complete. Check the service status or task details before starting a new request."
+      "failed": "Video generation could not complete. Check the service status or task details before starting a new request.",
+      "stages": {
+        "submitting": "Submitting",
+        "queued": "Queued",
+        "generating": "Generating",
+        "downloading": "Downloading result",
+        "completed": "Completed",
+        "failed": "Failed"
+      },
+      "background": "Cloud generation is still running. You can continue chatting.",
+      "progressUnknown": "The provider does not report a percentage. Status is checked automatically.",
+      "elapsed": "Elapsed: {{seconds}} seconds",
+      "lastChecked": "Last status received {{seconds}} seconds ago"
     },
     "noLocalModels": "Sem modelos locais",
     "noLocalModelsHint": "Nenhum modelo local encontrado. Instale ou adicione um.",
-    "addCloud": "Adicionar API na nuvem"
+    "addCloud": "Adicionar API na nuvem",
+    "inventoryIncomplete": "Detalhes da busca de modelos",
+    "inventoryIncompleteHint": "Alguns locais não puderam ser totalmente verificados. Os modelos encontrados são mantidos. Copie os detalhes para diagnóstico."
   },
   "aiCreation": "Criação com IA",
   "aiCreationSubtitle": "Transforme sua imaginação em algo novo",
@@ -417,5 +472,142 @@
   },
   "templateReferenceRequired": "Referência necessária",
   "templateReferenceHint": "Envie um retrato ou imagem original antes da solicitação.",
-  "templateReferencePrompt": "Use minhas imagens de referência, preservando a identidade ou o tema original conforme o modelo. Se não houver referência, peça o envio antes de gerar. Não invente o conteúdo de referência. Proporção: {{ratio}}.\n\n{{prompt}}"
+  "templateReferencePrompt": "Use minhas imagens de referência, preservando a identidade ou o tema original conforme o modelo. Se não houver referência, peça o envio antes de gerar. Não invente o conteúdo de referência. Proporção: {{ratio}}.\n\n{{prompt}}",
+  "localModels": {
+    "title": "Modelos locais",
+    "subtitle": "Encontre modelos para este dispositivo e gerencie suas ferramentas criativas locais.",
+    "preview": "Exemplo de {{name}}",
+    "noPreview": "Nenhum exemplo disponível",
+    "play": "Reproduzir exemplo",
+    "pause": "Pausar exemplo",
+    "unknown": "Não medido",
+    "device": "Este dispositivo",
+    "checkedAt": "Verificado às {{time}}",
+    "refresh": "Atualizar",
+    "graphics": "Placa de vídeo",
+    "vram": "Memória de vídeo",
+    "sharedMemory": "Memória compartilhada",
+    "ram": "Memória do sistema",
+    "available": "{{value}} disponíveis",
+    "cpu": "Processador",
+    "system": "Sistema",
+    "driver": "Driver da GPU",
+    "disk": "Espaço em disco",
+    "directory": "Pasta de instalação",
+    "changeDirectory": "Escolher pasta",
+    "environment": "Detalhes do ambiente",
+    "environmentHint": "O Agent verifica ou prepara Python e ComfyUI durante a instalação. A ausência do ambiente não indica incompatibilidade do dispositivo.",
+    "python": "Python",
+    "workflowCount": "{{count}} fluxos de trabalho",
+    "downloadSize": "Download: {{value}}",
+    "reusedSize": "Reutilizável: {{value}}",
+    "details": "Ver detalhes",
+    "assessment": "Avaliação do dispositivo",
+    "assessmentHint": "A capacidade necessária é estimada. O Agent verifica o fluxo e o ambiente reais antes da instalação.",
+    "totalSize": "Total de componentes",
+    "download": "Para baixar",
+    "reused": "Já disponível",
+    "versions": "Versões e fluxos",
+    "noVersions": "O Agent escolhe uma versão e um fluxo adequados durante a instalação.",
+    "workflow": "Fluxo de trabalho",
+    "components": "Componentes",
+    "evidence": "Evidências de validação",
+    "noEvidence": "Nenhuma geração bem-sucedida foi verificada ainda.",
+    "loading": "Verificando dispositivo e modelos",
+    "unavailable": "Não foi possível ler as informações dos modelos locais.",
+    "retry": "Tentar novamente",
+    "models": "Biblioteca de modelos",
+    "catalogHint": "As recomendações consideram a capacidade do dispositivo e os componentes existentes.",
+    "search": "Buscar modelos ou versões",
+    "filter": "Tipo de modelo",
+    "noModels": "Nenhum modelo correspondente. Altere o filtro ou veja todos os modelos.",
+    "tabs": {
+      "recommended": "Recomendados",
+      "all": "Todos os modelos",
+      "installed": "Instalados"
+    },
+    "filters": {
+      "all": "Todos os tipos",
+      "image": "Imagem",
+      "video": "Vídeo"
+    },
+    "actions": {
+      "install": "Iniciar instalação",
+      "use": "Usar modelo",
+      "progress": "Ver progresso",
+      "repair": "Verificar / reparar"
+    },
+    "status": {
+      "verified": "Verificado",
+      "compatible": "Capacidade adequada",
+      "unknown": "Requer avaliação",
+      "insufficient": "Requer ajustes"
+    },
+    "purpose": {
+      "image-generation": "Geração de imagens",
+      "image-edit": "Edição de imagens",
+      "video": "Geração de vídeos"
+    },
+    "errors": {
+      "load": "Não foi possível atualizar as informações do dispositivo. Tente novamente antes de instalar.",
+      "action": "Não foi possível abrir a tarefa do modelo. Tente novamente.",
+      "directory": "Não foi possível abrir o seletor de pastas. Tente novamente."
+    },
+    "reasons": {
+      "verified-workflow": "Um fluxo instalado passou na validação de geração.",
+      "component-metadata-missing": "Os tamanhos dos componentes não foram confirmados. O Agent avaliará a instalação.",
+      "workflow-missing": "Um fluxo adequado ainda precisa ser preparado.",
+      "hardware-unknown": "A capacidade da GPU não pôde ser medida. O Agent inspecionará o dispositivo.",
+      "platform-unknown": "A compatibilidade desta plataforma precisa de mais avaliação.",
+      "gpu-architecture-insufficient": "Esta versão requer outra arquitetura de GPU.",
+      "native-kernel-unverified": "Os operadores nativos ainda precisam ser verificados neste dispositivo.",
+      "runtime-unverified": "O ambiente Python e ComfyUI ainda precisa ser validado.",
+      "memory-insufficient": "A memória disponível está abaixo do requisito estimado desta versão.",
+      "disk-insufficient": "O disco selecionado não tem espaço livre suficiente.",
+      "disk-unknown": "O espaço livre da pasta selecionada não pôde ser medido.",
+      "temporary-memory-pressure": "Outros aplicativos estão usando memória. Libere capacidade antes de executar.",
+      "offload-required": "Esta configuração deve usar transferência para a memória do sistema.",
+      "capacity-compatible": "Este dispositivo atende aos requisitos de capacidade conhecidos."
+    },
+    "installContext": "Os novos arquivos devem ser colocados em {{directory}}. Reutilize os ambientes e arquivos compatíveis existentes sem movê-los. Hardware verificado em {{checkedAt}}. Configuração sugerida: {{candidate}} (apenas como referência; verifique o hardware atual e escolha o plano real).",
+    "automaticCandidate": "Escolher automaticamente",
+    "newInstallLocation": "Novo local de instalação",
+    "newFilesOnly": "Somente novos arquivos usam este local. Os arquivos existentes permanecem onde estão.",
+    "journey": {
+      "label": "Fluxo de criação local",
+      "device": "Verificar hardware",
+      "choose": "Escolher modelo",
+      "create": "Começar a criar",
+      "deviceHint": "Veja os recursos deste computador",
+      "chooseHint": "Encontre modelos de imagem e vídeo adequados",
+      "createHint": "O Agent instala e verifica"
+    },
+    "recommendedHeading": "Recomendados para este computador",
+    "resourceHint": "A VRAM atende ao cálculo do modelo; a RAM mantém os componentes carregados. As recomendações consideram ambas e o espaço em disco.",
+    "descriptions": {
+      "h3": "Transforme texto ou imagens de referência em vídeo para paisagens, produtos e cenas narrativas.",
+      "fasth3-omni": "Combine referências de imagem, vídeo ou áudio para personagens, extensão de cenas e criações multimídia.",
+      "qwen-edit": "Edite imagens com linguagem natural: roupas, fundos e materiais de produtos.",
+      "z-image": "Crie imagens a partir de texto para retratos, conceitos de produtos e ideias visuais.",
+      "flux-3-image-klein": "Um modelo leve para conceitos visuais, cenas de produtos e esboços criativos.",
+      "moss-image-base": "Foco em texto chinês e composição para pôsteres, imagens informativas e layouts.",
+      "moss-image-sft": "Um modelo MOSS ajustado para pôsteres chineses, retratos e design de cenas.",
+      "krea2": "Explore imagens estilizadas para conceitos visuais e inspiração de design.",
+      "image": "Crie imagens a partir de descrições para ilustrações, produtos e cenas.",
+      "editing": "Crie e edite imagens para adaptar referências, alterar cenas e criar designs.",
+      "video": "Crie vídeos locais para cenas narrativas, produtos e paisagens."
+    },
+    "agentHandlesSetup": "Descreva o que deseja criar. O Agent verifica o ambiente, escolhe um fluxo de trabalho e faz os reparos necessários.",
+    "technicalDetails": "Detalhes técnicos",
+    "precisionGuide": {
+      "full": "Precisão de 16 bits e pesos maiores; para recursos amplos e menor impacto de quantização.",
+      "int8": "Pesos inteiros de 8 bits ocupam menos que 16 bits; para criar no dia a dia com menos recursos.",
+      "fp8": "Pesos de ponto flutuante de 8 bits reduzem o tamanho; para GPUs com as operações necessárias.",
+      "w4a8": "Modelo principal INT8 e codificador de texto com pesos de 4 bits; usa menos recursos que INT8 padrão.",
+      "nvfp4": "Ponto flutuante de 4 bits economiza mais espaço; o Agent verifica NVFP4 na instalação.",
+      "mixed": "Os componentes usam precisões diferentes para equilibrar tamanho e requisitos; exige GPU compatível.",
+      "hint": "Os usos criativos são iguais; os recursos e a quantização mudam. Velocidade e qualidade dependem também da GPU, do fluxo e da entrada. Em dúvida, comece por Recomendados."
+    }
+  },
+  "refreshPrompts": "Outras ideias"
 }

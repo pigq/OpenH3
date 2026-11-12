@@ -13,6 +13,7 @@
  */
 
 import type { IConfirmation } from '@/common/chat/chatLib';
+import { comfyApi } from '@/common/chat/document/creation/comfyApi';
 export { contentCatalog } from '../contentCatalog/bridge';
 import type { AcpSlashCommandApiItem } from '@/common/chat/slash/types';
 import { bridge } from '@/common/platform/bridge';
@@ -269,6 +270,26 @@ export const auth = {
 // Conversation — REST + WS
 // ---------------------------------------------------------------------------
 
+const conversationStop = httpPost<
+  { runtime: TConversationRuntimeSummary },
+  { conversation_id: string; turn_id: string }
+>(
+  (p) => `/api/conversations/${p.conversation_id}/cancel`,
+  (p) => ({ turn_id: p.turn_id })
+);
+const conversationSend = httpPost<ISendMessageResult, ISendMessageParams>(
+  (p) => `/api/conversations/${p.conversation_id}/messages`,
+  (p) => ({
+    content: p.input,
+    files: p.files,
+    sessions: p.sessions,
+    loading_id: p.loading_id,
+    inject_skills: p.inject_skills,
+  })
+);
+const continuationStopEpochs = new Map<string, number>();
+const hasLocalMediaControl = () => typeof window !== 'undefined' && Boolean(window.electronAPI?.getMediaServiceUiToken);
+
 export const conversation = {
   create: withResponseMap(
     httpPost<TChatConversation, ICreateConversationParams>('/api/conversations', (p) => buildCreateConversationBody(p)),
@@ -358,28 +379,50 @@ export const conversation = {
     (p) => `/api/conversations/${p.conversation_id}/active-lease`,
     () => undefined
   ),
-  stop: httpPost<{ runtime: TConversationRuntimeSummary }, { conversation_id: string; turn_id: string }>(
-    (p) => `/api/conversations/${p.conversation_id}/cancel`,
-    (p) => ({ turn_id: p.turn_id })
-  ),
+  stop: {
+    ...conversationStop,
+    invoke: async (params: { conversation_id: string; turn_id: string }) => {
+      continuationStopEpochs.set(params.conversation_id, (continuationStopEpochs.get(params.conversation_id) ?? 0) + 1);
+      if (hasLocalMediaControl()) {
+        try {
+          await comfyApi.continuationControl(params.conversation_id, 'pause');
+        } catch (error) {
+          // An unavailable media service must never prevent stopping the real Agent.
+          console.warn('[comfy] continuation stop persistence unavailable', error);
+        }
+      }
+      return conversationStop.invoke(params);
+    },
+  },
   killTerminal: httpPost<void, { conversation_id: string; terminal_id: string }>(
     (p) => `/api/conversations/${p.conversation_id}/terminals/${encodeURIComponent(p.terminal_id)}/kill`,
     () => undefined
   ),
   activeCount: httpGet<{ count: number }>('/api/conversations/active-count'),
-  sendMessage: httpPost<ISendMessageResult, ISendMessageParams>(
-    (p) => `/api/conversations/${p.conversation_id}/messages`,
-    (p) => ({
-      content: p.input,
-      files: p.files,
-      // `@@` session references. Omitting this silently breaks the feature end
-      // to end: the backend's send-boundary resolver would always see an empty
-      // list and neither side would report an error.
-      sessions: p.sessions,
-      loading_id: p.loading_id,
-      inject_skills: p.inject_skills,
-    })
-  ),
+  sendMessage: {
+    ...conversationSend,
+    invoke: async (params: ISendMessageParams) => {
+      // This bridge is the visible user-send path. Application continuation uses
+      // its own hidden Core POST and must never clear a user's stop instruction.
+      const localEpoch = continuationStopEpochs.get(params.conversation_id) ?? 0;
+      const control =
+        hasLocalMediaControl() && (params.input.trim() || params.files?.length)
+          ? await comfyApi.continuationControl(params.conversation_id, 'status').catch((): undefined => undefined)
+          : undefined;
+      const result = await conversationSend.invoke(params);
+      if (
+        result.turn_id &&
+        control?.paused &&
+        localEpoch === (continuationStopEpochs.get(params.conversation_id) ?? 0)
+      ) {
+        await comfyApi.continuationControl(params.conversation_id, 'resume', control.epoch).catch((error: unknown) => {
+          // Preserve the accepted send; the worker remains paused if persistence fails.
+          console.warn('[comfy] continuation resume persistence unavailable', error);
+        });
+      }
+      return result;
+    },
+  },
   getSlashCommands: httpGet<AcpSlashCommandApiItem[], { conversation_id: string }>(
     (p) => `/api/conversations/${p.conversation_id}/slash-commands`
   ),

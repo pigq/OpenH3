@@ -13,7 +13,7 @@
  */
 
 import React from 'react';
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const hoisted = vi.hoisted(() => ({
@@ -70,5 +70,16 @@ describe('LocalImageView workspace root from ConversationContext', () => {
       path: './material.jpeg',
       workspace: undefined,
     });
+  });
+
+  it('uses a bounded uncropped preview and opens the full image from a keyboard-accessible control', async () => {
+    hoisted.getImageBase64.mockResolvedValueOnce('data:image/png;base64,fixture');
+    renderInConversation('/workspace/demo', './portrait.png');
+    const image = await screen.findByAltText('demo');
+    expect(image).toHaveStyle({ maxHeight: 'min(420px, 52dvh)', width: 'auto', height: 'auto', objectFit: 'contain' });
+    const trigger = screen.getByRole('button', { name: /demo/ });
+    expect(trigger).toHaveStyle({ maxWidth: 'min(100%, 640px)' });
+    fireEvent.click(trigger);
+    await waitFor(() => expect(document.querySelector('.arco-image-preview')).not.toBeNull());
   });
 });

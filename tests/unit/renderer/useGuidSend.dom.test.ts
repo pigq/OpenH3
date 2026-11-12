@@ -5,11 +5,15 @@
  */
 
 import { act, renderHook } from '@testing-library/react';
+import fs from 'node:fs';
+import path from 'node:path';
+import { createInstance } from 'i18next';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import i18nConfig from '@/common/config/i18n-config.json';
 import type { IMcpServer } from '@/common/config/storage';
 import { useGuidSend, type GuidSendDeps } from '@/renderer/pages/guid/hooks/useGuidSend';
 import { Message } from '@arco-design/web-react';
-import { resetGuidDraft, setGuidTemplateSnapshot } from '@/renderer/pages/guid/hooks/useGuidDraft';
+import { resetGuidDraft, setGuidTemplateSnapshot, useGuidDraft } from '@/renderer/pages/guid/hooks/useGuidDraft';
 import { templateSnapshotFixture } from '../contentCatalog/galleryFixture';
 import { ensureBackendMcpCatalog } from '@/renderer/hooks/mcp/catalog';
 import { BackendHttpError } from '@/common/adapter/httpBridge';
@@ -106,6 +110,121 @@ const createGenerationDeps = (): GuidSendDeps => ({
 
 describe('useGuidSend', () => {
   it.each(
+    i18nConfig.supportedLanguages.flatMap((language) =>
+      ['default', 'bypassPermissions'].map((mode) => ({ language, mode }))
+    )
+  )('keeps generation repair within the selected approval mode in $language ($mode)', async ({ language, mode }) => {
+    const policies: Record<string, { repair: RegExp; approval: RegExp; obsoleteGate: string }> = {
+      'zh-CN': { repair: /诊断.*修复/, approval: /当前审批模式/, obsoleteGate: '请先询问我是否安装' },
+      'en-US': { repair: /diagnose.*repair/, approval: /current approval mode/, obsoleteGate: 'ask me to install' },
+      'ja-JP': { repair: /診断.*修復/, approval: /現在の承認モード/, obsoleteGate: 'インストールまたは設定を依頼' },
+      'zh-TW': { repair: /診斷.*修復/, approval: /目前的審批模式/, obsoleteGate: '請先詢問我是否安裝' },
+      'ko-KR': { repair: /진단.*복구/, approval: /현재 승인 모드/, obsoleteGate: '설치나 설정을 요청' },
+      'tr-TR': {
+        repair: /tanıla.*onar/,
+        approval: /geçerli onay modu/,
+        obsoleteGate: 'yüklememi veya yapılandırmamı iste',
+      },
+      'ru-RU': {
+        repair: /диагностику.*исправление/,
+        approval: /текущего режима подтверждений/,
+        obsoleteGate: 'попроси меня установить',
+      },
+      'uk-UA': {
+        repair: /діагностику.*виправлення/,
+        approval: /поточного режиму підтверджень/,
+        obsoleteGate: 'попроси мене встановити',
+      },
+      'pt-BR': {
+        repair: /diagnostique.*repare/,
+        approval: /modo de aprovação atual/,
+        obsoleteGate: 'peça para eu instalá-lo',
+      },
+      'de-DE': {
+        repair: /diagnostiziere.*repariere/,
+        approval: /aktuellen Genehmigungsmodus/,
+        obsoleteGate: 'bitte mich um Installation',
+      },
+      'es-ES': {
+        repair: /diagnostica.*repara/,
+        approval: /modo de aprobación actual/,
+        obsoleteGate: 'pídeme instalarlo',
+      },
+      'fr-FR': {
+        repair: /diagnostique.*répare/,
+        approval: /mode d’approbation actuel/,
+        obsoleteGate: 'demande-moi de l’installer',
+      },
+      'fa-IR': { repair: /عیب‌یابی.*تعمیر/, approval: /حالت تأیید فعلی/, obsoleteGate: 'از من بخواه آن را نصب' },
+    };
+    const guid = JSON.parse(
+      fs.readFileSync(path.resolve(`packages/desktop/src/renderer/services/i18n/locales/${language}/guid.json`), 'utf8')
+    );
+    const translation = createInstance();
+    await translation.init({ lng: language, fallbackLng: false, resources: { [language]: { translation: { guid } } } });
+    const deps = createGenerationDeps();
+    deps.t = translation.t as GuidSendDeps['t'];
+    deps.localeKey = language;
+    deps.selectedMode = mode;
+    deps.input =
+      'Use this exact model and precision at 1024x1024. Repair failures without changing those requirements.';
+    deps.creationModel = { ...deps.creationModel!, state: 'unavailable', available: false };
+    const { result } = renderHook(() => useGuidSend(deps));
+    await act(async () => {
+      expect(await result.current.handleSend()).toBe(true);
+    });
+    const payload = createConversationInvokeMock.mock.calls[0][0];
+    const initial = JSON.parse(sessionStorage.getItem('acp_initial_message_conv-1')!);
+    expect(initial.input).toMatch(policies[language].repair);
+    expect(initial.input).toMatch(policies[language].approval);
+    expect(initial.input).not.toContain(policies[language].obsoleteGate);
+    const variantTerms: Record<string, RegExp> = {
+      'zh-CN': /已验证的修复变体/,
+      'en-US': /validated repair variant/,
+      'ja-JP': /検証済みの修復バリアント/,
+      'zh-TW': /已驗證的修復變體/,
+      'ko-KR': /검증된 복구 변형/,
+      'tr-TR': /doğrulanmış bir onarım varyantı/,
+      'ru-RU': /проверенный исправленный вариант/,
+      'uk-UA': /перевірений виправлений варіант/,
+      'pt-BR': /variante de reparo validada/,
+      'de-DE': /validierte Reparaturvariante/,
+      'es-ES': /variante de reparación validada/,
+      'fr-FR': /variante de réparation validée/,
+      'fa-IR': /نسخهٔ اصلاح‌شده و اعتبارسنجی‌شده/,
+    };
+    expect(initial.input).toMatch(variantTerms[language]);
+    expect(initial.input.startsWith(`${deps.input}\n\n`)).toBe(true);
+    expect(initial.input).toContain('qwen-fp8');
+    expect(initial.input).not.toContain('{{');
+    expect(initial.guidDraft).toBe(deps.input);
+    expect(payload.assistant.conversation_overrides.permission).toBe(mode);
+    expect(payload.extra.creation_request).toMatchObject({
+      profileId: 'qwen-fp8',
+      source: 'local',
+      intent: 'generate',
+    });
+  });
+
+  it('clears the submitted install prompt from the persistent home draft', async () => {
+    const draft = renderHook(() => useGuidDraft());
+    const prompt = '调用 comfyui-local 自动安装 Qwen-Edit';
+    act(() => draft.result.current[1](prompt));
+    const deps = createDeps();
+    deps.input = prompt;
+    deps.setInput = draft.result.current[1];
+    deps.creationIntent = { family: 'qwen-edit', intent: 'install' };
+
+    const { result } = renderHook(() => useGuidSend(deps));
+    await act(async () => {
+      await result.current.handleSend();
+    });
+
+    expect(draft.result.current[0]).toBe('');
+    expect(JSON.parse(sessionStorage.getItem('acp_initial_message_conv-1')!).input).toBe(prompt);
+  });
+
+  it.each(
     COMFY_FAMILIES.flatMap(({ family, name, kind }) =>
       (['install', 'repair', 'install-other'] as const).flatMap((intent) =>
         ['claude', 'aionrs'].map((backend) => ({ family, name, kind, intent, backend }))
@@ -137,7 +256,15 @@ describe('useGuidSend', () => {
         disabled_builtin_skill_ids: ['disabled-skill'],
         permission: 'bypassPermissions',
       });
-      expect(payload.extra.creation_request).toMatchObject({ family, intent, profileId, name, kind, source: 'local' });
+      expect(payload.extra.creation_request).toMatchObject({
+        family,
+        intent,
+        profileId,
+        name,
+        kind,
+        source: 'local',
+        installationMode: 'agent',
+      });
       expect(payload.extra.selected_session_mcp_servers).toHaveLength(1);
       expect(payload.extra.selected_session_mcp_servers[0].transport.env).toMatchObject({
         OPENH3_CREATION_FAMILY: family,
@@ -472,7 +599,14 @@ describe('useGuidSend', () => {
       available: true,
       profileId: 'qwen-profile',
       family: 'qwen-edit',
+      modelSetId: 'model:qwen-bf16',
     } as GuidSendDeps['creationModel'];
+    deps.creationConstraint = {
+      modelSetId: 'model:qwen-bf16',
+      selectionRevision: 4,
+      workflowMode: 'fixed',
+      fixedWorkflowId: 'qwen-edit-route',
+    };
     deps.guidEnabledSkills = ['other-skill'];
     deps.guidDisabledBuiltinSkills = ['comfyui-local', 'disabled-skill'];
     deps.availableMcpServers.push({
@@ -494,6 +628,10 @@ describe('useGuidSend', () => {
       kind: 'image',
       intent: 'generate',
       source: 'local',
+      modelConstraint: deps.creationConstraint,
+      modelSetId: 'model:qwen-bf16',
+      workflowMode: 'fixed',
+      fixedWorkflowId: 'qwen-edit-route',
     });
     expect(payload?.extra.selected_session_mcp_servers).toHaveLength(1);
     expect(payload?.extra.selected_session_mcp_servers[0].name).toBe('openh3-video-media');

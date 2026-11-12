@@ -12,6 +12,28 @@ import {
 } from '@/renderer/components/Markdown/markdownUtils';
 
 describe('resolveLocalFileLinkPath', () => {
+  it('resolves generated documents against the actual conversation directory', () => {
+    for (const extension of ['pdf', 'docx', 'xlsx', 'zip', 'md']) {
+      expect(
+        resolveLocalFileLinkReference(`./交付/經費預算表.${extension}`, undefined, 'C:/Users/demo/项目')?.filePath
+      ).toBe(`C:/Users/demo/项目/交付/經費預算表.${extension}`);
+    }
+    expect(resolveLocalFileLinkReference('../report.pdf', undefined, '/home/demo/project')?.filePath).toBe(
+      '/home/demo/report.pdf'
+    );
+    expect(resolveLocalFileLinkReference('https://example.org/report.pdf', undefined, '/home/demo')).toBeNull();
+    expect(resolveLocalFileLinkReference('#section', undefined, '/home/demo')).toBeNull();
+    expect(resolveLocalFileLinkReference('javascript:alert(1)', undefined, '/home/demo')).toBeNull();
+  });
+
+  it('decodes URI path segments once and preserves encoded filename punctuation', () => {
+    const path = 'C:/交付/预算 #1 100%20?.docx';
+    expect(resolveLocalFileLinkPath(toLocalFileHref(path))).toBe(path);
+    expect(resolveLocalFileLinkPath('C:/交付/预算%20%231.docx')).toBe('C:/交付/预算 #1.docx');
+    expect(resolveLocalFileLinkPath('file://server/share/预算%20%231.xlsx')).toBe('//server/share/预算 #1.xlsx');
+    expect(resolveLocalFileLinkPath(String.raw`\\server\share\报告.pdf`)).toBe(String.raw`\\server\share\报告.pdf`);
+  });
+
   it('recognizes Windows absolute paths emitted as root-relative markdown links', () => {
     expect(resolveLocalFileLinkPath('/C:/Users/Administrator/AppData/Roaming/AionUi/report.xlsx')).toBe(
       'C:/Users/Administrator/AppData/Roaming/AionUi/report.xlsx'

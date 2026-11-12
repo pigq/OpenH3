@@ -6,6 +6,8 @@ import {
   validateComfyGenerationInputForFamily,
   comfyProfileSchema,
   comfyInstallPlanSchema,
+  assertComfyReferenceBindings,
+  comfyWorkflowRepairReason,
 } from '@/common/chat/document/creation/comfy';
 
 const profile = {
@@ -33,6 +35,64 @@ const profile = {
   state: 'downloaded',
 };
 
+describe('custom model registration contract', () => {
+  it.each(['image', 'video'] as const)(
+    'accepts an explicit custom %s model without impersonating a built-in family',
+    (kind) => {
+      const custom = comfyProfileSchema.parse({ ...profile, family: `custom-${kind}`, kind, name: `Custom ${kind}` });
+      expect(custom).toMatchObject({ family: `custom-${kind}`, kind, name: `Custom ${kind}` });
+      expect(comfyFamilyKind(custom.family, kind)).toBe(kind);
+      expect(() => comfyFamilyKind(custom.family)).toThrow('COMFY_MODEL_KIND_REQUIRED');
+    }
+  );
+});
+
+describe('workflow repair classification', () => {
+  it.each([
+    ['COMFY_IMAGE_BINDINGS_MISSING', undefined, 'reference-bindings'],
+    ['COMFY_IMAGE_BINDINGS_DUPLICATE', undefined, 'reference-bindings'],
+    ['COMFY_REFERENCE_INPUT_DISCONNECTED:4', undefined, 'reference-routing'],
+    ['COMFY_REFERENCE_OUTPUT_UNCONFIRMED', undefined, 'reference-routing'],
+    ['COMFY_MULTIMODAL_WORKFLOW_REQUIRED', undefined, 'input-adapter'],
+    ['COMFY_OMNI_REFERENCE_BINDING_MISSING', undefined, 'input-adapter'],
+    ['H3_WORKFLOW_PREFLIGHT', 'MISSING_NODE', 'missing-node'],
+    ['H3_WORKFLOW_PREFLIGHT', 'INVALID_INPUT', 'workflow-schema'],
+    ['COMFY_PROMPT_REJECTED', 'INVALID_INPUT', 'workflow-schema'],
+    ['H3_COMFY_PROMPT_REJECTED:INVALID_INPUT:node=12', undefined, 'workflow-schema'],
+    ['H3_COMFY_EXECUTION_FAILED:MISSING_NODE:node=4', undefined, 'missing-node'],
+    ['COMFY_BINDING_INVALID:image', undefined, 'workflow-schema'],
+    ['COMFY_INPUT_UNSUPPORTED:durationSeconds', undefined, 'workflow-schema'],
+    ['COMFY_NODE_REVISION_UNCONFIRMED', undefined, 'runtime-revision'],
+    ['COMFY_NODE_REVISION_MISMATCH', undefined, 'runtime-revision'],
+    ['COMFY_EXISTING_RUNTIME_INCOMPATIBLE:WORKFLOW_NODE_OR_INPUT_UNSUPPORTED', undefined, 'workflow-schema'],
+  ])('classifies %s with %s without depending on the selected model', (error, category, expected) => {
+    expect(comfyWorkflowRepairReason({ error, diagnosis: { category } })).toBe(expected);
+  });
+
+  it.each([
+    'COMFY_INPUT_IMAGE_REQUIRED',
+    'COMFY_INPUT_IMAGE_MISSING',
+    'COMFY_REFERENCE_FILE_MISSING',
+    'COMFY_REFERENCE_TYPE_MISMATCH',
+    'COMFY_INSTALL_INTENT_MISMATCH',
+    'COMFY_JOB_SCOPE_MISMATCH',
+    'COMFY_JOB_CANCELLED',
+    'CUDA_OUT_OF_MEMORY',
+    'COMFY_SERVER_ENVIRONMENT_MISMATCH',
+    'UNKNOWN:COMFY_IMAGE_BINDINGS_MISSING',
+    'COMFY_IMAGE_BINDINGS_MISSING_EXTRA',
+    'H3_COMFY_EXECUTION_FAILED:OOM:node=3',
+    'H3_COMFY_PROMPT_REJECTED:MISSING_MODEL',
+  ])('does not misclassify %s as a workflow capability repair', (error) => {
+    expect(comfyWorkflowRepairReason({ error })).toBeUndefined();
+  });
+  it('requires a workflow error before interpreting a generic invalid-input diagnosis', () => {
+    expect(
+      comfyWorkflowRepairReason({ error: 'COMFY_INPUT_IMAGE_REQUIRED', diagnosis: { category: 'INVALID_INPUT' } })
+    ).toBeUndefined();
+  });
+});
+
 describe('additional image model families', () => {
   it.each(['flux-3-image-klein', 'moss-image-base', 'moss-image-sft', 'krea2'] as const)(
     'accepts %s as a distinct image profile without requiring reference media',
@@ -47,6 +107,47 @@ describe('additional image model families', () => {
   );
 });
 describe('Comfy profile contracts', () => {
+  it.each(['image', 'images', 'imagePaths', 'inputImage'])(
+    'rejects duplicate %s destinations instead of overwriting an earlier reference',
+    (binding) => {
+      const parsed = comfyProfileSchema.parse({
+        ...profile,
+        bindings: {
+          [binding]: [
+            { nodeId: '4', input: 'image' },
+            { nodeId: '4', input: 'image' },
+          ],
+        },
+      });
+      expect(() =>
+        assertComfyReferenceBindings(parsed, { prompt: 'Use both people', imagePaths: ['D:/one.png', 'D:/two.png'] })
+      ).toThrow('COMFY_IMAGE_BINDINGS_DUPLICATE');
+    }
+  );
+
+  it('accepts distinct reference destinations and ignores unused bindings', () => {
+    const parsed = comfyProfileSchema.parse({
+      ...profile,
+      bindings: {
+        image: [
+          { nodeId: '4', input: 'image' },
+          { nodeId: '5', input: 'image' },
+          { nodeId: '4', input: 'image' },
+        ],
+      },
+    });
+    expect(() =>
+      assertComfyReferenceBindings(parsed, {
+        prompt: 'Use both people',
+        references: [
+          { type: 'image', path: 'D:/one.png' },
+          { type: 'image', path: 'D:/two.png' },
+        ],
+      })
+    ).not.toThrow();
+    expect(() => assertComfyReferenceBindings(parsed, { prompt: 'No reference' })).not.toThrow();
+  });
+
   it('accepts the FastH3-Omni family and preserves ordered multimodal references', () => {
     expect(comfyFamilySchema.parse('fasth3-omni')).toBe('fasth3-omni');
     expect(comfyFamilyKind('fasth3-omni')).toBe('video');

@@ -21,7 +21,7 @@ description: "Use this skill when the user is building a fundraising / investor 
 
 # OfficeCLI Pitch Deck Skill
 
-**This skill is a scene layer on top of `officecli-pptx`.** Every pptx hard rule — visual delivery floor (title ≥ 36pt / body ≥ 18pt / title ≥ 2× body), 12-column grid on 33.87×19.05cm, 4 canonical palettes, chart-choice decision table, connector canon (`shape` / `from` / `to` / `tailEnd=triangle`), shell escape, resident + batch, Delivery Gate 1–5a — is inherited, not re-taught. This file adds only what **fundraising** needs on top: stage diagnosis (A / B / C), 5 赛道 arc templates, 10 key-slide recipes (cover / problem / solution / market / product / model / traction / team / financials / ask), pitch-specific numbers convention, a VC ship-check, and a pitch-specific fresh-eyes Gate 6.
+**This skill is a scene layer on top of `officecli-pptx`.** Read its current layout, shell, tool-help, and Delivery Gate rules as dependencies. This file adds fundraising narrative, stage-appropriate metrics, and pitch-specific review. User-provided structure, brand, and scope override default recipes; keep factual accuracy and readability checks.
 
 When the pptx base rules cover it, the text here says `→ see pptx v2 §X`. Read `skills/officecli-pptx/SKILL.md` first if you have not.
 
@@ -44,11 +44,11 @@ officecli help pptx <element>                # Full schema (e.g. chart, shape, c
 officecli help pptx <element> --json         # Machine-readable
 ```
 
-Help reflects the installed CLI version. When this skill and help disagree, **help wins.** Every `--prop X=` in this file has been grep-verified against `officecli help pptx <element>` — if help adds / renames a prop in a later version, trust help.
+Help reflects the installed CLI version. When this skill and help disagree, **help wins.** Examples are usage guidance, not a compatibility capture for the current machine. Verify uncertain props, enums, and readback fields through installed help and actual command output before relying on them.
 
 ## Mental Model & Inheritance
 
-**Inherits pptx v2.** You should have read `skills/officecli-pptx/SKILL.md` first. This skill assumes you know how to: add slides + shapes + charts + connectors; address by `@name=` / `@id=`; quote paths; use `batch` heredocs; write `--prop tailEnd=triangle` on every flow connector; and run the 5-gate Delivery Gate. If any of those are unfamiliar, open a pptx v2 session before continuing.
+**Inherits pptx v2.** Read `officecli-pptx` in this session for slide elements, selectors, quoting, batches, connectors, and its current Delivery Gate. Learn unfamiliar operations from installed help and continue; a separate session is unnecessary.
 
 ## Shell & Execution Discipline
 
@@ -61,11 +61,11 @@ Help reflects the installed CLI version. When this skill and help disagree, **he
 A pitch deck is a pptx with a **fundraising layer** on top: VC-oriented narrative arc, verifiable metrics, stage-appropriate data density, founder-credibility surface. Slides are consumed at ~3 seconds per slide in a live room — the pptx v2 rule. Pitch decks add a second constraint on top: **every slide carries one investable proposition**. If a slide is "interesting background" that doesn't move the ask forward, cut it. VCs will not. The base pptx rules still apply; pitch decks add six deltas:
 
 1. **Stage determines everything.** Series A / B / C each dictates slide count, narrative weight, which metrics are must-haves, and tolerance for unit-econ sophistication. A Series A deck with 6 pages of CAC/LTV math reads as over-packaged; a Series B deck missing unit econ reads as incomplete. Pick the stage first — everything downstream follows.
-2. **Narrative arc beats feature dump.** 10 essential slides in a fixed order: cover → problem → solution → market → product → model → traction → team → financials → ask. Out of order = VCs disengage.
-3. **Numbers are a contract.** TAM/SAM/SOM must be clean three-layer; CAC/LTV must have a payback line; ARR ≠ revenue; Use-of-Funds must be a four-bucket pie. Sloppy numbers = round dies.
+2. **Narrative arc beats feature dump.** A useful default is cover → problem → solution → market → product → model → traction → team → financials → ask. Adapt slide count and order to the user's outline, stage, evidence, and presentation length.
+3. **Numbers are a contract.** Define market layers where relevant; distinguish ARR from revenue and label unit economics clearly. Use-of-Funds must reflect the actual supported categories and amounts; a pie, bar, or table can communicate the allocation. Do not invent categories or numbers to match a template.
 4. **Team slide carries prior companies.** Avatar grid alone reads as a student project. Add prior-company logos / names + one-line role. Without this, first-time founders look exactly like first-time founders.
 5. **Traction chart y-axis starts at 0.** A "hockey stick" starting at `y_min = 80% of current` is a visual lie — VCs who have seen 10,000 decks spot it in < 2 seconds.
-6. **The ask is a slide, not a footnote.** `$XX M` hero + four-bucket Use-of-Funds + runway length. "We're raising some money" is not an ask.
+6. **The ask is a slide, not a footnote.** A clearly labelled raise amount + supported Use-of-Funds allocation + runway length where known. "We're raising some money" is not an ask.
 
 ### Reverse handoff — when to go BACK to pptx base
 
@@ -325,7 +325,7 @@ officecli add "$FILE" "/slide[1]" --type shape --prop name=CoverMeta --prop text
   --prop font=Calibri --prop size=16 --prop color=FFFFFF --prop align=center --prop fill=none
 ```
 
-**QA.** Cover has 4 discrete elements (brand band + title + tagline + meta). 80%-whitespace covers fail the pptx "cover ≥ 60% filled" floor.
+**QA.** Make the company, purpose, and round readable at a glance. The four-element recipe is optional; intentional whitespace and a user-supplied cover design are valid.
 
 **Consumer variant (3-second grab).** Consumer decks (B2C app / hardware / D2C) should add a single dominant motif — hero product shot, oversized company name (60–96pt), or symbolic mark (crescent moon / abstract geometric). Replace the 44pt title with an 80–96pt name + one motif shape (`--type shape --prop geometry=ellipse --prop fill=<accent>` for an abstract mark, or `picture` at ~40% of slide for a product hero). Keep tagline + round + date identical. SaaS / B2B may skip — the typographic-only cover is sufficient.
 
@@ -394,7 +394,7 @@ officecli add "$FILE" "/slide[$SLIDE]" --type shape --prop name=SolTitle \
   --prop x=1.5cm --prop y=1.2cm --prop width=30.87cm --prop height=2.2cm \
   --prop font=Georgia --prop size=32 --prop bold=true --prop color=1E2761 --prop fill=none
 # 3 boxes across: gap = (33.87 − 3 − 3·7) / 2 = 4.93cm; x = 1.5, 13.43, 25.36
-# Connectors + arrowheads: --prop tailEnd=triangle ALWAYS (pptx Known Issues C-P-5..6).
+# Connectors + arrowheads: --prop tailEnd=triangle ALWAYS (see the current pptx connector guidance and installed help).
 # Full batch block → see pptx v2 §Creating and Editing (c) 4-step flowchart; swap N from 4 boxes to 3.
 ```
 
@@ -567,9 +567,9 @@ officecli add "$FILE" "/slide[$SLIDE]" --type shape --prop text="Key Assumptions
 
 **QA.** `officecli query "$FILE" 'shape:contains("assumption")'` OR `'shape:contains("Assumes")'` ≥ 1. If zero, add the panel.
 
-### (10) The Ask — hero number + 4-bucket Use-of-Funds + runway
+### (10) The Ask — raise amount + supported allocation + runway
 
-**Visual outcome.** Dark fill (match cover). Hero number in the center top: `$35M` at 96pt white. Below, a 4-bucket pie OR a 4-card row listing **Engineering 40% / GTM 35% / G&A 15% / Reserve 10%**. Bottom line: "18-month runway to $40M ARR" (next milestone, not "until next round").
+**Visual outcome (example).** Dark fill matching the cover, a clear raise amount, and a pie, bar, table, or cards showing the actual funding allocation. The example below uses four categories and illustrative numbers; replace them with supported inputs. Include runway and the next milestone when known.
 
 ```bash
 SLIDE=20
@@ -588,9 +588,9 @@ officecli add "$FILE" "/slide[$SLIDE]" --type shape --prop text='18 months runwa
   --prop font=Calibri --prop size=22 --prop color=CADCFC --prop align=center --prop fill=none
 ```
 
-**4-bucket convention.** Engineering / GTM / G&A / Reserve is the canonical breakdown. Typical Series A ranges: Eng 40-50%, GTM 30-40%, G&A 10-15%, Reserve 5-10%. Series B shifts 5-10 points from Eng to GTM.
+**Allocation example.** Engineering / GTM / G&A / Reserve is one possible breakdown. Use the real categories and agreed assumptions, with amounts that reconcile to the raise total. Do not force four categories or invent percentages from a stage template.
 
-**QA.** `officecli query "$FILE" 'shape:contains("Use of Funds")'` ≥ 1. Pie chart present on ask slide. Runway + milestone on ask slide.
+**QA.** Inspect the actual ask slide in its language: funding allocation categories and amounts reconcile to the raise total, with runway and milestones where supplied. The chart type and category count follow the data.
 
 ### (11) Pipeline chart — Bio / Deep Tech must-have
 
@@ -642,7 +642,7 @@ officecli add "$FILE" "/slide[$SLIDE]" --type table \
 # Highlight your row: loop over /slide[$SLIDE]/table[1]/tr[5]/tc[1..5] and set cell fill to CADCFC.
 ```
 
-**QA.** `officecli query "$FILE" 'table' --json | jq '.data.results | length'` ≥ 1. Row count ≥ 4 (you + ≥ 3 named competitors). Your row visually distinct via cell fill (Gate 5b visual check — table style alone does not highlight one row).
+**QA.** `officecli query "$FILE" 'table' --json | jq '.data.results | length'` ≥ 1. Row count ≥ 4 (you + ≥ 3 named competitors). Your row visually distinct via cell fill (pitch visual review — table style alone does not highlight one row).
 
 ## Numbers convention (pitch-specific)
 
@@ -662,7 +662,7 @@ A terse convention table — **not a finance tutorial**. Resolve unfamiliar stan
 | **CAC payback** | months | VC floor: < 18 mo OK, < 12 mo strong |
 | **Gross margin** | % | SaaS floor 70%, strong 80%+; marketplace 15-40%; hardware 30-50% |
 | **Burn / runway** | $/month + months | Gross burn vs net burn — label which; runway to specific milestone |
-| **Use of Funds** | 4-bucket pie | Engineering / Go-to-Market / G&A / Reserve — see Ask slide recipe |
+| **Use of Funds** | Labelled allocation | Actual categories and reconciled amounts; see Ask slide recipe |
 
 **Rule.** Every number on a deck carries a unit. `18%` or `18M` alone is ambiguous — write `$18M ARR` / `18% NRR growth`. `TBD`, `coming soon`, `(fill in)`, `lorem`, `xxxx` in numeric slots = immediate VC disqualification. Gate 6 greps these below.
 
@@ -676,7 +676,7 @@ What the VC reads in the first 30 seconds. Six one-line conditions — every "FA
 | 2 | TAM > $100B without a cited source / methodology | TAM clearly labeled bottom-up OR top-down with a visible 2024+ source |
 | 3 | Traction chart y-axis does not start at 0 (hockey-stick lie) | Line chart `axismin=0`; growth shape honest |
 | 4 | Team slide: headshots + names only, no prior companies | Every member: prior company + role + 1 achievement metric |
-| 5 | Ask slide missing Use-of-Funds breakdown | `$XM` hero + 4-bucket pie (Eng / GTM / G&A / Reserve) + runway + next milestone |
+| 5 | Ask slide missing a supported funding allocation | Raise amount + actual allocation + runway and next milestone where known |
 | 6 | `TBD` / `lorem` / `xxxx` / `{{...}}` / `(fill in)` anywhere | `view text` clean — zero placeholder tokens |
 
 **Common Series-specific failures.**
@@ -684,7 +684,7 @@ What the VC reads in the first 30 seconds. Six one-line conditions — every "FA
 - **Series B specific** — no unit-econ slide at all; CAC payback > 24 months without a "we're pre-scale, here's the plan" narrative; logo wall < 8 customers.
 - **Series C specific** — no moat / defensibility slide; revenue growth shown without margin trajectory; international expansion stated but no specific launch plan / hires.
 
-The Delivery Gate 6 block below executes checks 1–6 above via grep + query. Gate 5b fresh-eyes covers the visual judgments (hockey stick, team credibility) that grep can't see.
+The Delivery Gate 6 block below executes checks 1–6 above via grep + query. The pitch visual review covers the visual judgments (hockey stick, team credibility) that grep can't see.
 
 ## Traction triple-pattern (ARR + milestones + logos)
 
@@ -705,21 +705,18 @@ For Series B+, traction often spans 2 slides: one for the chart + callout (recip
 
 ## QA — Delivery Gate (executable)
 
-**Assume there are problems.** First render is almost never correct. Pitch decks fail at two layers: **structural** (schema, token leaks — caught by pptx v2 Gates 1–3) and **narrative** (wrong stage, missing unit econ, TAM unsourced — the checks that make pptx v2 Gate 5b + Gate 6 indispensable). Every check must print its success message.
+**Assume there are problems.** Apply the current base schema, issue, placeholder, and visual checks, then review fundraising claims against supplied sources. Command failure or missing evidence is not a PASS. Pitch heuristics must be interpreted against the agreed stage, language, and user outline.
 
-### Gates 1–5a — inherited from pptx v2 verbatim
+### Base checks — inherited from the current officecli-pptx Delivery Gate
 
-→ see pptx v2 §Delivery Gate L637-679. Copy-paste the full block:
+- **Gate 1:** schema validation.
+- **Gate 2:** overflow, format, and structure issues.
+- **Gate 2b:** leftover placeholders.
+- **Gate 3:** rendered visual review, including contrast, connectors, and slide order. Use its screenshot path when available; HTML text alone cannot verify visual details.
 
-- **Gate 1** — `validate` schema check (whitelist `ChartShapeProperties` warnings per C-P-2).
-- **Gate 2** — token leak via `view text` grep (`$xxx$`, `{{...}}`, `<TODO>`, `lorem`, `xxxx`, empty `()`/`[]`, `\$`/`\t`/`\n` literals).
-- **Gate 3** — hyperlink `rPr` schema trap (C-P-1) — zero `<a:rPr><a:hlinkClick>`.
-- **Gate 4** — slide-order sanity — cover first, dividers before sections, closing last.
-- **Gate 5a** — dark-on-dark contrast — every fill in `{1E2761, 0A1628, 8B1A1A, 2C5F2D, 36454F}` must declare near-white textColor. **This includes charts rendered on that fill**: chart `title.textColor`, `legend.textColor`, axis text default to dark and read as invisible on dark backgrounds — set them explicitly, or place the chart on a light card inside the dark slide.
+Read those sections by heading rather than stale line numbers. Diagnose and repair findings within the authorized task; report unavailable checks explicitly.
 
-Do not skip or reorder these five. Every pptx-layer defect caught by Gates 1–5a also fires on pitch decks.
-
-**Gate 2b — pitch-specific shell-strip signatures (MANDATORY).** Gate 2 misses `$35M` that zsh silently stripped to empty (no residue to grep). Run this after Gate 2:
+**Pitch shell-strip check — pitch-specific shell-strip signatures (MANDATORY).** Gate 2 misses `$35M` that zsh silently stripped to empty (no residue to grep). Run this after Gate 2:
 
 ```bash
 # $XXM stripped by zsh leaves bare " M ARR" / " M raised" / "Series [A-C] · M" patterns.
@@ -729,11 +726,11 @@ STRIP=$(officecli view "$FILE" text | grep -niE '(^|[^A-Za-z0-9])M (ARR|raised|S
 
 Fix: re-issue the offending `add`/`set` with single quotes around the text value (`--prop text='Series B · $35M'`, not double quotes). The same strip hits **chart series names / axis titles** (`--prop name="营收 ($M)"` → legend shows `营收 ()`): single-quote every chart prop carrying `$`.
 
-### Gate 5b — Visual audit via HTML preview (MANDATORY, NOT optional)
+### Pitch visual review — extends base Gate 3
 
-Gates 1–5a are token-grep defenses. **They cannot see a rendered slide.** This step is the only visual-assembly check. Do not skip.
+Schema and text checks cannot see a rendered slide. Extend the base Gate 3 visual review with the pitch-specific checklist below; do not label HTML-text inspection as a full visual PASS.
 
-Run `officecli view "$FILE" html` and Read the returned HTML. Walk every slide and answer, for EACH (inherits pptx v2 Gate 5b checklist; pitch-specific additions marked ⭐):
+Use the screenshot/HTML capability branches from base Gate 3. Walk every slide and answer, for EACH (pitch-specific additions marked ⭐):
 
 - **overlap**: do any text shapes overlap each other or a chart?
 - **dark-on-dark**: is any text on a fill where fill brightness < 30% AND text brightness < 80%?
@@ -743,73 +740,52 @@ Run `officecli view "$FILE" html` and Read the returned HTML. Walk every slide a
 - ⭐ **traction y-axis**: does every ARR / revenue / growth line chart start at 0 on the y-axis? (Not 80% of current — that is the hockey-stick lie.)
 - ⭐ **team credibility**: does every team-slide card show a prior company or prior title? (Cards with just headshot + name = reject.)
 - ⭐ **TAM / market number credibility**: is the TAM under $100B for a niche market, or if ≥ $100B, is a methodology source cited? (A claimed `$500B TAM` with no source is an auto-reject red flag.)
-- ⭐ **Use-of-Funds pie**: does the ask slide carry a 4-bucket pie (Engineering / GTM / G&A / Reserve) or a 4-card row with %s?
-- ⭐ **narrative completeness**: is the order cover → problem → solution → market → product → model → traction → team → financials → ask, or your stage-appropriate permutation from §Stage diagnosis?
+- ⭐ **Use-of-Funds allocation**: do the displayed categories match the business plan, and do amounts/proportions reconcile to the raise total?
+- ⭐ **narrative completeness**: does the sequence satisfy the user's agreed outline and communicate the stage-appropriate investment case?
 
-**Instruction.** Run `officecli view "$FILE" html` and Read the HTML. Walk every slide against the questions below. If rendering chart colors, animations, or zoom — those only show in the target viewer (PowerPoint / Keynote / WPS); ask the user to open `.pptx` directly for those runtime features.
+**Instruction.** Use available screenshots and the target viewer for visual/runtime checks. HTML text provides structural evidence only. Perform the checks yourself when capable; if no available tool can inspect a runtime feature, name that limitation without treating it as PASS or turning it into a mandatory user step.
 
 > For every slide:
-> (a) Are slides in VC narrative order (cover → problem → solution → market → product → model → traction → team → financials → ask, with your stage's adjustments)? Flag any out-of-sequence.
+> (a) Does slide order follow the agreed outline and make the investment case understandable? Flag unexplained gaps, not deviations from a default template.
 > (b) Is every ARR / revenue / growth line chart y-axis anchored at 0? Flag hockey-stick visual lies.
 > (c) Does the team slide carry prior-company credentials for each person? (Not just headshot + name.)
 > (d) Does every TAM / SAM / SOM claim have a visible source or methodology?
-> (e) Does the ask slide have a 4-bucket Use of Funds (Engineering / GTM / G&A / Reserve) and a specific next milestone + runway length?
+> (e) Does the ask slide show the supported funding allocation, and the next milestone and runway where known?
 > (f) Any text overlap, dark-on-dark, off-slide geometry, missing arrowheads, placeholder tokens (`TBD` / `lorem` / `{{...}}` / `xxxx` / empty `()`)?
 
 Report every instance with slide number. If ANY defect — REJECT; do not deliver until fixed.
 
 **Human preview (optional).** If you want the user to visually preview the deck, run `officecli watch "$FILE"` for a live preview the user can open at their own discretion, or have them open the `.pptx` directly in PowerPoint / WPS / Keynote. For final visual verification, open the file in the target presentation viewer.
 
-### Gate 6 — Pitch narrative sanity (executable)
+### Gate 6 — Pitch narrative sanity
 
-Pitch-specific checks that grep the deck for VC red flags. Every one is a token check — combine with Gate 5b's human read for full coverage.
+Extract the deck text successfully before evaluating its claims:
 
 ```bash
-FILE="deck.pptx"
-
-# 6.1 — no TBD / lorem / placeholder tokens (stronger than Gate 2 — pitch-specific scope)
-LEAK=$(officecli view "$FILE" text | grep -niE 'TBD|lorem|\(fill in\)|xxxx|coming soon|placeholder')
-[ -z "$LEAK" ] && echo "Gate 6.1 OK (no placeholder tokens)" || { echo "REJECT Gate 6.1:"; echo "$LEAK"; exit 1; }
-
-# 6.2 — TAM / SAM / SOM presence (Series A+)
-TAM_HIT=$(officecli query "$FILE" 'shape:contains("TAM")' --json | jq '.data.results | length')
-[ "$TAM_HIT" -ge 1 ] && echo "Gate 6.2 OK (TAM slide present)" || echo "WARN Gate 6.2: no TAM mention — confirm stage is Seed / Bridge if intentional"
-
-# 6.3 — Unit econ presence (Series B+): CAC OR LTV OR payback
-CAC_HIT=$(officecli query "$FILE" 'shape:contains("CAC")' --json | jq '.data.results | length')
-LTV_HIT=$(officecli query "$FILE" 'shape:contains("LTV")' --json | jq '.data.results | length')
-if [ "$CAC_HIT" -ge 1 ] || [ "$LTV_HIT" -ge 1 ]; then
-  echo "Gate 6.3 OK (unit econ surface)"
-else
-  echo "WARN Gate 6.3: no CAC / LTV — confirm stage Seed/A if intentional, REJECT if Series B+"
+if ! PITCH_TEXT=$(officecli view "$FILE" text); then
+  echo "REJECT Gate 6: text extraction failed"; exit 1
 fi
-
-# 6.4 — Use of Funds present on ask slide
-UOF_HIT=$(officecli query "$FILE" 'shape:contains("Use of Funds")' --json | jq '.data.results | length')
-[ "$UOF_HIT" -ge 1 ] && echo "Gate 6.4 OK (Use of Funds)" || { echo "REJECT Gate 6.4: ask slide missing Use of Funds"; exit 1; }
-
-# 6.5 — Team prior-company signal (at least one of ex- / former / prior / previously)
-PRIOR_HIT=$(officecli view "$FILE" text | grep -ciE '\b(ex-|former|prior|previously)\b')
-[ "$PRIOR_HIT" -ge 1 ] && echo "Gate 6.5 OK (team prior-company)" || { echo "REJECT Gate 6.5: team slide has no prior-company credentials"; exit 1; }
-
-# 6.6 — Traction chart y-axis anchored at 0 (at least one chart must set axismin=0, Series A+)
-AXISMIN_HIT=$(officecli query "$FILE" 'chart' --json | jq '[.data.results[]? | select(.format.axisMin == "0" or .format.axisMin == 0 or .format.axismin == "0" or .format.axismin == 0)] | length')
-[ "$AXISMIN_HIT" -ge 1 ] && echo "Gate 6.6 OK (traction chart axisMin=0)" || echo "WARN Gate 6.6: no chart sets axisMin=0 — confirm no ARR/revenue line chart, or add --prop axismin=0"
-
-echo "Delivery Gate 6 PASS (token + narrative checks) — proceed to Gate 5b fresh-eyes (MANDATORY)"
+printf '%s\n' "$PITCH_TEXT"
 ```
 
-**Readback key note.** CLI accepts lowercase `axismin` as input (on `--prop axismin=0`) but emits camelCase `axisMin` in `query --json` readback. The jq above accepts both for forward-compat.
+Review the actual text, charts, and supplied evidence in the deck's language. Record PASS, a concrete defect, or a justified not-applicable result for each:
 
-Gate 6 is a grep floor. Gate 5b is the visual ceiling. Ship only when both print PASS.
+1. No unfinished placeholder text or unsupported numeric claims. Preserve intentional literal examples when requested.
+2. Market size definitions, scope, arithmetic, and sources are clear where market sizing is part of the agreed outline.
+3. Unit economics match the company stage and sector; use the relevant measures rather than demanding English CAC/LTV tokens in every deck.
+4. The ask and funding allocation reconcile to the actual plan. Category count and chart type follow the data.
+5. Team credentials are supported: prior achievements, domain experience, or other supplied evidence. Never invent a former employer to satisfy a keyword check.
+6. Inspect each applicable traction chart's axis and labels. A single chart with axisMin=0 does not prove all charts are sound; any nonzero baseline needs clear labelling and a non-misleading purpose.
+
+Keyword hits are search aids, not evidence that these semantic checks passed. Keep unresolved items visible; do not print an overall PASS after WARN or failed readback. Combine this review with base Gate 3 and the pitch visual checklist, reporting any unavailable visual/runtime verification.
 
 ### Honest limit
 
-`validate` catches schema errors, not fundraising errors. A deck passes `validate` with a `$500B TAM` on a $10M market, a team slide of four co-founders with no prior companies, a hockey stick y-axis at 80%, a pitch for a Series B round without unit econ, and an ask slide saying "we're raising some money". Gates 5b + 6 above exist because `validate` cannot catch any of this.
+`validate` catches schema errors, not fundraising errors. A deck passes `validate` with a `$500B TAM` on a $10M market, a team slide of four co-founders with no prior companies, a hockey stick y-axis at 80%, a pitch for a Series B round without unit econ, and an ask slide saying "we're raising some money". The pitch visual review and Gate 6 above exist because `validate` cannot catch any of this.
 
 ## Known Issues & Pitfalls
 
-→ Base pitfalls (shell escape, `[last()]` in resident, connector `@name=` rejection C-P-6, picture alt two-step C-P-7, animation remove C-P-4, chart color normalization C-P-7): see pptx v2 §Known Issues & Pitfalls C-P-1..7.
+→ Base pitfalls: read the current `officecli-pptx` §Common Pitfalls and consult installed help for the relevant element. Do not rely on historical numbered C-P sections or assume their old workarounds apply to this version.
 
 Pitch-specific:
 
@@ -817,7 +793,7 @@ Pitch-specific:
 - **Hockey-stick y-axis.** If the line chart's y-axis doesn't start at 0, VCs read it as a visual lie within 2 seconds. Always `--prop axismin=0` on ARR / revenue / growth charts. Gate 6.6 checks this.
 - **Team slide = portfolio.** Cards showing only {headshot + name + role} fail VC credibility. Every card needs a prior-company or prior-achievement line. Gate 6.5 checks this.
 - **TAM without methodology.** A claimed number with no "top-down" or "bottom-up" source footnote = fabricated. Pick one methodology per deck; don't mix.
-- **Use-of-Funds as 3-bucket or 5-bucket.** 4-bucket (Eng / GTM / G&A / Reserve) is convention; departing from it reads as sloppy. Gate 6.4 checks presence.
+- **Use-of-Funds categories.** Use the categories supported by the business plan; Eng / GTM / G&A / Reserve is only an example. Verify amounts, proportions, labels, and total instead of requiring exactly four buckets.
 - **Pitch deck used for a board review / sales deck.** Narrative arc (problem → ask) makes board reviews awkward — route to pptx v2 Recipe (d) 10-slide instead. See §Reverse handoff above.
 - **pptx v2 Recipe (d′) 20-slide is a starting point, not a formula.** It is stage-agnostic SaaS. Adjust for your stage + 赛道 via §Stage diagnosis and §赛道 arc templates — never ship (d′) unchanged for a non-SaaS Series A.
 

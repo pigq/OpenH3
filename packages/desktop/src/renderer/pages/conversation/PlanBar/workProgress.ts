@@ -7,6 +7,7 @@ import type {
 import { creationOperationIds, h3ToolJobIds, toolResultRecords } from '@/common/chat/document/creation/toolResults';
 import type { H3Job } from '@/common/chat/document/h3Job';
 import type { CreationOperation } from '@/common/chat/document/creation/operation';
+import type { CloudVideoJob } from '@/common/chat/document/creation/cloudVideo';
 import { useSyncExternalStore } from 'react';
 
 export type WorkStatus = 'pending' | 'running' | 'completed' | 'failed' | 'interrupted' | 'waiting' | 'cancelled';
@@ -74,6 +75,16 @@ export function workComfyIds(messages: TMessage[]): { operations: string[]; jobs
     operations: [...new Set(records.map((item) => item.comfyOperationId).filter(uuid))],
     jobs: [...new Set(records.map((item) => item.comfyJobId).filter(uuid))],
   };
+}
+export function workCloudVideoIds(messages: Array<{ type: string; content: unknown }>): string[] {
+  return [
+    ...new Set(
+      messages
+        .flatMap(toolResultRecords)
+        .map((item) => item.cloudVideoJobId)
+        .filter(uuid)
+    ),
+  ];
 }
 
 function status(value: string | undefined): WorkStatus {
@@ -174,7 +185,8 @@ export function projectWorkProgress(
     unavailable: string[];
     operations?: CreationOperation[];
     unavailableOperations?: string[];
-  } = { jobs: [], unavailable: [] }
+  } = { jobs: [], unavailable: [] },
+  cloudActivity: { jobs: CloudVideoJob[]; unavailable: string[] } = { jobs: [], unavailable: [] }
 ): WorkSnapshot {
   const tasks = new Map<string, WorkTask>();
   const latestPlan = messages.findLast((message) => message.type === 'plan');
@@ -228,6 +240,7 @@ export function projectWorkProgress(
       const entries = message.content.filter(
         (entry) =>
           !h3ToolJobIds([{ type: 'tool_group', content: [entry] }]).length &&
+          !workCloudVideoIds([{ type: 'tool_group', content: [entry] }]).length &&
           !creationOperationIds([{ type: 'tool_group', content: [entry] }]).length
       );
       if (!entries.length) continue;
@@ -270,7 +283,8 @@ export function projectWorkProgress(
       continue;
     }
     if (message.type !== 'tool_call' && message.type !== 'acp_tool_call') continue;
-    if (h3ToolJobIds([message]).length || creationOperationIds([message]).length) continue;
+    if (h3ToolJobIds([message]).length || creationOperationIds([message]).length || workCloudVideoIds([message]).length)
+      continue;
     if (toolResultRecords(message).some((record) => uuid(record.comfyOperationId) || uuid(record.comfyJobId))) continue;
     const native = message.type === 'tool_call' ? message.content : undefined;
     const acp = message.type === 'acp_tool_call' ? message.content.update : undefined;
@@ -345,6 +359,15 @@ export function projectWorkProgress(
   }
   for (const id of new Set([...ids.jobs, ...jobs.map((item) => item.id)])) {
     const job = jobs.find((item) => item.id === id);
+    if (
+      job?.status === 'failed' &&
+      !job.submissionUncertain &&
+      job.recoveredBy &&
+      jobs.some(
+        (success) => success.id === job.recoveredBy && success.status === 'succeeded' && !success.submissionUncertain
+      )
+    )
+      continue;
     tasks.set(id, {
       id,
       title: job?.profileId ?? '',
@@ -353,7 +376,9 @@ export function projectWorkProgress(
       detail: [job?.error, job?.diagnosis?.action].filter(Boolean).join('\n') || undefined,
     });
   }
+  const operationRequests = new Set(operations.map((operation) => operation.requestId));
   for (const preparation of preparations) {
+    if (operationRequests.has(preparation.requestId)) continue;
     tasks.set(`prepare:${preparation.requestId}`, {
       id: `prepare:${preparation.requestId}`,
       title: preparation.family,
@@ -400,6 +425,23 @@ export function projectWorkProgress(
       status: unavailable || job?.remoteUncertain ? 'interrupted' : status(job?.status),
       generationWarning: job?.remoteUncertain ? 'remoteUncertain' : unavailable ? 'disconnected' : undefined,
       detail: [job?.error, job?.diagnosis?.action].filter(Boolean).join('\n') || undefined,
+    });
+  }
+  for (const id of new Set([...workCloudVideoIds(messages), ...cloudActivity.jobs.map((job) => job.id)])) {
+    const job = cloudActivity.jobs.find((item) => item.id === id);
+    const unavailable = cloudActivity.unavailable.includes(id);
+    tasks.set('cloud:' + id, {
+      id: 'cloud:' + id,
+      title: job?.model ?? '',
+      summaryKey: 'generateVideo',
+      kind: 'generation',
+      status: unavailable || job?.submissionUncertain ? 'interrupted' : status(job?.status),
+      generationWarning: job?.submissionUncertain
+        ? 'remoteUncertain'
+        : unavailable || job?.error === 'CLOUD_VIDEO_CONNECTION_RETRYING'
+          ? 'disconnected'
+          : undefined,
+      detail: job?.status === 'failed' ? job.error : undefined,
     });
   }
   return {

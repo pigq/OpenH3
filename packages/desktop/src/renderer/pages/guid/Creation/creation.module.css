@@ -89,8 +89,6 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: calc(100% - 16px);
-  overflow-y: auto;
   padding: 10px;
   border: 1px solid color-mix(in srgb, var(--color-bg-2) 80%, transparent);
   border-radius: 10px;

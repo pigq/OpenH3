@@ -80,6 +80,216 @@ function setup(overrides: Partial<Parameters<typeof createComfyProfileDiscovery>
 }
 
 describe('incremental local Comfy profile discovery', () => {
+  it('keeps complete internal weights when an external duplicate is only partially downloaded', async () => {
+    fs.writeFileSync(path.join(root, 'folder_paths.py'), '# source');
+    fs.mkdirSync(path.join(root, 'comfy'));
+    const internal = path.join(root, 'models', 'diffusion_models', 'nested');
+    const external = path.join(temporary, 'external');
+    fs.mkdirSync(internal, { recursive: true });
+    fs.mkdirSync(external);
+    fs.writeFileSync(path.join(internal, 'moss-image-sft.safetensors'), 'data');
+    const discover = setup({ roots: () => [], applicationRoots: () => [root] });
+    expect((await discover([])).some((profile) => profile.family === 'moss-image-sft')).toBe(true);
+    fs.writeFileSync(path.join(external, 'moss-image-sft.safetensors'), 'partial');
+    fs.writeFileSync(
+      path.join(root, 'extra_model_paths.yaml'),
+      `extra:\n  base_path: ${JSON.stringify(external)}\n  diffusion_models: .\n`
+    );
+    const profiles = await discover([]);
+    expect(profiles.some((profile) => profile.family === 'moss-image-sft')).toBe(true);
+    expect(profiles[0].components[0].path).toBe(path.join(internal, 'moss-image-sft.safetensors'));
+  });
+
+  it('isolates invalid extra model paths in one checkout from another valid checkout', async () => {
+    writeModels();
+    fs.writeFileSync(path.join(root, 'folder_paths.py'), '# source');
+    fs.mkdirSync(path.join(root, 'comfy'));
+    const bad = path.join(temporary, 'broken-config');
+    fs.mkdirSync(path.join(bad, '.venv', 'Scripts'), { recursive: true });
+    fs.mkdirSync(path.join(bad, 'comfy'));
+    fs.writeFileSync(path.join(bad, 'main.py'), '# source');
+    fs.writeFileSync(path.join(bad, 'folder_paths.py'), '# source');
+    fs.writeFileSync(path.join(bad, '.venv', 'Scripts', 'python.exe'), 'python');
+    fs.writeFileSync(path.join(bad, 'extra_model_paths.yaml'), '{invalid');
+    const discover = setup({ roots: () => [], applicationRoots: () => [temporary] });
+    const profiles = await discover([]);
+    expect(profiles.some((profile) => profile.family === 'moss-image-sft' && profile.environment.root === root)).toBe(
+      true
+    );
+    expect(discover.diagnostics()).toContainEqual({ code: 'COMFY_INVENTORY_MODEL_PATHS_INCOMPLETE', path: bad });
+  });
+  it('keeps a complete MOSS environment visible beside an unrelated checkout without Python', async () => {
+    writeModels();
+    fs.writeFileSync(path.join(root, 'folder_paths.py'), '# paths');
+    fs.mkdirSync(path.join(root, 'comfy'));
+    const broken = path.join(temporary, 'old-incomplete-checkout');
+    fs.mkdirSync(path.join(broken, 'comfy'), { recursive: true });
+    fs.writeFileSync(path.join(broken, 'main.py'), '# ComfyUI');
+    fs.writeFileSync(path.join(broken, 'folder_paths.py'), '# paths');
+    const discover = setup({ roots: () => [], applicationRoots: () => [temporary] });
+    const profiles = await discover([]);
+    expect(profiles.some((profile) => profile.family === 'moss-image-sft' && profile.environment.root === root)).toBe(
+      true
+    );
+    expect(profiles.every((profile) => profile.environment.root !== broken)).toBe(true);
+    expect(discover.diagnostics()).toContainEqual(
+      expect.objectContaining({ code: 'COMFY_INVENTORY_INTERPRETER_UNCONFIRMED', path: broken })
+    );
+  });
+  it.each(comfyFamilySchema.options)(
+    'finds complete %s files under deep arbitrarily named application task and weight directories',
+    async (family) => {
+      const application = path.join(temporary, 'OpenH3');
+      const installed = path.join(application, 'aionui', 'projects', 'previous', 'tasks', 'generation', 'checkout');
+      fs.mkdirSync(path.dirname(installed), { recursive: true });
+      fs.renameSync(root, installed);
+      fs.writeFileSync(path.join(installed, 'folder_paths.py'), '# ComfyUI source marker');
+      fs.mkdirSync(path.join(installed, 'comfy'));
+      const weights = path.join(
+        installed,
+        'models',
+        'diffusion_models',
+        'archives',
+        '2026',
+        'november',
+        'moss',
+        'bf16'
+      );
+      fs.mkdirSync(weights, { recursive: true });
+      fs.writeFileSync(path.join(weights, `${family}.safetensors`), 'data');
+      const create = () => setup({ roots: () => [], applicationRoots: () => [application] });
+      const profiles = await create()([]);
+      expect(profiles.map((profile) => profile.family)).toEqual([family]);
+      expect(profiles[0].environment.root).toBe(installed);
+      expect(profiles[0].state).toBe('downloaded');
+      expect(await create()([])).toEqual(profiles);
+    }
+  );
+
+  it('finds catalog model sets stored outside ComfyUI but under OpenH3 data', async () => {
+    const application = path.join(temporary, 'OpenH3');
+    const installed = path.join(application, 'aionui', 'moss-sft', 'ComfyUI-' + 'd'.repeat(40));
+    fs.mkdirSync(path.join(installed, 'comfy'), { recursive: true });
+    fs.writeFileSync(path.join(installed, 'main.py'), '# ComfyUI');
+    fs.writeFileSync(path.join(installed, 'folder_paths.py'), '# source');
+    fs.mkdirSync(path.join(installed, '.venv', 'Scripts'), { recursive: true });
+    fs.writeFileSync(path.join(installed, '.venv', 'Scripts', 'python.exe'), 'python');
+    const sharedModels = path.join(application, 'aionui', 'models', 'shared', 'moss-sft', 'bf16');
+    fs.mkdirSync(sharedModels, { recursive: true });
+    fs.writeFileSync(path.join(sharedModels, 'moss-image-sft.safetensors'), 'data');
+    const profiles = await setup({ roots: () => [], applicationRoots: () => [application] })([]);
+    expect(profiles.map((profile) => profile.family)).toEqual(['moss-image-sft']);
+    expect(profiles[0].components[0].path).toBe(path.join(sharedModels, 'moss-image-sft.safetensors'));
+  });
+
+  it('finds catalog weights stored elsewhere under the same application-owned data root', async () => {
+    const application = path.join(temporary, 'OpenH3');
+    const installed = path.join(application, 'aionui', 'moss-sft', 'ComfyUI-' + 'd'.repeat(40));
+    fs.mkdirSync(path.join(installed, 'comfy'), { recursive: true });
+    fs.writeFileSync(path.join(installed, 'main.py'), '# ComfyUI');
+    fs.writeFileSync(path.join(installed, 'folder_paths.py'), '# source');
+    fs.mkdirSync(path.join(installed, '.venv', 'Scripts'), { recursive: true });
+    fs.writeFileSync(path.join(installed, '.venv', 'Scripts', 'python.exe'), 'python');
+    const sharedModels = path.join(application, 'aionui', 'models', 'shared', 'moss-sft', 'bf16');
+    fs.mkdirSync(sharedModels, { recursive: true });
+    fs.writeFileSync(path.join(sharedModels, 'moss-image-sft.safetensors'), 'data');
+    const profiles = await setup({ roots: () => [], applicationRoots: () => [application] })([]);
+    expect(profiles.map((profile) => profile.family)).toEqual(['moss-image-sft']);
+    expect(profiles[0].components[0].path).toBe(path.join(sharedModels, 'moss-image-sft.safetensors'));
+  });
+
+  it('discovers and persists all application environments beyond the old candidate limit', async () => {
+    const application = path.join(temporary, 'OpenH3');
+    for (let i = 0; i < 40; i++) {
+      const installed = path.join(application, `task-${String(i).padStart(2, '0')}`, 'runtime');
+      fs.mkdirSync(path.join(installed, '.venv', 'Scripts'), { recursive: true });
+      fs.writeFileSync(path.join(installed, 'main.py'), '# ComfyUI');
+      fs.writeFileSync(path.join(installed, 'folder_paths.py'), '# source');
+      fs.mkdirSync(path.join(installed, 'comfy'));
+      fs.writeFileSync(path.join(installed, '.venv', 'Scripts', 'python.exe'), 'python');
+      const models = path.join(installed, 'models', 'diffusion_models');
+      fs.mkdirSync(models, { recursive: true });
+      fs.writeFileSync(path.join(models, 'moss-image-sft.safetensors'), 'data');
+    }
+    const create = () => setup({ roots: () => [], applicationRoots: () => [application] });
+    expect(await create()([])).toHaveLength(40);
+    expect(Object.keys(JSON.parse(fs.readFileSync(path.join(temporary, 'cache.json'), 'utf8')).roots)).toHaveLength(40);
+    expect(await create()([])).toHaveLength(40);
+  }, 30_000);
+
+  it('reports complete application model files with an unknown interpreter as incomplete inventory', async () => {
+    const installed = path.join(temporary, 'OpenH3', 'task', 'checkout');
+    fs.mkdirSync(path.join(installed, 'comfy'), { recursive: true });
+    fs.writeFileSync(path.join(installed, 'main.py'), '# ComfyUI');
+    fs.writeFileSync(path.join(installed, 'folder_paths.py'), '# paths');
+    const models = path.join(installed, 'models', 'diffusion_models');
+    fs.mkdirSync(models, { recursive: true });
+    fs.writeFileSync(path.join(models, 'moss-image-sft.safetensors'), 'data');
+    const discover = setup({ roots: () => [], applicationRoots: () => [path.join(temporary, 'OpenH3')] });
+    expect(await discover([])).toEqual([]);
+    expect(discover.diagnostics()).toContainEqual({ code: 'COMFY_INVENTORY_INTERPRETER_UNCONFIRMED', path: installed });
+  });
+
+  it('checks every configured model path within an application installation', async () => {
+    fs.writeFileSync(path.join(root, 'folder_paths.py'), '# paths');
+    fs.mkdirSync(path.join(root, 'comfy'));
+    const group = path.join(temporary, 'shared');
+    const folders = Array.from({ length: 20 }, (_, index) => `set-${index}`);
+    fs.mkdirSync(path.join(group, folders[19]), { recursive: true });
+    fs.writeFileSync(path.join(group, folders[19], 'moss-image-sft.safetensors'), 'data');
+    fs.writeFileSync(
+      path.join(root, 'extra_model_paths.yaml'),
+      `shared:\n  base_path: ${JSON.stringify(group)}\n  diffusion_models: |\n${folders.map((folder) => `    ${folder}`).join('\n')}\n`
+    );
+    const profiles = await setup({ applicationRoots: () => [temporary] })([]);
+    expect(profiles.some((profile) => profile.family === 'moss-image-sft')).toBe(true);
+  });
+  it('rediscovers an Agent-installed versioned checkout under application data after restart', async () => {
+    writeModels();
+    const parent = path.join(temporary, 'moss-sft');
+    const installed = path.join(parent, 'ComfyUI-' + 'a'.repeat(40));
+    fs.mkdirSync(parent);
+    fs.renameSync(root, installed);
+    fs.renameSync(path.join(installed, '.venv'), path.join(parent, '.venv'));
+    const create = () => setup({ roots: () => [temporary] });
+    for (const discover of [create(), create()]) {
+      const profiles = await discover([]);
+      expect(profiles.some((profile) => profile.family === 'moss-image-sft')).toBe(true);
+      expect(profiles.every((profile) => profile.environment.root === installed)).toBe(true);
+      expect(
+        profiles.every((profile) => profile.environment.python === path.join(parent, '.venv', 'Scripts', 'python.exe'))
+      ).toBe(true);
+      expect(profiles.every((profile) => profile.state === 'downloaded')).toBe(true);
+      expect(profiles.every((profile) => profile.environment.baseUrl !== 'http://127.0.0.1:8188')).toBe(true);
+    }
+  });
+
+  it('does not follow linked task directories or inspect output trees for ComfyUI installations', async () => {
+    const linked = path.join(temporary, 'linked-task');
+    const hidden = path.join(temporary, 'output', 'ComfyUI-' + 'b'.repeat(40));
+    fs.mkdirSync(hidden, { recursive: true });
+    fs.writeFileSync(path.join(hidden, 'main.py'), 'not an installation');
+    fs.symlinkSync(root, linked, process.platform === 'win32' ? 'junction' : 'dir');
+    writeModels();
+    const parent = path.join(temporary, 'application-data');
+    fs.mkdirSync(parent);
+    fs.symlinkSync(root, path.join(parent, 'linked-task'), process.platform === 'win32' ? 'junction' : 'dir');
+    fs.renameSync(path.join(temporary, 'output'), path.join(parent, 'output'));
+    expect(await setup({ roots: () => [parent] })([])).toEqual([]);
+  });
+
+  it('keeps a busy unrelated recent root from exhausting discovery of the application-data root', async () => {
+    writeModels();
+    const unrelated = path.join(temporary, 'unrelated');
+    fs.mkdirSync(unrelated);
+    for (let i = 0; i < 260; i++) fs.mkdirSync(path.join(unrelated, `folder-${i}`));
+    const parent = path.join(temporary, 'app-data');
+    const destination = path.join(parent, 'moss-sft', 'ComfyUI-' + 'c'.repeat(40));
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.renameSync(root, destination);
+    const profiles = await setup({ roots: () => [unrelated, parent] })([]);
+    expect(profiles.some((profile) => profile.family === 'moss-image-sft')).toBe(true);
+  });
   it('constructs profiles for the shipped Qwen, Z-Image, Omni, FLUX, MOSS and Krea baselines', async () => {
     const shipped = loadComfyInstallCatalog(path.resolve('resources'));
     const candidates = shipped.candidates.map((candidate) => ({

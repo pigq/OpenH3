@@ -1,16 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import useSWR, { mutate as swrMutate } from 'swr';
+import useSWR, { unstable_serialize, useSWRConfig } from 'swr';
 import { Button, Collapse } from '@arco-design/web-react';
 import { useTranslation } from 'react-i18next';
 import { ipcBridge } from '@/common';
-import { comfyApi } from '@/common/chat/document/creation/comfyApi';
-import type { ComfyIntent, ComfyOperation, ComfyProfile } from '@/common/chat/document/creation/comfy';
-import type { CreationRequest } from '@/common/chat/document/creation/creation';
-import type { TChatConversation } from '@/common/config/storage';
+import { comfyApi, COMFY_INVENTORY_CACHE_KEY } from '@/common/chat/document/creation/comfyApi';
+import type {
+  ComfyGenerationJob,
+  ComfyIntent,
+  ComfyOperation,
+  ComfyProfile,
+} from '@/common/chat/document/creation/comfy';
+import { creationSessionServers, type CreationRequest } from '@/common/chat/document/creation/creation';
+import type { ISessionMcpServer, TChatConversation } from '@/common/config/storage';
 import { requestConversationSendBoxPrefill } from '@/renderer/hooks/chat/useSendBoxDraft';
 import { useConversationRuntimeView } from '@/renderer/pages/conversation/runtime/useConversationRuntimeView';
 import { toolResultRecords } from '@/common/chat/document/creation/toolResults';
 import { beginComfySelectionChange, useComfySelectionPending } from './useComfySelectionPending';
+import { comfyWorkflowStatus, getComfyModelSetId } from '@/common/chat/document/creation/workflows/identity';
 
 const isUuid = (value: unknown): value is string =>
   typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value);
@@ -62,11 +68,21 @@ function bytes(value: number) {
   return `${amount.toFixed(index ? 2 : 0)} ${units[index]}`;
 }
 
-export default function ComfyOperationResult({ id, conversationId }: { id: string; conversationId: string }) {
+export default function ComfyOperationResult({
+  id,
+  conversationId,
+  compact = false,
+}: {
+  id: string;
+  conversationId: string;
+  compact?: boolean;
+}) {
   const { t } = useTranslation();
+  const { cache, mutate: swrMutate } = useSWRConfig();
   const runtime = useConversationRuntimeView(conversationId);
   const selectionPending = useComfySelectionPending(conversationId);
   const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState('');
   const {
     data: operation,
@@ -81,12 +97,25 @@ export default function ComfyOperationResult({ id, conversationId }: { id: strin
     { refreshInterval: 30_000 }
   );
   const completedProfile = profiles?.find((profile) => profile.id === operation?.profileId);
-  const verified = completedProfile?.state === 'verified' && !inventoryUnavailable;
+  const verified = completedProfile && comfyWorkflowStatus(completedProfile) === 'verified' && !inventoryUnavailable;
   const diagnosticLogPath = (operation as (ComfyOperation & { diagnosticLogPath?: string }) | undefined)
     ?.diagnosticLogPath;
   useEffect(() => {
-    if (operation?.state === 'completed') void swrMutate('creation.comfy-profiles');
-  }, [operation?.state]);
+    if (operation?.state === 'completed' && operation.id === id && operation.conversationId === conversationId) {
+      void swrMutate('creation.comfy-profiles');
+      void swrMutate(COMFY_INVENTORY_CACHE_KEY);
+      // Validation can succeed before its receipt establishes the authoritative recovery association.
+      void swrMutate(
+        (key) => {
+          if (!Array.isArray(key) || key[0] !== 'comfy.job' || key[1] !== conversationId) return false;
+          const previous = cache.get(unstable_serialize(key))?.data as ComfyGenerationJob | undefined;
+          return previous?.status === 'failed' && !previous.submissionUncertain && !previous.observationOnly;
+        },
+        undefined,
+        { populateCache: false }
+      ).catch((): undefined => undefined);
+    }
+  }, [operation?.state, operation?.id, operation?.conversationId, conversationId, id, cache, swrMutate]);
   if (operation && operation.conversationId !== conversationId) return null;
   const authorize = async () => {
     setBusy(true);
@@ -111,6 +140,60 @@ export default function ComfyOperationResult({ id, conversationId }: { id: strin
       setBusy(false);
     }
   };
+  const diagnose = async () => {
+    if (!operation || busy || runtime.isProcessing || selectionPending) return;
+    const finishSelection = beginComfySelectionChange(conversationId);
+    setBusy(true);
+    setError('');
+    let sending = false;
+    try {
+      const conversation = await ipcBridge.conversation.get.invoke({ id: conversationId });
+      const snapshot = (conversation.extra as { creation_request?: CreationRequest }).creation_request;
+      if (!snapshot?.requestId) throw new Error('COMFY_SELECTION_CHANGED');
+      // The service proves the operation belongs to this request, including a linked repair child.
+      const current = await comfyApi.operation(id, conversationId, snapshot.requestId);
+      if (
+        current.id !== id ||
+        current.requestId !== operation.requestId ||
+        current.conversationId !== conversationId ||
+        !['failed', 'paused'].includes(current.state)
+      )
+        throw new Error('COMFY_SELECTION_CHANGED');
+      // Reading the child also checks that its original parent selection is still current.
+      const child = await comfyApi.selection(current.requestId);
+      const selected = current.requestId === snapshot.requestId ? child : await comfyApi.selection(snapshot.requestId);
+      if (
+        child.requestId !== current.requestId ||
+        child.conversationId !== conversationId ||
+        child.source !== 'local' ||
+        child.intent === 'generate' ||
+        child.family !== current.plan.family ||
+        selected.requestId !== snapshot.requestId ||
+        selected.conversationId !== conversationId ||
+        selected.source !== snapshot.source ||
+        selected.kind !== snapshot.kind ||
+        selected.family !== snapshot.family ||
+        selected.profileId !== snapshot.profileId ||
+        selected.intent !== (snapshot.intent ?? 'generate')
+      )
+        throw new Error('COMFY_SELECTION_CHANGED');
+      runtime.markSendStarted();
+      sending = true;
+      const result = await ipcBridge.conversation.sendMessage.invoke({
+        conversation_id: conversationId,
+        input: t('guid.comfy.operation.agentRetry', { model: operation.plan.name }),
+        inject_skills: ['comfyui-local'],
+      });
+      runtime.markSendAccepted(result.turn_id, result.runtime, result.msg_id);
+    } catch (cause) {
+      const reason = cause instanceof Error ? cause.message : String(cause);
+      setError(reason);
+      if (sending) runtime.markSendFailed({ kind: 'ordinary', reason });
+    } finally {
+      finishSelection();
+      setBusy(false);
+    }
+  };
   const chooseCompletedProfile = async (intent: ComfyIntent) => {
     if (!operation?.profileId || runtime.isProcessing || busy || selectionPending) return;
     const finishSelection = beginComfySelectionChange(conversationId);
@@ -119,26 +202,71 @@ export default function ComfyOperationResult({ id, conversationId }: { id: strin
     try {
       const conversation = await ipcBridge.conversation.get.invoke({ id: conversationId });
       const profile = (await comfyApi.profiles()).find((item) => item.id === operation.profileId);
-      if (!profile || (intent === 'generate' && profile.state !== 'verified'))
+      if (!profile || (intent === 'generate' && comfyWorkflowStatus(profile) !== 'verified'))
         throw new Error(t('guid.comfy.operation.unavailable'));
       const previous = (conversation.extra as { creation_request?: CreationRequest & { requestId?: string } })
         .creation_request;
-      const next = {
+      const modelSetId = getComfyModelSetId(profile);
+      const sameModel =
+        (previous?.modelConstraint?.modelSetId ?? previous?.modelSetId) === modelSetId ||
+        previous?.profileId === profile.id;
+      const fixedWorkflowId = previous?.modelConstraint?.fixedWorkflowId ?? previous?.fixedWorkflowId;
+      const workflowMode =
+        sameModel && fixedWorkflowId === (profile.workflowMetadata?.id ?? profile.id)
+          ? (previous?.modelConstraint?.workflowMode ?? previous?.workflowMode ?? 'auto')
+          : 'auto';
+      const modelConstraint =
+        intent === 'install-other'
+          ? undefined
+          : {
+              modelSetId,
+              workflowMode,
+              fixedWorkflowId: workflowMode === 'fixed' ? fixedWorkflowId : undefined,
+              selectionRevision:
+                (previous?.modelConstraint?.selectionRevision ?? 0) +
+                (sameModel &&
+                workflowMode === (previous?.modelConstraint?.workflowMode ?? previous?.workflowMode ?? 'auto')
+                  ? 0
+                  : 1),
+            };
+      const servers = (conversation.extra as { session_mcp_servers?: ISessionMcpServer[] }).session_mcp_servers ?? [];
+      const installationInput =
+        intent === 'generate'
+          ? undefined
+          : t(`guid.comfy.prompts.${intent}`, {
+              family: profile.name,
+              profile: intent === 'repair' ? profile.id : '',
+            });
+      const next: CreationRequest & { requestId: string } = {
         ...previous,
-        requestId: previous?.requestId ?? operation.requestId,
-        id: intent === 'install-other' ? profile.family : profile.id,
-        name: profile.name,
+        requestId: intent === 'generate' ? (previous?.requestId ?? operation.requestId) : crypto.randomUUID(),
+        installationMode: intent === 'generate' ? undefined : ('agent' as const),
+        installationInput,
+        installationError: undefined,
+        id: intent === 'install-other' ? profile.family : sameModel ? previous!.id : profile.id,
+        name: sameModel ? previous!.name : profile.name,
         kind: profile.kind,
         source: 'local' as const,
         state: profile.state,
         family: profile.family,
         profileId: intent === 'install-other' ? undefined : profile.id,
         intent,
+        modelSetId: modelConstraint?.modelSetId,
+        workflowMode: modelConstraint?.workflowMode,
+        fixedWorkflowId: modelConstraint?.fixedWorkflowId,
+        modelConstraint,
       };
       const update = (snapshot: typeof previous) =>
         ipcBridge.conversation.update.invoke({
           id: conversationId,
-          updates: { extra: { creation_request: snapshot } as TChatConversation['extra'] },
+          updates: {
+            extra: {
+              creation_request: snapshot,
+              ...(intent !== 'generate'
+                ? { session_mcp_servers: snapshot ? creationSessionServers(servers, snapshot) : servers }
+                : {}),
+            } as TChatConversation['extra'],
+          },
           merge_extra: true,
         });
       if (!(await update(next))) throw new Error(t('guid.comfy.session.saveFailed'));
@@ -146,8 +274,17 @@ export default function ComfyOperationResult({ id, conversationId }: { id: strin
         const bound = await comfyApi.bind(next.requestId, conversationId, next.profileId, next.family, next.intent, {
           source: next.source,
           kind: next.kind,
+          modelSetId: next.modelSetId,
+          workflowMode: next.workflowMode,
+          fixedWorkflowId: next.fixedWorkflowId,
+          selectionRevision: next.modelConstraint?.selectionRevision,
+          modelConstraint: next.modelConstraint,
+          installContext: next.installContext,
         });
         if (!bound.ok) throw new Error(t('guid.comfy.session.saveFailed'));
+        if (intent !== 'generate') {
+          await ipcBridge.conversation.restartRuntime.invoke({ conversation_id: conversationId });
+        }
       } catch (cause) {
         if (!(await update(previous))) throw new Error(t('guid.comfy.session.saveFailed'), { cause });
         if (previous?.requestId) {
@@ -157,17 +294,26 @@ export default function ComfyOperationResult({ id, conversationId }: { id: strin
             previous.profileId,
             previous.family,
             previous.intent,
-            { source: previous.source, kind: previous.kind }
+            {
+              source: previous.source,
+              kind: previous.kind,
+              modelSetId: previous.modelSetId,
+              workflowMode: previous.workflowMode,
+              fixedWorkflowId: previous.fixedWorkflowId,
+              selectionRevision: previous.modelConstraint?.selectionRevision,
+              modelConstraint: previous.modelConstraint,
+              installContext: previous.installContext,
+            }
           );
           if (!rebound.ok) throw new Error(t('guid.comfy.session.saveFailed'), { cause });
+        }
+        if (intent !== 'generate') {
+          await ipcBridge.conversation.restartRuntime.invoke({ conversation_id: conversationId });
         }
         throw cause;
       }
       if (intent !== 'generate') {
-        requestConversationSendBoxPrefill(
-          conversationId,
-          t(`guid.comfy.prompts.${intent}`, { family: profile.name, profile: next.profileId ?? '' })
-        );
+        requestConversationSendBoxPrefill(conversationId, installationInput!);
       }
       await swrMutate(`conversation/${conversationId}`).catch((): void => undefined);
     } catch (cause) {
@@ -178,6 +324,23 @@ export default function ComfyOperationResult({ id, conversationId }: { id: strin
     }
   };
   const plan = operation?.plan;
+  if (compact && operation && operation.state !== 'awaiting-consent')
+    return (
+      <section className='mt-8px text-13px space-y-4px' data-testid='comfy-operation-summary'>
+        <div role='status'>
+          {operation.plan.name} ·{' '}
+          {t(
+            operation.state === 'failed' && runtime.isProcessing
+              ? 'guid.comfy.operation.recovering'
+              : `guid.comfy.operation.states.${operation.state}`
+          )}
+        </div>
+        <Button type='text' size='mini' onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>
+          {t('guid.comfy.operation.details')}
+        </Button>
+        {expanded && <ComfyOperationResult id={id} conversationId={conversationId} />}
+      </section>
+    );
   return (
     <div className='mt-12px p-12px rd-12px border border-3 space-y-8px' data-testid='comfy-operation-result'>
       <div className='flex items-center justify-between gap-12px'>
@@ -349,9 +512,19 @@ export default function ComfyOperationResult({ id, conversationId }: { id: strin
           </Collapse.Item>
         </Collapse>
       )}
-      {operation && ['awaiting-consent', 'paused', 'failed'].includes(operation.state) && (
+      {operation?.state === 'awaiting-consent' && (
         <Button type='primary' loading={busy} disabled={runtime.isProcessing} onClick={() => void authorize()}>
           {t('guid.comfy.operation.authorize')}
+        </Button>
+      )}
+      {operation && ['paused', 'failed'].includes(operation.state) && (
+        <Button
+          type='primary'
+          loading={busy}
+          disabled={runtime.isProcessing || selectionPending}
+          onClick={() => void diagnose()}
+        >
+          {t('guid.comfy.operation.continue')}
         </Button>
       )}
       {operation?.state === 'authorized' && (

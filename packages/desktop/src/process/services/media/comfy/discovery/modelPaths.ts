@@ -12,13 +12,23 @@ function within(root: string, file: string): boolean {
 }
 
 /** Resolve only directories explicitly declared in the existing ComfyUI config. */
-export function configuredModelDirectories(root: string, modelsRoot: string, categories: string[]): string[] {
+export function configuredModelDirectories(
+  root: string,
+  modelsRoot: string,
+  categories: string[],
+  complete = false
+): string[] {
   const directories = categories.map((category) => path.join(modelsRoot, category));
   const config = path.join(root, 'extra_model_paths.yaml');
   try {
-    if (fs.statSync(config).size > 1024 * 1024) return directories;
+    if (fs.statSync(config).size > 1024 * 1024) {
+      if (complete) throw new Error('COMFY_INVENTORY_MODEL_PATHS_TOO_LARGE');
+      return directories;
+    }
     const groups = record(yaml.load(fs.readFileSync(config, 'utf8'), { schema: yaml.JSON_SCHEMA }));
-    for (const group of Object.values(groups).map(record).slice(0, 32)) {
+    for (const group of Object.values(groups)
+      .map(record)
+      .slice(0, complete ? undefined : 32)) {
       const base = typeof group.base_path === 'string' ? path.resolve(root, group.base_path) : root;
       for (const category of categories) {
         const value = group[category];
@@ -27,11 +37,13 @@ export function configuredModelDirectories(root: string, modelsRoot: string, cat
           .split(/\r?\n/)
           .map((entry) => entry.trim())
           .filter(Boolean)
-          .slice(0, 16))
+          .slice(0, complete ? undefined : 16))
           directories.push(path.resolve(base, relative));
       }
     }
-  } catch {
+  } catch (error) {
+    if (complete && (error as NodeJS.ErrnoException).code !== 'ENOENT')
+      throw new Error('COMFY_INVENTORY_MODEL_PATHS_INCOMPLETE', { cause: error });
     // Missing or invalid optional paths do not prevent discovering the default tree.
   }
   return [...new Set(directories)];

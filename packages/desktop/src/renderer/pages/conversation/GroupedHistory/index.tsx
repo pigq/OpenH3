@@ -28,6 +28,7 @@ import { useDragAndDrop } from './hooks/useDragAndDrop';
 import type { ConversationRowProps, WorkspaceGroupedHistoryProps } from './types';
 
 const WorkspaceGroupedHistory: React.FC<WorkspaceGroupedHistoryProps> = ({
+  onNewChat,
   onSessionClick,
   collapsed = false,
   tooltipEnabled = false,
@@ -521,7 +522,28 @@ const WorkspaceGroupedHistory: React.FC<WorkspaceGroupedHistoryProps> = ({
         {conversationOnlySections.length > 0 && (
           <div className='min-w-0'>
             {!collapsed && (
-              <SectionLabel sectionKey='conversations' label={t('conversation.history.conversationsSection')} />
+              <SectionLabel
+                sectionKey='conversations'
+                label={t('conversation.history.conversationsSection')}
+                trailing={
+                  <Tooltip content={t('conversation.welcome.newConversation')} position='right'>
+                    <Button
+                      type='text'
+                      size='mini'
+                      className='sider-section-add'
+                      aria-label={t('conversation.welcome.newConversation')}
+                      icon={<Plus theme='outline' size={14} />}
+                      onClick={() => {
+                        if (onNewChat) onNewChat();
+                        else {
+                          void navigate('/guid', { state: { resetAssistant: true } });
+                          onSessionClick?.();
+                        }
+                      }}
+                    />
+                  </Tooltip>
+                }
+              />
             )}
             {!collapsedSections.has('conversations') &&
               conversationOnlySections.map((section) => (

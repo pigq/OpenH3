@@ -20,6 +20,20 @@ import { H3JobRunner } from '@/process/services/runtime/H3JobRunner';
 import { diagnoseComfyError } from '@/process/services/runtime/h3ComfyError';
 import { ComfyRuntimeCoordinator } from '@/process/services/media/comfy/runtimeCoordinator';
 
+it('archives completed outputs before returning the successful generation without submitting a new prompt', async () => {
+  const store = memoryStore(createH3Job({ prompt: 'archive output' }, 'archive-job'));
+  const result = {
+    promptId: 'existing-prompt',
+    artifacts: [{ filename: 'result.mp4', subfolder: '', type: 'output', mimeType: 'video/mp4' }],
+  };
+  const save = vi.fn(async () => undefined);
+  const client = { generate: vi.fn(async () => result), resume: vi.fn(), cancel: vi.fn() };
+  const runner = new H3JobRunner(store, client, { validate: async () => undefined }, undefined, save);
+  await expect(runner.run('archive-job')).resolves.toMatchObject({ status: 'succeeded' });
+  expect(save).toHaveBeenCalledExactlyOnceWith('archive-job', result);
+  expect(client.generate).toHaveBeenCalledOnce();
+});
+
 it('coordinates legacy H3 OOM cleanup and retries the original spec once with a persisted allowance', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'h3-oom-'));
   try {
@@ -71,13 +85,32 @@ it('coordinates legacy H3 OOM cleanup and retries the original spec once with a 
   }
 });
 
-it.each(['queued', 'running', 'succeeded', 'failed', 'cancelled'] as const)(
-  'ends Agent polling for a %s snapshot',
+it.each([
+  ['queued', false, 'MONITOR_SAME_JOB_UNTIL_TERMINAL'],
+  ['running', false, 'MONITOR_SAME_JOB_UNTIL_TERMINAL'],
+  ['succeeded', true, 'SHOW_RESULT_AND_CONTINUE_REMAINING_WORK'],
+  ['failed', true, 'DIAGNOSE_AND_CONTINUE_AUTHORIZED_WORK'],
+  ['cancelled', true, 'REPORT_CANCELLATION'],
+] as const)('returns task-aware monitoring guidance for a %s snapshot', (status, terminal, nextAction) => {
+  expect(h3AgentSnapshot({ ...createH3Job({ prompt: 'test' }), status })).toMatchObject({
+    stopPolling: terminal,
+    automaticRetryAllowed: false,
+    terminal,
+    nextAction,
+  });
+});
+
+it.each(['queued', 'running', 'failed'] as const)(
+  'requires recovery of an uncertain %s job without authorizing resubmission',
   (status) => {
-    expect(h3AgentSnapshot({ ...createH3Job({ prompt: 'test' }), status })).toMatchObject({
+    expect(
+      h3AgentSnapshot({ ...createH3Job({ prompt: 'test' }, 'existing-job'), status, remoteUncertain: true })
+    ).toMatchObject({
+      id: 'existing-job',
+      remoteUncertain: true,
       stopPolling: true,
       automaticRetryAllowed: false,
-      terminal: !['queued', 'running'].includes(status),
+      nextAction: 'RECOVER_EXISTING_JOB_NO_RESUBMISSION',
     });
   }
 );

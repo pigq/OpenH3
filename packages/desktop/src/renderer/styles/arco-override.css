@@ -685,6 +685,13 @@ body[arco-theme='dark'] .arco-message-error {
   overflow: visible;
 }
 
+/* Conversation history actions are a short, fixed list. Keep every action
+   visible in the context menu instead of inheriting Arco's 200px scroll cap. */
+.arco-dropdown-menu.conversation-history-context-menu {
+  max-height: none;
+  overflow: visible;
+}
+
 /* Divider between the menu's action sections (add-to-chat | locate/copy |
    create/rename/delete). A plain <div role='separator'> emitted by ExplorerPanel
    between two non-empty sections; theme-aware border token so it adapts to dark

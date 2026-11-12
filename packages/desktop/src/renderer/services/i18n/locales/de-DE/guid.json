@@ -5,11 +5,20 @@
   "agentTabAutoSwitch": "Modell nicht kompatibel mit Gemini, automatisch zu {{fallback}} gewechselt",
   "autoSwitchToAgent": "Gemini ist nicht konfiguriert, automatischer Wechsel zu {{agent}}",
   "autoSwitchedAgent": "{{from}} ist nicht verfügbar, zu {{to}} gewechselt",
-  "promptExamplesHint": "Diese Anweisungen ausprobieren",
+  "promptExamplesHint": "Mit einer kreativen Idee beginnen",
   "defaultPrompts": {
-    "understand": "Verschaffe dir einen Überblick über dieses Projekt und erkläre mir in einfachen Worten, was es macht und wo ich anfangen sollte",
-    "cleanup": "Finde doppelte und unnötige Dateien in diesem Ordner und liste sie zur Bestätigung auf",
-    "create": "Erstelle mir eine schöne persönliche Homepage und öffne sie, sobald sie fertig ist"
+    "image": "Erzeuge eine filmische Straßenszene bei Nacht im Regen, Hochformat 3:4",
+    "reference": "Erstelle aus meinem hochgeladenen Foto ein Porträtposter und bewahre die Identität",
+    "story": "Erstelle eine kurze Geschichte über den Alltag eines Lieferkuriers mit Schnitt und Musik",
+    "models": "Prüfe meinen Computer, installiere passende lokale Modelle und teste die Bilderzeugung",
+    "product": "Gestalte eine minimalistische Kaffeewerbung im Querformat 16:9",
+    "portrait": "Mache mein hochgeladenes Porträt zum natürlich beleuchteten Magazincover und erhalte die Gesichtszüge",
+    "travel": "Erstelle einen Reisefilm am Meer mit eigener Szenenplanung, Schnitt und Musik",
+    "repair": "Prüfe meine lokalen Modelle, repariere fehlerhafte Konfigurationen und teste die Generierung",
+    "poster": "Gestalte ein Blumenposter „Briefe zwischen Blüten“ im Hochformat 3:4",
+    "restyle": "Verwandle mein Foto in ein Aquarell und erhalte Motiv und Komposition",
+    "storyboard": "Erzähle „Eine Bäckerei öffnet vor Sonnenaufgang“ in drei Videoakten mit einheitlichem Stil",
+    "edit": "Schneide meine Videos zu einem lebhaften Kurzfilm mit Untertiteln und Musik"
   },
   "selectAssistantHint": "Wähle einen Assistenten, um eine Aufgabe zu starten",
   "agentSwitcherLabel": "Agent",
@@ -51,18 +60,19 @@
       "moss-image-sft": "Generierung chinesischer Texte und Layouts (SFT)"
     },
     "actions": {
-      "install": "Geführte Installation",
+      "install": "Installation starten",
       "repair": "Prüfen / Reparieren",
       "install-other": "Andere Version",
       "generate": "Generieren"
     },
     "intentSummary": "Lokales Modell: {{model}} · {{intent}} · {{profile}}.",
     "prompts": {
-      "install": "Nutze comfyui-local: Gerät automatisch prüfen, eine passende lokale {{family}}-Version wählen und mit passendem Workflow herunterladen und installieren.",
-      "repair": "Nutze comfyui-local, um das lokale {{family}}-Profil {{profile}} zu prüfen und zu reparieren. Andere funktionierende Profile erhalten.",
-      "install-other": "Nutze comfyui-local: Gerät prüfen, eine separate passende {{family}}-Version mit passendem Workflow herunterladen und installieren. Funktionierende Versionen erhalten."
+      "install": "Installiere {{family}} lokal mit passendem Workflow. Verwende kompatible vorhandene Umgebungen und Dateien, wähle eine geeignete Konfiguration, behebe Fehler und prüfe eine echte Generierung vor der Fertigmeldung.",
+      "repair": "Diagnostiziere und repariere das lokale {{family}}-Profil {{profile}}. Erhalte andere funktionierende Umgebungen und Modelle und prüfe eine echte Generierung.",
+      "install-other": "Installiere eine separate alternative lokale Version von {{family}} mit passendem Workflow. Erhalte funktionierende Versionen, behebe Installationsfehler und prüfe eine echte Generierung."
     },
     "operation": {
+      "recovering": "Der Agent untersucht und repariert diese Aufgabe.",
       "title": "ComfyUI-Modellplan",
       "authorize": "Plan bestätigen und Assistenten fortsetzen lassen",
       "continue": "Assistenten fortsetzen lassen",
@@ -86,9 +96,11 @@
       },
       "snapshotDirectory": "Wiederherstellungssnapshot",
       "submittedContext": "Die App hat die Installation {{id}} übermittelt ({{state}}); die Fortschrittsanzeige aktualisiert sich automatisch. Erläutere den bestehenden Vorgang, ohne eine weitere Installation zu senden oder erneut im Chat um Bestätigung zu bitten.",
-      "preparationFailed": "Die Installationsvorbereitung wurde nicht abgeschlossen: {{reason}}. Die Anfrage bleibt gespeichert; Details stehen im Arbeitsfortschritt."
+      "preparationFailed": "Die Installationsvorbereitung wurde nicht abgeschlossen: {{reason}}. Die Anfrage bleibt gespeichert; Details stehen im Arbeitsfortschritt.",
+      "agentPreparing": "An den Agent gesendet; die Installationsumgebung wird als Nächstes geprüft.",
+      "agentRetry": "Setze die Installation von {{model}} fort. Prüfe gespeicherte Aufgaben und Fehler und nutze comfyui-local zur Diagnose und Fortsetzung, ohne eine doppelte Installation anzulegen."
     },
-    "profileSummary": "Ausgewähltes lokales Profil: {{profile}}. Verwende genau dieses Profil.",
+    "profileSummary": "Ausgewähltes lokales Profil: {{profile}}. Behalte Modell, numerische Präzision und angeforderte Parameter bei; zum Abschluss der Reparatur darf eine validierte Reparaturvariante übernommen werden.",
     "session": {
       "title": "Lokales Generierungsprofil",
       "hint": "Gilt für die nächste Generierung. Übermittelte Aufträge behalten ihr gespeichertes Profil.",
@@ -108,7 +120,9 @@
       },
       "adjusted": "Die Parameter wurden innerhalb der freigegebenen Grenzen dieses Profils angepasst.",
       "actualInput": "Tatsächliche Generierungsparameter",
-      "submissionUncertain": "Die Übermittlung wurde nicht bestätigt. Prüfe die aktuelle ComfyUI-Warteschlange, bevor du erneut übermittelst."
+      "submissionUncertain": "Die Übermittlung wurde nicht bestätigt. Prüfe die aktuelle ComfyUI-Warteschlange, bevor du erneut übermittelst.",
+      "recovered": "Behoben · vorherigen Fehler anzeigen",
+      "elapsed": "Verstrichene Zeit: {{seconds}} Sekunden"
     },
     "illustrativeCover": "Beispielbild",
     "preview": {
@@ -130,7 +144,34 @@
       "krea2": "comfyui-local: references/z-image.md#krea2 — BF16 / FP8 / INT8-ConvRot / NVFP4; Turbo steps=8, CFG=1; CLIPLoader.type=krea2. Standardmäßig Turbo verwenden; keine Raw-Gewichte mischen oder automatisch Stil-LoRAs hinzufügen. Diese Basis validiert nur Text-zu-Bild; Stilreferenzen benötigen einen eigenen passenden Workflow.",
       "moss-image-sft": "comfyui-local: references/z-image.md#moss-image-sft — MOSS-Image-SFT, BF16 / INT8-ConvRot / INT8-ConvRot+W4A8; steps=50, CFG=3; CLIPLoader.type=moss_image. Keep SFT separate from Base and use the fixed native moss_image ComfyUI route with shift=5 and negative-branch SLG layer=22. Prefer ModelScope, then verified domestic mirror, then upstream with fixed revision, size and SHA-256; only real generation verification marks the profile usable."
     },
-    "imageRecipeRequirements": "Mit openh3_comfy_environment Betriebssystem, GPU-Architektur, Treiber, Python/Torch, tatsächliche Präzisions-/Attention-Kernel, freien VRAM/RAM, Offload und Speicherplatz prüfen. Geräteanforderungen nicht erfüllt von Erkennung unvollständig unterscheiden und Fehlendes benennen; nicht allein nach VRAM wählen. NVFP4 erfordert kompatibles Blackwell. Geprüfte ModelScope-Dateien vor SHA-256-identischem hf-mirror.com und Originalquelle verwenden; revision, Größe und SHA-256 fixieren, Downloads fortsetzen. Ungeprüfte oder zugangsbeschränkte Quellen erklären, keine Version erfinden. Erst nach echter Bilderzeugung als nutzbar markieren."
+    "imageRecipeRequirements": "Mit openh3_comfy_environment Betriebssystem, GPU-Architektur, Treiber, Python/Torch, tatsächliche Präzisions-/Attention-Kernel, freien VRAM/RAM, Offload und Speicherplatz prüfen. Geräteanforderungen nicht erfüllt von Erkennung unvollständig unterscheiden und Fehlendes benennen; nicht allein nach VRAM wählen. NVFP4 erfordert kompatibles Blackwell. Geprüfte ModelScope-Dateien vor SHA-256-identischem hf-mirror.com und Originalquelle verwenden; revision, Größe und SHA-256 fixieren, Downloads fortsetzen. Ungeprüfte oder zugangsbeschränkte Quellen erklären, keine Version erfinden. Erst nach echter Bilderzeugung als nutzbar markieren.",
+    "workflows": {
+      "advanced": "Erweiterte Workflows",
+      "mode": "Workflow-Auswahl",
+      "auto": "Workflow automatisch wählen",
+      "fixed": "Fester Workflow",
+      "autoHint": "Wählt für die Aufgabe einen Workflow des ausgewählten Modells. Ein fester Workflow verwendet immer denselben Weg.",
+      "details": "Details",
+      "environment": "Umgebung",
+      "workflow": "Workflow",
+      "states": {
+        "verified": "Verifiziert",
+        "pending-validation": "Validierung ausstehend",
+        "needs-preparation": "Vorbereitung erforderlich",
+        "needs-repair": "Reparatur erforderlich"
+      },
+      "tasks": {
+        "text-to-image": "Text zu Bild",
+        "image-to-image": "Bild zu Bild",
+        "image-edit": "Bildbearbeitung",
+        "multi-reference-image": "Mehrere Referenzbilder",
+        "inpaint": "Inpainting",
+        "text-to-video": "Text zu Video",
+        "image-to-video": "Bild zu Video",
+        "reference-to-video": "Referenz zu Video",
+        "first-last-frame-video": "Start- und Endbild zu Video"
+      }
+    }
   },
   "creation": {
     "states": {
@@ -158,7 +199,7 @@
     "cloudVideo": "Cloud-Videomodell",
     "manageLocal": "Lokale Modelle verwalten",
     "configureCloud": "Cloud-API konfigurieren",
-    "requestSummary": "Erstellungseinstellungen: {{kind}} · {{source}} · {{model}} ({{state}}). Verwende das ausgewählte Modell. Wenn es nicht verfügbar ist, bitte mich um Installation oder Konfiguration. Wechsle nie automatisch zu einem anderen Modell oder einem Cloud-Dienst.",
+    "requestSummary": "Erstellungseinstellungen (App-Kontext; Benutzeranweisungen haben Vorrang): {{kind}} · {{source}} · {{model}} ({{state}}). Behalte das ausgewählte Modell und die angeforderten Parameter bei. Ist es nicht verfügbar, diagnostiziere, konfiguriere oder repariere es gemäß dem aktuellen Genehmigungsmodus und setze die Aufgabe fort. Im vollautomatischen Modus ist keine zusätzliche Bestätigung im Chat nötig; die tatsächlichen Werkzeugberechtigungen gelten weiterhin. Frage nur nach fehlenden erforderlichen Eingaben oder einer Entscheidung zur Änderung eines Modells oder Parameters, dessen Beibehaltung der Benutzer ausdrücklich verlangt hat.",
     "toolsUnavailable": "Die Erstellungstools sind noch nicht bereit. Bitte versuche es in Kürze erneut.",
     "install": {
       "states": {
@@ -199,11 +240,25 @@
       "invalid": "Check the service name, API URL and model. OpenAI Videos requires a model and API key.",
       "uncertain": "The server may have received this request. Automatic resubmission is disabled to prevent duplicate generation.",
       "retrying": "Waiting for the cloud service to respond. This task will be checked again automatically.",
-      "failed": "Video generation could not complete. Check the service status or task details before starting a new request."
+      "failed": "Video generation could not complete. Check the service status or task details before starting a new request.",
+      "stages": {
+        "submitting": "Submitting",
+        "queued": "Queued",
+        "generating": "Generating",
+        "downloading": "Downloading result",
+        "completed": "Completed",
+        "failed": "Failed"
+      },
+      "background": "Cloud generation is still running. You can continue chatting.",
+      "progressUnknown": "The provider does not report a percentage. Status is checked automatically.",
+      "elapsed": "Elapsed: {{seconds}} seconds",
+      "lastChecked": "Last status received {{seconds}} seconds ago"
     },
     "noLocalModels": "Keine lokalen Modelle",
     "noLocalModelsHint": "Keine lokalen Modelle gefunden. Zuerst installieren oder hinzufügen.",
-    "addCloud": "Cloud-API hinzufügen"
+    "addCloud": "Cloud-API hinzufügen",
+    "inventoryIncomplete": "Details des Modellscans",
+    "inventoryIncompleteHint": "Einige Speicherorte konnten nicht vollständig geprüft werden. Erkannte Modelle bleiben erhalten. Kopieren Sie die Details zur Diagnose."
   },
   "aiCreation": "KI-Erstellung",
   "aiCreationSubtitle": "Verwirkliche deine Ideen",
@@ -435,5 +490,142 @@
   },
   "templateReferenceRequired": "Referenz nötig",
   "templateReferenceHint": "Lade vor der Anfrage ein Porträt oder Ausgangsbild hoch.",
-  "templateReferencePrompt": "Verwende meine Referenzbilder und bewahre die Identität oder das ursprüngliche Motiv gemäß Vorlage. Fehlt die Referenz, bitte mich vor der Generierung um den Upload. Erfinde keine Referenzinhalte. Seitenverhältnis: {{ratio}}.\n\n{{prompt}}"
+  "templateReferencePrompt": "Verwende meine Referenzbilder und bewahre die Identität oder das ursprüngliche Motiv gemäß Vorlage. Fehlt die Referenz, bitte mich vor der Generierung um den Upload. Erfinde keine Referenzinhalte. Seitenverhältnis: {{ratio}}.\n\n{{prompt}}",
+  "localModels": {
+    "title": "Lokale Modelle",
+    "subtitle": "Passende Modelle für dieses Gerät finden und lokale Kreativwerkzeuge verwalten.",
+    "preview": "Beispiel für {{name}}",
+    "noPreview": "Kein Beispiel verfügbar",
+    "play": "Beispiel abspielen",
+    "pause": "Beispiel pausieren",
+    "unknown": "Nicht gemessen",
+    "device": "Dieses Gerät",
+    "checkedAt": "Geprüft um {{time}}",
+    "refresh": "Erneut prüfen",
+    "graphics": "Grafikkarte",
+    "vram": "Grafikspeicher",
+    "sharedMemory": "Gemeinsamer Speicher",
+    "ram": "Arbeitsspeicher",
+    "available": "{{value}} verfügbar",
+    "cpu": "Prozessor",
+    "system": "System",
+    "driver": "GPU-Treiber",
+    "disk": "Festplattenspeicher",
+    "directory": "Installationsordner",
+    "changeDirectory": "Ordner wählen",
+    "environment": "Umgebungsdetails",
+    "environmentHint": "Der Agent prüft oder richtet Python und ComfyUI bei der Installation ein. Eine fehlende Umgebung bedeutet nicht, dass das Gerät inkompatibel ist.",
+    "python": "Python",
+    "workflowCount": "{{count}} Workflows",
+    "downloadSize": "Download {{value}}",
+    "reusedSize": "Wiederverwendbar {{value}}",
+    "details": "Details anzeigen",
+    "assessment": "Gerätebewertung",
+    "assessmentHint": "Der Speicherbedarf ist geschätzt. Vor der Installation prüft der Agent den tatsächlichen Workflow und die Umgebung.",
+    "totalSize": "Komponenten gesamt",
+    "download": "Herunterzuladen",
+    "reused": "Bereits verfügbar",
+    "versions": "Versionen und Workflows",
+    "noVersions": "Der Agent wählt bei der Installation eine passende Version und einen Workflow aus.",
+    "workflow": "Workflow",
+    "components": "Komponenten",
+    "evidence": "Prüfnachweise",
+    "noEvidence": "Eine erfolgreiche Generierung wurde noch nicht bestätigt.",
+    "loading": "Gerät und Modelle werden geprüft",
+    "unavailable": "Lokale Modellinformationen konnten nicht gelesen werden.",
+    "retry": "Erneut versuchen",
+    "models": "Modellbibliothek",
+    "catalogHint": "Empfehlungen basieren auf Gerätespeicher und vorhandenen Komponenten.",
+    "search": "Modelle oder Versionen suchen",
+    "filter": "Modelltyp",
+    "noModels": "Keine passenden Modelle. Filter ändern oder alle Modelle anzeigen.",
+    "tabs": {
+      "recommended": "Empfohlen",
+      "all": "Alle Modelle",
+      "installed": "Installiert"
+    },
+    "filters": {
+      "all": "Alle Typen",
+      "image": "Bild",
+      "video": "Video"
+    },
+    "actions": {
+      "install": "Installation starten",
+      "use": "Modell verwenden",
+      "progress": "Fortschritt anzeigen",
+      "repair": "Prüfen / reparieren"
+    },
+    "status": {
+      "verified": "Verifiziert",
+      "compatible": "Speicher ausreichend",
+      "unknown": "Bewertung erforderlich",
+      "insufficient": "Anpassung erforderlich"
+    },
+    "purpose": {
+      "image-generation": "Bilderzeugung",
+      "image-edit": "Bildbearbeitung",
+      "video": "Videoerzeugung"
+    },
+    "errors": {
+      "load": "Geräteinformationen konnten nicht aktualisiert werden. Vor der Installation erneut versuchen.",
+      "action": "Modellaufgabe konnte nicht geöffnet werden. Bitte erneut versuchen.",
+      "directory": "Ordnerauswahl konnte nicht geöffnet werden. Bitte erneut versuchen."
+    },
+    "reasons": {
+      "verified-workflow": "Ein installierter Workflow hat die Generierungsprüfung bestanden.",
+      "component-metadata-missing": "Komponentengrößen sind unbestätigt. Der Agent bewertet die Installation.",
+      "workflow-missing": "Ein passender Workflow muss noch vorbereitet werden.",
+      "hardware-unknown": "GPU-Speicher konnte nicht gemessen werden. Der Agent prüft das Gerät.",
+      "platform-unknown": "Die Kompatibilität dieser Plattform muss weiter geprüft werden.",
+      "gpu-architecture-insufficient": "Diese Version benötigt eine andere GPU-Architektur.",
+      "native-kernel-unverified": "Native Operatoren müssen auf diesem Gerät noch geprüft werden.",
+      "runtime-unverified": "Die Python- und ComfyUI-Umgebung muss noch verifiziert werden.",
+      "memory-insufficient": "Der verfügbare Speicher liegt unter dem geschätzten Bedarf dieser Version.",
+      "disk-insufficient": "Auf dem gewählten Datenträger ist nicht genug freier Speicher.",
+      "disk-unknown": "Freier Speicher im gewählten Ordner konnte nicht gemessen werden.",
+      "temporary-memory-pressure": "Andere Apps belegen Speicher. Vor dem Ausführen Kapazität freigeben.",
+      "offload-required": "Diese Konfiguration benötigt voraussichtlich Auslagerung in den Arbeitsspeicher.",
+      "capacity-compatible": "Dieses Gerät erfüllt die bekannten Speicheranforderungen."
+    },
+    "installContext": "Neue Dateien müssen in {{directory}} abgelegt werden. Vorhandene kompatible Umgebungen und Dateien wiederverwenden, nicht verschieben. Hardware geprüft am {{checkedAt}}. Empfohlene Konfiguration: {{candidate}} (unverbindlich; aktuelle Hardware prüfen und den tatsächlichen Plan festlegen).",
+    "automaticCandidate": "Automatisch auswählen",
+    "newInstallLocation": "Neuer Installationsort",
+    "newFilesOnly": "Nur neue Dateien verwenden diesen Ort. Vorhandene Dateien bleiben unverändert.",
+    "journey": {
+      "label": "Ablauf für lokale Kreation",
+      "device": "Hardware prüfen",
+      "choose": "Modell wählen",
+      "create": "Kreation starten",
+      "deviceHint": "Verfügbare Ressourcen dieses Computers",
+      "chooseHint": "Passende Bild- und Videomodelle finden",
+      "createHint": "Der Agent installiert und prüft"
+    },
+    "recommendedHeading": "Für diesen Computer empfohlen",
+    "resourceHint": "VRAM dient der Modellberechnung, Arbeitsspeicher den geladenen Komponenten. Empfehlungen berücksichtigen beide und den freien Speicherplatz.",
+    "descriptions": {
+      "h3": "Text oder Referenzbilder als Video: für Landschaften, Produktpräsentationen und Filmszenen.",
+      "fasth3-omni": "Bild-, Video- oder Audioreferenzen kombinieren: für Figurenclips, Szenenerweiterungen und kreative Montagen.",
+      "qwen-edit": "Bilder per Sprache bearbeiten: für neue Outfits, Hintergründe und Produktmotive.",
+      "z-image": "Bilder aus Text: für Porträts, Produktkonzepte und visuelle Ideen.",
+      "flux-3-image-klein": "Ein schlankes Bildmodell für Konzepte, Produktszenen und kreative Skizzen.",
+      "moss-image-base": "Schwerpunkt chinesische Schrift und Bildaufbau: für Plakate, Infografiken und Layoutentwürfe.",
+      "moss-image-sft": "Ein feinabgestimmtes MOSS-Bildmodell für chinesische Plakate, Porträts und Szenen.",
+      "krea2": "Stilisierte Bilder für visuelle Konzepte, Designideen und neue Ausdrucksformen.",
+      "image": "Bilder aus Beschreibungen für Illustrationen, Produktkonzepte und Szenenentwürfe.",
+      "editing": "Bilder erstellen und bearbeiten: für Referenzvarianten, Szenenänderungen und visuelles Design.",
+      "video": "Lokale Videos für Filmszenen, Produktclips und Landschaftsaufnahmen."
+    },
+    "agentHandlesSetup": "Beschreibe dein Vorhaben. Der Agent prüft die Umgebung, wählt einen Workflow und übernimmt nötige Reparaturen.",
+    "technicalDetails": "Technische Details",
+    "precisionGuide": {
+      "full": "16-Bit-Präzision mit größeren Gewichten; für reichlich Ressourcen und weniger Quantisierungseinfluss.",
+      "int8": "8-Bit-Ganzzahlgewichte brauchen weniger Platz als 16 Bit; für den Alltag mit weniger Ressourcen.",
+      "fp8": "8-Bit-Gleitkommagewichte sparen Platz; für GPUs mit passenden Rechenoperationen.",
+      "w4a8": "INT8-Hauptmodell und 4-Bit-Textencoder; für weniger Ressourcenbedarf als normales INT8.",
+      "nvfp4": "4-Bit-Gleitkomma spart mehr Platz; der Agent prüft NVFP4-Unterstützung bei der Einrichtung.",
+      "mixed": "Komponenten verwenden verschiedene Präzisionen; passende GPU-Rechenoperationen sind erforderlich.",
+      "hint": "Die kreativen Einsätze bleiben gleich; Ressourcenbedarf und Quantisierung unterscheiden sich. Tempo und Qualität hängen auch von GPU, Workflow und Eingabe ab. Im Zweifel unter Empfehlungen beginnen."
+    }
+  },
+  "refreshPrompts": "Andere Vorschläge"
 }

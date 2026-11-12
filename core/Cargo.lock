@@ -3464,6 +3464,7 @@ dependencies = [
  "aion-mcp",
  "aion-protocol",
  "aion-providers",
+ "aion-tools",
  "aion-types",
  "async-trait",
  "axum",

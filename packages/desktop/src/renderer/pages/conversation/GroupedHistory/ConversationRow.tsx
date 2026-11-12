@@ -171,6 +171,7 @@ const ConversationRow: React.FC<ConversationRowProps> = (props) => {
     >
       <div
         id={'c-' + conversation.id}
+        aria-current={selected ? 'page' : undefined}
         className={classNames(
           'chat-history__item h-34px rd-8px flex items-center group cursor-pointer relative overflow-hidden shrink-0 conversation-item [&.conversation-item+&.conversation-item]:mt-2px min-w-0 transition-colors',
           collapsed ? 'justify-center px-0' : 'justify-start gap-8px pe-16px',
@@ -271,6 +272,7 @@ const ConversationRow: React.FC<ConversationRowProps> = (props) => {
             <Dropdown
               droplist={
                 <Menu
+                  className='conversation-history-context-menu'
                   onClickMenuItem={(key) => {
                     if (key === 'pin') {
                       onTogglePin(conversation);

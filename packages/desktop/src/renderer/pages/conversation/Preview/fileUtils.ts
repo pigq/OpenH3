@@ -19,6 +19,7 @@ export const FILE_EXTENSION_MAP: Record<PreviewContentType, readonly string[]> =
   // routing them here produced a failure that told the user to install officecli,
   // which does not help for a format it cannot open.
   word: ['docx'],
+  archive: ['zip'],
   ppt: ['pptx'],
   excel: ['xlsx'],
   // CSV is plain text, and officecli rejects it outright — so it reads as text
@@ -39,7 +40,24 @@ export const FILE_EXTENSION_MAP: Record<PreviewContentType, readonly string[]> =
    *   yields a broken-image placeholder with no explanation — strictly worse than
    *   saying it is unsupported.
    */
-  unsupported: ['doc', 'xls', 'ppt', 'odt', 'ods', 'odp', 'docm', 'xlsm', 'pptm', 'heic'],
+  unsupported: [
+    'doc',
+    'xls',
+    'ppt',
+    'odt',
+    'ods',
+    'odp',
+    'docm',
+    'xlsm',
+    'pptm',
+    'heic',
+    '7z',
+    'rar',
+    'tar',
+    'gz',
+    'bz2',
+    'xz',
+  ],
   url: [], // url 类型用于网页预览，无扩展名映射 / url type for web preview, no extension mapping
   browser: [], // browser 类型用于应用内浏览器 tab，无扩展名映射 / browser type for in-app browser tabs, no extension mapping
 };

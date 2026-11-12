@@ -72,15 +72,17 @@ export class H3RuntimeManager {
     const main = path.join(root, 'ComfyUI', 'main.py');
     if (!fs.existsSync(python) || !fs.existsSync(main)) throw new Error('H3_PORTABLE_RUNTIME_NOT_INSTALLED');
     const selectedAcceleration = this.accelerationStatus();
-    if (!allowInstall && selectedAcceleration.mode !== 'dense' && selectedAcceleration.backend !== 'sla')
-      throw new Error(`H3_ACCELERATION_DEPENDENCIES_MISSING:${selectedAcceleration.reason}`);
     if (
       allowInstall &&
       !this.options.spawnProcess &&
-      this.accelerationStatus().backend !== 'sla' &&
-      this.options.acceleration?.mode !== 'dense'
+      selectedAcceleration.backend !== 'sla' &&
+      selectedAcceleration.mode !== 'dense'
     )
       await prepareH3Acceleration(this.options.bundleRoot ?? this.installStatus().bundleRoot, root);
+    const acceleration = this.accelerationStatus();
+    // Auto preserves the installed node's supported fallback; only an explicit SLA choice requires acceleration.
+    if (acceleration.mode === 'sla' && acceleration.backend !== 'sla')
+      throw new Error(`H3_ACCELERATION_DEPENDENCIES_MISSING:${acceleration.reason}`);
     const start = this.options.spawnProcess ?? ((command, args, spawnOptions) => spawn(command, args, spawnOptions));
     let logHandle: number;
     try {
@@ -93,7 +95,6 @@ export class H3RuntimeManager {
       logHandle = fs.openSync(path.join(root, `comfyui-service-${Date.now()}.log`), 'a');
     }
     try {
-      const acceleration = this.accelerationStatus();
       const env = buildH3AccelerationEnv(this.accelerationOptions());
       let args = [
         '-s',

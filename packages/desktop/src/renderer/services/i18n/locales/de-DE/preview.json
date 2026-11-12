@@ -221,5 +221,9 @@
   "zoomIn": "Vergrößern",
   "zoomOut": "Verkleinern",
   "zoomReset": "Ansicht zurücksetzen",
-  "diagramZoomHint": "Scrollen zum Zoomen • Ziehen zum Verschieben • ESC zum Schließen"
+  "diagramZoomHint": "Scrollen zum Zoomen • Ziehen zum Verschieben • ESC zum Schließen",
+  "archive": {
+    "entries": "{{count}} Dateien und Ordner",
+    "loadFailed": "Dieses Archiv kann nicht angezeigt werden"
+  }
 }

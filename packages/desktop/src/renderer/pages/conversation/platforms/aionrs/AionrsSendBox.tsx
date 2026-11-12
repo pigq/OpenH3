@@ -5,7 +5,9 @@
  */
 
 import { ipcBridge } from '@/common';
-import { parseError } from '@/common/utils';
+import { parseError, uuid } from '@/common/utils';
+import { useAddOrUpdateMessage } from '../../Messages/hooks';
+import { buildSendFailureError } from '../acp/buildSendFailureError';
 import { h3JobApi } from '@/common/chat/document/h3JobApi';
 import { prepareCreationEntry } from '../../runtime/Creation/prepareCreationEntry';
 import {
@@ -120,6 +122,23 @@ const useSendBoxDraft = (conversation_id: string) => {
     [data, mutate]
   );
 
+  const restoreFailedInitial = useCallback(
+    (input: string, files: ChatFileRef[]) => {
+      const restored = splitChatFileRefs(files);
+      mutate((prev) =>
+        prev?.content || prev?.uploadFile?.length || prev?.atPath?.length
+          ? prev
+          : {
+              ...prev,
+              content: input,
+              uploadFile: restored.uploadFiles,
+              atPath: restored.atPath,
+            }
+      );
+    },
+    [mutate]
+  );
+
   return {
     atPath,
     uploadFile,
@@ -127,6 +146,7 @@ const useSendBoxDraft = (conversation_id: string) => {
     setUploadFile,
     content,
     setContent,
+    restoreFailedInitial,
   };
 };
 
@@ -175,6 +195,7 @@ const AionrsSendBox: React.FC<{
         }))
       : loadedMcpStatuses;
   const { t } = useTranslation();
+  const addOrUpdateMessage = useAddOrUpdateMessage();
   const { checkAndUpdateTitle } = useAutoTitle();
   const { current_model } = modelSelection;
   const teamPermission = useTeamPermission();
@@ -194,7 +215,8 @@ const AionrsSendBox: React.FC<{
   const runtimeView = useConversationRuntimeView(conversation_id);
   const { markSendStarted, markSendAccepted, markSendFailed } = runtimeView;
 
-  const { atPath, uploadFile, setAtPath, setUploadFile, content, setContent } = useSendBoxDraft(conversation_id);
+  const { atPath, uploadFile, setAtPath, setUploadFile, content, setContent, restoreFailedInitial } =
+    useSendBoxDraft(conversation_id);
 
   const handleContentChange = useCallback(
     (val: string) => {
@@ -407,6 +429,7 @@ const AionrsSendBox: React.FC<{
       let bindingPending = false;
       let installationPending = false;
       let finishBinding: (() => void) | undefined;
+      let recovery: { input: string; files: ChatFileRef[]; scope: string } | undefined;
       try {
         const {
           input: initialInput,
@@ -416,7 +439,7 @@ const AionrsSendBox: React.FC<{
           creationRequestId,
           creationRequest,
         } = JSON.parse(storedMessage);
-        let input = typeof initialInput === 'string' ? initialInput : '';
+        const input = typeof initialInput === 'string' ? initialInput : '';
         const guidDraftScope = getGuidDraftScope();
         if (!isGuidDraftScopeCurrent(storedScope)) return;
         // Guid-page initial files are source-tagged ChatFileRefs (`local` for
@@ -425,6 +448,7 @@ const AionrsSendBox: React.FC<{
         const initialRefs: ChatFileRef[] = Array.isArray(initialFiles)
           ? initialFiles.map((f: unknown) => (typeof f === 'string' ? uploadFileRef(f) : f)).filter(isChatFileRef)
           : [];
+        recovery = { input, files: initialRefs, scope: guidDraftScope };
         if (typeof creationRequestId === 'string' && creationRequest) {
           bindingPending = true;
           installationPending =
@@ -434,15 +458,7 @@ const AionrsSendBox: React.FC<{
               creationRequest.intent === 'repair' ||
               creationRequest.intent === 'install-other');
           finishBinding = beginComfySelectionChange(conversation_id);
-          const operation = await prepareCreationEntry(creationRequestId, conversation_id, creationRequest);
-          if (operation) {
-            input += `\n\n${t('guid.comfy.operation.submittedContext', {
-              id: operation.id,
-              state: t(`guid.comfy.operation.states.${operation.state}`),
-            })}`;
-            void mutateActivity(['comfy.activity', conversation_id]).catch((): void => undefined);
-            emitter.emit('chat.history.refresh');
-          }
+          await prepareCreationEntry(creationRequestId, conversation_id, creationRequest);
           bindingPending = false;
         } else if (typeof creationRequestId === 'string') {
           bindingPending = true;
@@ -455,6 +471,8 @@ const AionrsSendBox: React.FC<{
         if (typeof guidDraft === 'string') clearGuidDraftIfMatches(guidDraft, guidDraftScope);
       } catch (error) {
         console.error('[AionrsSendBox] Failed to send initial message:', error);
+        if (recovery && recovery.scope !== getGuidDraftScope()) return;
+        if (recovery) restoreFailedInitial(recovery.input, recovery.files);
         if (bindingPending) {
           sessionStorage.setItem(storageKey, storedMessage);
           Message.error(
@@ -464,6 +482,20 @@ const AionrsSendBox: React.FC<{
           );
           void mutateActivity(['comfy.activity', conversation_id]).catch((): void => undefined);
         }
+        const reason =
+          getConversationRuntimeWorkspaceErrorMessage(error, t) || parseError(error) || t('common.unknownError');
+        addOrUpdateMessage(
+          {
+            id: uuid(),
+            msg_id: uuid(),
+            conversation_id,
+            type: 'tips',
+            position: 'center',
+            content: { content: reason, type: 'error', error: buildSendFailureError(error, reason) },
+            created_at: Date.now(),
+          },
+          true
+        );
         sessionStorage.removeItem(processedKey);
       } finally {
         finishBinding?.();
@@ -471,7 +503,7 @@ const AionrsSendBox: React.FC<{
     };
 
     void processInitialMessage();
-  }, [conversation_id, current_model?.use_model, executeCommand, t]);
+  }, [conversation_id, current_model?.use_model, executeCommand, t, addOrUpdateMessage, restoreFailedInitial]);
 
   // `@@` session references the user picked. Declared before the handlers that
   // read it — every send path has to both forward and release it.

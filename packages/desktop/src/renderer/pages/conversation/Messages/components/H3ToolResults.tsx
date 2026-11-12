@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Button, Progress, Spin } from '@arco-design/web-react';
 import { useTranslation } from 'react-i18next';
 import type { H3Job } from '@/common/chat/document/h3Job';
@@ -52,23 +52,44 @@ export function stripH3PlayerMarkup(text: string, jobIds: string[]): string {
 function H3VideoArtifact({ src, filename, job }: { src: string; filename: string; job: H3Job }) {
   const { t } = useTranslation();
   const [metadata, setMetadata] = useState<{ duration: number; width: number; height: number }>();
+  const [unavailable, setUnavailable] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const elapsed =
     job.startedAt && job.finishedAt ? (Date.parse(job.finishedAt) - Date.parse(job.startedAt)) / 1000 : NaN;
   const unknown = t('conversation.h3Activity.notRecorded');
   return (
     <div>
       <video
+        ref={videoRef}
         controls
         preload='metadata'
         src={src}
         aria-label={filename}
+        onError={() => setUnavailable(true)}
         onLoadedMetadata={(event) => {
+          setUnavailable(false);
           const video = event.currentTarget;
           if (Number.isFinite(video.duration) && video.duration > 0 && video.videoWidth > 0 && video.videoHeight > 0)
             setMetadata({ duration: video.duration, width: video.videoWidth, height: video.videoHeight });
         }}
         style={{ display: 'block', width: '100%', maxHeight: 420, borderRadius: 12 }}
       />
+      {unavailable && (
+        <div className='mt-8px flex flex-wrap items-center gap-8px'>
+          <span role='alert' className='text-12px text-t-secondary'>
+            {t('conversation.h3Activity.artifactUnavailable')}
+          </span>
+          <Button
+            size='small'
+            onClick={() => {
+              setUnavailable(false);
+              videoRef.current?.load();
+            }}
+          >
+            {t('common.retry')}
+          </Button>
+        </div>
+      )}
       <div
         className='mt-8px flex flex-wrap gap-x-16px gap-y-4px text-12px text-t-secondary leading-5'
         data-testid='h3-video-parameters'

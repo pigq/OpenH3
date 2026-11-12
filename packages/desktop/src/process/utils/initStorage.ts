@@ -30,6 +30,7 @@ import {
 } from './utils';
 import { runLegacyDatabaseMigrations } from '@process/services/database/runLegacyDatabaseMigrations';
 import { BUILTIN_IMAGE_GEN_ID } from '../resources/builtinMcp/constants';
+import { resolveBuiltinNodeRuntime } from '../resources/builtinMcp/browserRuntime';
 // Platform and architecture types (moved from deleted updateConfig)
 type PlatformType = 'win32' | 'darwin' | 'linux';
 type ArchitectureType = 'x64' | 'arm64' | 'ia32' | 'arm';
@@ -498,5 +499,14 @@ export const getSystemDir = () => {
  * Get assistant rules directory path (for use by other modules)
  */
 export { getAssistantsDir, getSkillsDir, getCronSkillsDir, BUILTIN_IMAGE_GEN_ID, getBuiltinMcpScriptPath };
+
+/** Managed Node/npm paths are stable across user machines, unlike the system PATH. */
+export function getBuiltinMcpNodeRuntime() {
+  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+  const developmentResources = path.resolve(getBuiltinMcpBaseDir(), '..', '..', 'resources');
+  return resolveBuiltinNodeRuntime(
+    [resourcesPath, developmentResources].filter((root): root is string => Boolean(root))
+  );
+}
 
 export default initStorage;

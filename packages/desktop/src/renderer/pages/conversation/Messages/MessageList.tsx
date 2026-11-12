@@ -5,6 +5,7 @@
  */
 
 import type { IConversationArtifact } from '@/common/adapter/ipcBridge';
+import { RenderedMediaProvider } from '@/renderer/components/Markdown/RenderedMediaContext';
 import type { IMessageAcpToolCall, IMessageToolCall, IMessageToolGroup, TMessage } from '@/common/chat/chatLib';
 import { useConversationContextSafe } from '@/renderer/hooks/context/ConversationContext';
 import { useConversationRuntimeView } from '@/renderer/pages/conversation/runtime/useConversationRuntimeView';
@@ -42,6 +43,7 @@ import MessageTips from './components/MessageTips';
 import MessageToolCall from './components/MessageToolCall';
 import H3ToolResults, { h3TurnResults, stripH3PlayerMarkup } from './components/H3ToolResults';
 import CreationInstallResult from '../runtime/Creation/CreationInstallResult';
+import { ComfyInstallationTranscript } from '../runtime/Creation/ComfyInstallationTranscript';
 import { creationTurnResults } from '../runtime/Creation/turnResults';
 import ComfyOperationResult, { comfyTurnResults } from '../runtime/Creation/ComfyOperationResult';
 import ComfyGenerationResult, { comfyGenerationTurnResults } from '../runtime/Creation/ComfyGenerationResult';
@@ -343,6 +345,11 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
   const pagination = useMessagePaginationState();
   const artifacts = useConversationArtifacts();
   const conversationContext = useConversationContextSafe();
+  const creationRequest = conversationContext?.creationRequest;
+  const installation =
+    creationRequest?.source === 'local' && creationRequest.intent && creationRequest.intent !== 'generate'
+      ? creationRequest
+      : undefined;
   const rowWidthClass = getChatSurfaceWidthClass();
   const loadPreviousMessagePage = useLoadPreviousMessagePage(conversationContext?.conversation_id);
   const loadAnchorMessageWindow = useLoadAnchorMessageWindow(conversationContext?.conversation_id);
@@ -752,11 +759,11 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
     );
   };
 
-  if (processedList.length === 0 && isMessageListLoading) {
+  if (processedList.length === 0 && isMessageListLoading && !installation) {
     return <MessageListSkeleton rowWidthClass={rowWidthClass} />;
   }
 
-  if (processedList.length === 0 && emptySlot) {
+  if (processedList.length === 0 && emptySlot && !installation) {
     return <div className='relative flex-1 h-full flex items-center justify-center'>{emptySlot}</div>;
   }
 
@@ -786,40 +793,72 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
               }}
             >
               <div className='h-10px' />
-              {processedList.map((item, index) => (
-                <React.Fragment key={getProcessedItemAnchorId(item) || index}>
-                  {renderItem(index, item)}
-                  {h3ResultGroups.has(item.id) && (
-                    <div className={rowWidthClass + ' min-w-0 px-8px'}>
-                      <H3ToolResults messages={[]} jobIds={h3ResultGroups.get(item.id)} />
-                    </div>
-                  )}
-                  {conversationContext?.conversation_id &&
-                    creationResultGroups.get(item.id)?.map((operationId) => (
-                      <div key={operationId} className={rowWidthClass + ' min-w-0 px-8px'}>
-                        <CreationInstallResult id={operationId} conversationId={conversationContext.conversation_id} />
+              {installation && conversationContext?.conversation_id && (
+                <div className={rowWidthClass + ' min-w-0 px-8px'}>
+                  <ComfyInstallationTranscript
+                    key={installation.requestId}
+                    conversationId={conversationContext.conversation_id}
+                    snapshot={installation}
+                    showRequest={
+                      !list.some(
+                        (item) =>
+                          item.position === 'right' &&
+                          item.type === 'text' &&
+                          (installation.installationInput
+                            ? item.content.content.startsWith(installation.installationInput)
+                            : true)
+                      )
+                    }
+                  />
+                </div>
+              )}
+              <RenderedMediaProvider
+                key={conversationContext?.conversation_id}
+                workspace={conversationContext?.workspace}
+              >
+                {processedList.map((item, index) => (
+                  <React.Fragment key={getProcessedItemAnchorId(item) || index}>
+                    {renderItem(index, item)}
+                    {h3ResultGroups.has(item.id) && (
+                      <div className={rowWidthClass + ' min-w-0 px-8px'}>
+                        <H3ToolResults messages={[]} jobIds={h3ResultGroups.get(item.id)} />
                       </div>
-                    ))}
-                  {conversationContext?.conversation_id &&
-                    comfyResultGroups.get(item.id)?.map((operationId) => (
-                      <div key={operationId} className={rowWidthClass + ' min-w-0 px-8px'}>
-                        <ComfyOperationResult id={operationId} conversationId={conversationContext.conversation_id} />
-                      </div>
-                    ))}
-                  {conversationContext?.conversation_id &&
-                    cloudVideoGroups.get(item.id)?.map((jobId) => (
-                      <div key={jobId} className={rowWidthClass + ' min-w-0 px-8px'}>
-                        <CloudVideoResult id={jobId} conversationId={conversationContext.conversation_id} />
-                      </div>
-                    ))}
-                  {conversationContext?.conversation_id &&
-                    comfyGenerationGroups.get(item.id)?.map((jobId) => (
-                      <div key={jobId} className={rowWidthClass + ' min-w-0 px-8px'}>
-                        <ComfyGenerationResult id={jobId} conversationId={conversationContext.conversation_id} />
-                      </div>
-                    ))}
-                </React.Fragment>
-              ))}
+                    )}
+                    {conversationContext?.conversation_id &&
+                      creationResultGroups.get(item.id)?.map((operationId) => (
+                        <div key={operationId} className={rowWidthClass + ' min-w-0 px-8px'}>
+                          <CreationInstallResult
+                            id={operationId}
+                            conversationId={conversationContext.conversation_id}
+                          />
+                        </div>
+                      ))}
+                    {!installation &&
+                      conversationContext?.conversation_id &&
+                      comfyResultGroups.get(item.id)?.map((operationId) => (
+                        <div key={operationId} className={rowWidthClass + ' min-w-0 px-8px'}>
+                          <ComfyOperationResult
+                            id={operationId}
+                            conversationId={conversationContext.conversation_id}
+                            compact
+                          />
+                        </div>
+                      ))}
+                    {conversationContext?.conversation_id &&
+                      cloudVideoGroups.get(item.id)?.map((jobId) => (
+                        <div key={jobId} className={rowWidthClass + ' min-w-0 px-8px'}>
+                          <CloudVideoResult id={jobId} conversationId={conversationContext.conversation_id} />
+                        </div>
+                      ))}
+                    {conversationContext?.conversation_id &&
+                      comfyGenerationGroups.get(item.id)?.map((jobId) => (
+                        <div key={jobId} className={rowWidthClass + ' min-w-0 px-8px'}>
+                          <ComfyGenerationResult id={jobId} conversationId={conversationContext.conversation_id} />
+                        </div>
+                      ))}
+                  </React.Fragment>
+                ))}
+              </RenderedMediaProvider>
               <div className='h-20px' />
             </div>
           </div>

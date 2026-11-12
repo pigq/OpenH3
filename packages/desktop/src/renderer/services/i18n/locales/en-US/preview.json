@@ -221,5 +221,9 @@
   "zoomIn": "Zoom in",
   "zoomOut": "Zoom out",
   "zoomReset": "Reset view",
-  "diagramZoomHint": "Scroll to zoom • Drag to pan • ESC to close"
+  "diagramZoomHint": "Scroll to zoom • Drag to pan • ESC to close",
+  "archive": {
+    "entries": "{{count}} files and folders",
+    "loadFailed": "Unable to preview this archive"
+  }
 }

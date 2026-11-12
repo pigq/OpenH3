@@ -146,20 +146,23 @@ export type H3Monitor = {
   consecutiveFailures: number;
 };
 
-/** Agent calls are snapshots, not a loop that waits for GPU work. The UI owns live updates. */
+/** Snapshots require monitoring through completion without authorizing generation retries. */
 export function h3AgentSnapshot(job: H3Job) {
+  const terminal = !['queued', 'running'].includes(job.status);
   return {
     ...job,
-    terminal: !['queued', 'running'].includes(job.status),
-    stopPolling: true,
+    terminal,
+    stopPolling: terminal || job.remoteUncertain === true,
     automaticRetryAllowed: false,
     nextAction: job.remoteUncertain
-      ? 'CONFIRM_REMOTE_STOP'
-      : ['queued', 'running'].includes(job.status)
-        ? 'END_TURN_UI_WILL_MONITOR'
+      ? 'RECOVER_EXISTING_JOB_NO_RESUBMISSION'
+      : !terminal
+        ? 'MONITOR_SAME_JOB_UNTIL_TERMINAL'
         : job.status === 'succeeded'
-          ? 'SHOW_RESULT'
-          : 'EXPLAIN_FAILURE_WAIT_FOR_USER',
+          ? 'SHOW_RESULT_AND_CONTINUE_REMAINING_WORK'
+          : job.status === 'cancelled'
+            ? 'REPORT_CANCELLATION'
+            : 'DIAGNOSE_AND_CONTINUE_AUTHORIZED_WORK',
   };
 }
 

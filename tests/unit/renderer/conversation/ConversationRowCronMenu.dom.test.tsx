@@ -83,6 +83,10 @@ describe('conversation scheduled-task menu item', () => {
     const rename = await screen.findByText('conversation.history.rename');
     const createCronTask = screen.getByText('conversation.history.createCronTask');
     const archiveItem = screen.getByText('conversation.history.archive');
+    expect(rename.closest('.arco-dropdown-menu')).toHaveClass('conversation-history-context-menu');
+    expect(screen.getByText('conversation.history.deleteTitle').closest('.arco-dropdown-menu')).toHaveClass(
+      'conversation-history-context-menu'
+    );
 
     expect(rename.compareDocumentPosition(createCronTask) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(createCronTask.compareDocumentPosition(archiveItem) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

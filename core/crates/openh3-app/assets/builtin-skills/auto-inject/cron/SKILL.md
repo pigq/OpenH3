@@ -14,13 +14,29 @@ agent-facing config CLI.
 2. Always query existing tasks before creating or updating.
 3. Do not ask for extra confirmation after the user has already requested the scheduling change.
 4. Never pass, inline, export, echo, or set any `OPENH3_...` environment variable.
-5. Commands must directly call `"$OPENH3_HELPER_BIN" config cron current ...`.
-6. Pass create and update payloads through stdin heredocs attached to the command. Do not write payload JSON files to disk.
+5. Commands must directly call `"$OPENH3_HELPER_BIN" config cron current ...` in POSIX shells, or `& $env:OPENH3_HELPER_BIN config cron current ...` in PowerShell.
+6. Pass create and update payloads through stdin: a POSIX heredoc or the UTF-8 PowerShell pattern below. Do not write payload JSON files to disk.
 7. Put `job_id` in the update JSON payload, not in a command flag.
 8. After a successful create or update, send one short final confirmation that a normal user can understand. Include the task name and schedule description. Do not show internal ids such as `cron_...`.
 9. If the CLI fails, report the failure from stderr/stdout in normal prose and do not claim the task was created.
 
 ## Workflow
+
+Examples marked `bash` require a POSIX shell. In PowerShell, use `& $env:OPENH3_HELPER_BIN` with the same subcommands; query with `& $env:OPENH3_HELPER_BIN config cron current list`. Reading the helper path for invocation is allowed; never print or change runtime environment values. For JSON stdin on Windows PowerShell 5.1 or PowerShell 7, keep the payload in memory and temporarily use UTF-8 (without a BOM). Do not save a command containing secrets to a script or payload file.
+
+```powershell
+$openh3Payload = @'
+{"name":"喝水提醒","schedule":"0 9 * * *","schedule_description":"每天 9:00","message":"回复：记得喝水。"}
+'@
+$previousOutputEncoding = $OutputEncoding
+try {
+    $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $openh3Payload | & $env:OPENH3_HELPER_BIN config cron current create
+    if ($LASTEXITCODE -ne 0) { throw "OpenH3 helper failed with exit code $LASTEXITCODE" }
+} finally { $OutputEncoding = $previousOutputEncoding }
+```
+
+Apply the same stdin pattern to `update`, using the returned `job_id`. Run it only after the query and authorization rules above are satisfied.
 
 1. Run `"$OPENH3_HELPER_BIN" config cron current list`.
 2. If the returned `data` array is empty, create the task with `"$OPENH3_HELPER_BIN" config cron current create <<'JSON'`.

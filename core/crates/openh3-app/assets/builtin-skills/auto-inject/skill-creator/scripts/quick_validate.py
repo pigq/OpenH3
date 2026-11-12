@@ -4,13 +4,12 @@ Quick validation script for skills - minimal version
 """
 
 import sys
-import os
 import re
 import yaml
 from pathlib import Path
 
 def validate_skill(skill_path):
-    """Basic validation of a skill"""
+    """Validate UTF-8 frontmatter only, not resources or instruction quality."""
     skill_path = Path(skill_path)
 
     # Check SKILL.md exists
@@ -19,7 +18,10 @@ def validate_skill(skill_path):
         return False, "SKILL.md not found"
 
     # Read and validate frontmatter
-    content = skill_md.read_text()
+    try:
+        content = skill_md.read_text(encoding='utf-8')
+    except (OSError, UnicodeError) as error:
+        return False, f"Cannot read UTF-8 SKILL.md: {error}"
     if not content.startswith('---'):
         return False, "No YAML frontmatter found"
 
@@ -60,6 +62,8 @@ def validate_skill(skill_path):
     if not isinstance(name, str):
         return False, f"Name must be a string, got {type(name).__name__}"
     name = name.strip()
+    if not name:
+        return False, "Name must not be empty"
     if name:
         # Check naming convention (hyphen-case: lowercase with hyphens)
         if not re.match(r'^[a-z0-9-]+$', name):
@@ -75,6 +79,8 @@ def validate_skill(skill_path):
     if not isinstance(description, str):
         return False, f"Description must be a string, got {type(description).__name__}"
     description = description.strip()
+    if not description:
+        return False, "Description must not be empty"
     if description:
         # Check for angle brackets
         if '<' in description or '>' in description:
@@ -83,7 +89,7 @@ def validate_skill(skill_path):
         if len(description) > 1024:
             return False, f"Description is too long ({len(description)} characters). Maximum is 1024 characters."
 
-    return True, "Skill is valid!"
+    return True, "Basic frontmatter validation passed (resources and instruction quality not checked)."
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:

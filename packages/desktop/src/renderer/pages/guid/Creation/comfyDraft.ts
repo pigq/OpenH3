@@ -1,10 +1,19 @@
-import type { ComfyFamily, ComfyIntent } from '@/common/chat/document/creation/comfy';
+import {
+  comfyFamilyKind,
+  comfyFamilySchema,
+  type ComfyFamily,
+  type BuiltinComfyFamily,
+  type ComfyIntent,
+} from '@/common/chat/document/creation/comfy';
 
 export type ComfyDraftIntent = {
   family: ComfyFamily;
   intent: Exclude<ComfyIntent, 'generate'>;
   profileId?: string;
   requestId?: string;
+  name?: string;
+  kind?: 'image' | 'video';
+  installContext?: import('@/common/chat/document/creation/workflows/localModels').LocalModelInstallContext;
 };
 
 let pendingIntent: ComfyDraftIntent | undefined;
@@ -16,16 +25,22 @@ export function writeComfyDraftIntent(intent?: ComfyDraftIntent) {
   return pendingIntent;
 }
 
-export const COMFY_FAMILIES = [
-  { family: 'h3', name: 'H3', kind: 'video' },
-  { family: 'fasth3-omni', name: 'FastH3-Omni', kind: 'video' },
-  { family: 'qwen-edit', name: 'Qwen-Edit', kind: 'image' },
-  { family: 'z-image', name: 'Z-Image', kind: 'image' },
-  { family: 'flux-3-image-klein', name: 'FLUX 3 Image Klein', kind: 'image' },
-  { family: 'moss-image-base', name: 'MOSS-Image-Base', kind: 'image' },
-  { family: 'moss-image-sft', name: 'MOSS-Image-SFT', kind: 'image' },
-  { family: 'krea2', name: 'Krea 2', kind: 'image' },
-] as const;
+const COMFY_FAMILY_NAMES = {
+  h3: 'H3',
+  'fasth3-omni': 'FastH3-Omni',
+  'qwen-edit': 'Qwen-Edit',
+  'z-image': 'Z-Image',
+  'flux-3-image-klein': 'FLUX 3 Image Klein',
+  'moss-image-base': 'MOSS-Image-Base',
+  'moss-image-sft': 'MOSS-Image-SFT',
+  krea2: 'Krea 2',
+} as const satisfies Record<BuiltinComfyFamily, string>;
+
+export const COMFY_FAMILIES = comfyFamilySchema.options.map((family) => ({
+  family,
+  name: COMFY_FAMILY_NAMES[family],
+  kind: comfyFamilyKind(family),
+}));
 
 /** Locate optional image recipe documentation without adding it to the Skill instruction. */
 export function comfyFamilyRecipeKey(family: ComfyFamily) {
@@ -44,6 +59,12 @@ export function comfyFamilyRecipeKey(family: ComfyFamily) {
 }
 
 /** Keep the target in metadata while leaving the installation request editable. */
-export function comfyFamilyDetails(family: ComfyFamily) {
-  return COMFY_FAMILIES.find((item) => item.family === family)!;
+export function comfyFamilyDetails(family: ComfyFamily, custom?: Pick<ComfyDraftIntent, 'name' | 'kind'>) {
+  return (
+    COMFY_FAMILIES.find((item) => item.family === family) ?? {
+      family,
+      name: custom?.name ?? family,
+      kind: comfyFamilyKind(family, custom?.kind),
+    }
+  );
 }

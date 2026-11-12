@@ -192,7 +192,7 @@ describe('useAcpInitialMessage', () => {
     expect(bindCreation).not.toHaveBeenCalled();
   });
 
-  it('submits a model-card installation before the Agent turn and forwards its existing operation context', async () => {
+  it('sends a model-card request to the Agent before any installation preparation', async () => {
     sessionStorage.setItem(
       'acp_initial_message_conv-1',
       JSON.stringify({
@@ -204,20 +204,12 @@ describe('useAcpInitialMessage', () => {
     sendMessageInvokeMock.mockResolvedValueOnce({ turn_id: 'turn-1', runtime: {} });
     mountInitial();
     await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledOnce());
-    expect(requestInstall).toHaveBeenCalledExactlyOnceWith('request-qwen', 'conv-1', {
-      action: 'request',
-      family: 'qwen-edit',
-      intent: 'install',
-      profileId: undefined,
-      requestId: 'request-qwen',
-    });
-    expect(requestInstall.mock.invocationCallOrder[0]).toBeLessThan(sendMessageInvokeMock.mock.invocationCallOrder[0]);
-    expect(sendMessageInvokeMock.mock.calls[0][0].input).toBe(
-      'Install Qwen-Edit with comfyui-local.\n\nguid.comfy.operation.submittedContext'
-    );
+    expect(requestInstall).not.toHaveBeenCalled();
+    expect(bindComfy.mock.invocationCallOrder[0]).toBeLessThan(sendMessageInvokeMock.mock.invocationCallOrder[0]);
+    expect(sendMessageInvokeMock.mock.calls[0][0].input).toBe('Install Qwen-Edit with comfyui-local.');
   });
 
-  it('keeps the card request for recovery if deterministic submission fails without delegating installation to the Agent', async () => {
+  it('does not let a broken preparation dependency prevent the first Agent turn', async () => {
     sessionStorage.setItem(
       'acp_initial_message_conv-1',
       JSON.stringify({
@@ -227,32 +219,32 @@ describe('useAcpInitialMessage', () => {
       })
     );
     requestInstall.mockRejectedValueOnce(new Error('COMFY_DETECTION_INCOMPLETE'));
+    sendMessageInvokeMock.mockResolvedValueOnce({ turn_id: 'turn-1', runtime: {} });
     mountInitial();
-    await waitFor(() => expect(requestInstall).toHaveBeenCalledOnce());
-    await waitFor(() => expect(sessionStorage.getItem('acp_initial_message_conv-1')).not.toBeNull());
-    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledOnce());
+    expect(requestInstall).not.toHaveBeenCalled();
   });
 
-  it('shows the exact installation preparation failure without a missing-tools diagnosis or automatic resubmission', async () => {
-    const reason = 'COMFY_DEVICE_INSUFFICIENT: Qwen-Edit needs 16 GB VRAM; detected 8 GB';
-    const stored = JSON.stringify({
-      input: 'Install Qwen-Edit.',
-      guidDraft: 'Install Qwen-Edit.',
-      creationRequestId: 'request-qwen',
-      creationRequest: { source: 'local', kind: 'image', family: 'qwen-edit', intent: 'install' },
-    });
-    sessionStorage.setItem('acp_initial_message_conv-1', stored);
-    requestInstall.mockRejectedValueOnce(new Error(reason));
+  it('sends the original installation goal once when optional media binding is offline', async () => {
+    sessionStorage.setItem(
+      'acp_initial_message_conv-1',
+      JSON.stringify({
+        input: 'Install Qwen-Edit.',
+        creationRequestId: 'request-qwen',
+        creationRequest: { source: 'local', kind: 'image', family: 'qwen-edit', intent: 'install' },
+      })
+    );
+    bindComfy.mockRejectedValueOnce(new Error('MEDIA_SERVICE_OFFLINE'));
+    sendMessageInvokeMock.mockResolvedValueOnce({ turn_id: 'turn-1', msg_id: 'msg-1', runtime: {} });
     const hook = mountInitial();
-    await waitFor(() => expect(addOrUpdateMessageMock).toHaveBeenCalledOnce());
-    const message = addOrUpdateMessageMock.mock.calls[0][0];
-    expect(message.content.content).toBe(`guid.comfy.operation.preparationFailed: ${reason}`);
-    expect(message.content.content).not.toContain('guid.creation.toolsUnavailable');
-    expect(sessionStorage.getItem('acp_initial_message_conv-1')).toBe(stored);
+    await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledOnce());
+    expect(sendMessageInvokeMock.mock.calls[0][0].input).toBe('Install Qwen-Edit.');
+    expect(addOrUpdateMessageMock).not.toHaveBeenCalled();
+    expect(requestInstall).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem('acp_initial_message_conv-1')).toBeNull();
     hook.rerender();
     await act(async () => {});
-    expect(requestInstall).toHaveBeenCalledOnce();
-    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    expect(sendMessageInvokeMock).toHaveBeenCalledOnce();
   });
 
   it('retains the prompt after failed binding and retries binding before sending on remount', async () => {

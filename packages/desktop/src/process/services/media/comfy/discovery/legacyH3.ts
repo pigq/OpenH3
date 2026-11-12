@@ -13,6 +13,7 @@ import {
 import type { H3PortableInstallStatus } from '@/process/services/runtime/H3PortableInstaller';
 import type { H3RuntimeStartOptions } from '@/process/services/runtime/H3RuntimeManager';
 import type { ComfyProfile } from '@/common/chat/document/creation/comfy';
+import embeddedWorkflows from '@/process/services/runtime/h3EmbeddedWorkflows.json';
 
 /** Preserve the portable launcher's acceleration setup for the exact selected runtime. */
 export async function startLegacyH3Runtime(
@@ -45,7 +46,11 @@ export async function startLegacyH3Runtime(
 }
 
 /** Import existing local files as unverified profiles, preserving weights, workflows and historical jobs. */
-export function importLegacyH3(install: H3PortableInstallStatus, baseUrl: string): ComfyProfile[] {
+export function importLegacyH3(
+  install: H3PortableInstallStatus,
+  baseUrl: string,
+  workflowDirectory?: string
+): ComfyProfile[] {
   if (!install.runtimePresent || install.missingAssets.length) return [];
   const manifest = matlowaiCompleteOfflineBundle();
   const components: ComfyProfile['components'] = manifest.files
@@ -94,8 +99,16 @@ export function importLegacyH3(install: H3PortableInstallStatus, baseUrl: string
     },
   ];
   return candidates.flatMap((candidate) => {
-    const workflowPath = path.join(install.bundleRoot, 'workflows', 'lowvram', candidate.filename);
-    if (!fs.existsSync(workflowPath)) return [];
+    const relative = `workflows/lowvram/${candidate.filename}`;
+    const originalWorkflowPath = path.join(install.bundleRoot, relative);
+    let workflowPath = originalWorkflowPath;
+    if (!fs.existsSync(workflowPath)) {
+      const encoded = (embeddedWorkflows as Record<string, string>)[relative];
+      if (!workflowDirectory || !encoded) return [];
+      workflowPath = path.join(workflowDirectory, candidate.filename);
+      fs.mkdirSync(workflowDirectory, { recursive: true });
+      if (!fs.existsSync(workflowPath)) fs.writeFileSync(workflowPath, Buffer.from(encoded, 'base64'), { flag: 'wx' });
+    }
     const actualHash = crypto.createHash('sha256').update(fs.readFileSync(workflowPath)).digest('hex');
     const pinned = manifest.files.find((file) => file.relativePath.endsWith(candidate.filename));
     const bindings: ComfyProfile['bindings'] = {
@@ -105,7 +118,7 @@ export function importLegacyH3(install: H3PortableInstallStatus, baseUrl: string
       megapixels: [{ nodeId: '115', input: 'megapixels' }],
     };
     if (candidate.suffix !== 't2v') bindings.image = [{ nodeId: '901', input: 'image' }];
-    const id = `legacy-h3-${candidate.suffix}-${crypto.createHash('sha256').update(install.bundleRoot).digest('hex').slice(0, 12)}`;
+    const id = `legacy-h3-${candidate.suffix}-${crypto.createHash('sha256').update(install.bundleRoot).digest('hex').slice(0, 12)}${workflowPath === originalWorkflowPath ? '' : '-recovered'}`;
     const profile: ComfyProfile = {
       id,
       family: 'h3',

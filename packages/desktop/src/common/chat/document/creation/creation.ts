@@ -8,6 +8,8 @@ import {
 } from '@/common/config/storage';
 import type { ComfyFamily, ComfyIntent, ComfyProfile } from './comfy';
 import type { TemplateSnapshot } from '@/common/contentCatalog/snapshot';
+import type { ModelConstraint, WorkflowSelectionMode } from './workflows/contracts';
+import type { LocalModelInstallContext } from './workflows/localModels';
 
 export type CreationKind = 'image' | 'video';
 export type CreationSource = 'local' | 'cloud';
@@ -28,6 +30,7 @@ export type CreationSelection = {
   kind: CreationKind;
   source: CreationSource;
   modelIds: Partial<Record<`${CreationSource}-${CreationKind}`, string>>;
+  modelConstraint?: ModelConstraint;
 };
 export type CreationModel = {
   id: string;
@@ -39,6 +42,9 @@ export type CreationModel = {
   provider?: TProviderWithModel;
   presetId?: string;
   profileId?: string;
+  modelSetId?: string;
+  workflowMode?: WorkflowSelectionMode;
+  fixedWorkflowId?: string;
   family?: ComfyFamily;
   intent?: ComfyIntent;
 };
@@ -49,8 +55,26 @@ export type LocalCreationInventory = {
 };
 export type CreationRequest = Pick<
   CreationModel,
-  'id' | 'name' | 'kind' | 'source' | 'state' | 'profileId' | 'family' | 'intent'
-> & { requestId?: string; templateSnapshot?: TemplateSnapshot };
+  | 'id'
+  | 'name'
+  | 'kind'
+  | 'source'
+  | 'state'
+  | 'profileId'
+  | 'family'
+  | 'intent'
+  | 'modelSetId'
+  | 'workflowMode'
+  | 'fixedWorkflowId'
+> & {
+  modelConstraint?: ModelConstraint;
+  requestId?: string;
+  templateSnapshot?: TemplateSnapshot;
+  installationInput?: string;
+  installationError?: string;
+  installationMode?: 'agent';
+  installContext?: LocalModelInstallContext;
+};
 
 /** Attach explicit user choices to the first turn without exposing credentials. */
 export function creationMessage(input: string, summary: string): string {

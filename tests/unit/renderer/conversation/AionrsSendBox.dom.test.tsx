@@ -28,6 +28,7 @@ const {
   markSendStartedMock,
   markSendAcceptedMock,
   sendBoxPropsSpy,
+  addOrUpdateMessageMock,
   enqueueMock,
   clearFilesMock,
   draftMutateMock,
@@ -44,6 +45,7 @@ const {
   markSendStartedMock: vi.fn(),
   markSendAcceptedMock: vi.fn(),
   sendBoxPropsSpy: vi.fn(),
+  addOrUpdateMessageMock: vi.fn(),
   enqueueMock: vi.fn(),
   clearFilesMock: vi.fn(),
   draftMutateMock: vi.fn(),
@@ -239,6 +241,8 @@ vi.mock('@/renderer/pages/conversation/utils/conversationCache', () => ({
 }));
 vi.mock('@/renderer/pages/conversation/utils/conversationCreateError', () => ({
   getConversationRuntimeWorkspaceErrorMessage: () => 'workspace failed',
+  normalizeWorkspacePathErrorCode: () => undefined,
+  getWorkspacePathFromErrorDetails: () => undefined,
 }));
 vi.mock('@/renderer/pages/conversation/utils/ensureConversationRuntime', () => ({
   ensureConversationRuntime: ensureConversationRuntimeMock,
@@ -263,9 +267,9 @@ vi.mock('@/renderer/utils/emitter', () => ({
 vi.mock('@/renderer/utils/file/fileSelection', () => ({
   mergeFileSelectionItems: vi.fn((items: unknown[]) => items),
 }));
-vi.mock('@/renderer/utils/file/messageFiles', () => ({
+vi.mock('@/renderer/utils/file/messageFiles', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/renderer/utils/file/messageFiles')>()),
   collectChatFileRefs: () => [],
-  splitChatFileRefs: () => ({ uploadFiles: [], atPath: [] }),
 }));
 vi.mock('@arco-design/web-react', () => ({
   Message: {
@@ -304,6 +308,9 @@ vi.mock('@/renderer/pages/conversation/platforms/aionrs/useAionrsMessage', () =>
     setWaitingResponse: vi.fn(),
     resetState: vi.fn(),
   }),
+}));
+vi.mock('@/renderer/pages/conversation/Messages/hooks', () => ({
+  useAddOrUpdateMessage: () => addOrUpdateMessageMock,
 }));
 
 const modelSelection = {
@@ -413,7 +420,7 @@ describe('AionrsSendBox', () => {
     expect(bindComfy.mock.invocationCallOrder[0]).toBeLessThan(sendMessageInvokeMock.mock.invocationCallOrder[0]);
   });
 
-  it('submits the bound model-card installation directly before the first Core turn', async () => {
+  it('sends the bound model-card request before installation preparation', async () => {
     sessionStorage.setItem(
       'aionrs_initial_message_conv-1',
       JSON.stringify({
@@ -425,21 +432,12 @@ describe('AionrsSendBox', () => {
     sendMessageInvokeMock.mockResolvedValueOnce({ turn_id: 'turn-1', msg_id: 'msg-1', runtime: {} });
     render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
     await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledOnce());
-    expect(requestInstall).toHaveBeenCalledExactlyOnceWith('request-qwen', 'conv-1', {
-      action: 'request',
-      family: 'qwen-edit',
-      intent: 'install',
-      profileId: undefined,
-      requestId: 'request-qwen',
-    });
-    expect(requestInstall.mock.invocationCallOrder[0]).toBeLessThan(sendMessageInvokeMock.mock.invocationCallOrder[0]);
-    expect(sendMessageInvokeMock.mock.calls[0][0].input).toBe(
-      'Install Qwen-Edit with comfyui-local.\n\nguid.comfy.operation.submittedContext'
-    );
+    expect(requestInstall).not.toHaveBeenCalled();
+    expect(bindComfy.mock.invocationCallOrder[0]).toBeLessThan(sendMessageInvokeMock.mock.invocationCallOrder[0]);
+    expect(sendMessageInvokeMock.mock.calls[0][0].input).toBe('Install Qwen-Edit with comfyui-local.');
   });
 
-  it('preserves the exact preparation failure and request instead of reporting unavailable tools or resubmitting', async () => {
-    const reason = 'COMFY_DEVICE_INSUFFICIENT: Qwen-Edit needs 16 GB VRAM; detected 8 GB';
+  it('sends the original installation goal once when optional media binding is offline', async () => {
     const stored = JSON.stringify({
       input: 'Install Qwen-Edit.',
       guidDraft: 'Install Qwen-Edit.',
@@ -447,18 +445,16 @@ describe('AionrsSendBox', () => {
       creationRequest: { source: 'local', kind: 'image', family: 'qwen-edit', intent: 'install' },
     });
     sessionStorage.setItem('aionrs_initial_message_conv-1', stored);
-    requestInstall.mockRejectedValueOnce(new Error(reason));
+    bindComfy.mockRejectedValueOnce(new Error('MEDIA_SERVICE_OFFLINE'));
+    sendMessageInvokeMock.mockResolvedValueOnce({ turn_id: 'turn-1', msg_id: 'msg-1', runtime: {} });
     const view = render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
-    await waitFor(() =>
-      expect(Message.error).toHaveBeenCalledWith(`guid.comfy.operation.preparationFailed: ${reason}`)
-    );
-    expect(Message.error).not.toHaveBeenCalledWith('guid.creation.toolsUnavailable');
-    expect(sessionStorage.getItem('aionrs_initial_message_conv-1')).toBe(stored);
-    expect(sessionStorage.getItem('aionrs_initial_processed_conv-1')).toBeNull();
+    await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledOnce());
+    expect(sendMessageInvokeMock.mock.calls[0][0].input).toBe('Install Qwen-Edit.');
+    expect(requestInstall).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem('aionrs_initial_message_conv-1')).toBeNull();
     view.rerender(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
     await act(async () => {});
-    expect(requestInstall).toHaveBeenCalledOnce();
-    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    expect(sendMessageInvokeMock).toHaveBeenCalledOnce();
   });
 
   it('preserves the Guid draft after a rejected initial aionrs send', async () => {
@@ -472,6 +468,55 @@ describe('AionrsSendBox', () => {
     render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
     await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledOnce());
     expect(draft.result.current[0]).toBe('Unsent prompt');
+    await waitFor(() =>
+      expect(addOrUpdateMessageMock).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'tips', content: expect.objectContaining({ type: 'error' }) }),
+        true
+      )
+    );
+  });
+
+  it('restores the failed first goal and reference files into the composer without resending', async () => {
+    sessionStorage.setItem(
+      'aionrs_initial_message_conv-1',
+      JSON.stringify({
+        input: 'Use my reference',
+        files: [{ kind: 'upload', path: 'portrait.jpg' }],
+      })
+    );
+    sendMessageInvokeMock.mockRejectedValueOnce(new Error('runtime unavailable'));
+    const view = render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    await waitFor(() => expect(addOrUpdateMessageMock).toHaveBeenCalled());
+    expect(draftMutateMock).toHaveBeenCalled();
+    const updater = draftMutateMock.mock.calls.at(-1)![0];
+    expect(updater({ content: '', uploadFile: [], atPath: [] })).toMatchObject({
+      content: 'Use my reference',
+      uploadFile: ['portrait.jpg'],
+    });
+    expect(updater({ content: 'new draft', uploadFile: [], atPath: [] }).content).toBe('new draft');
+    view.rerender(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    await act(async () => {});
+    expect(sendMessageInvokeMock).toHaveBeenCalledOnce();
+  });
+
+  it('shows a binding failure in the chat while retaining the model-card goal for manual retry', async () => {
+    const stored = JSON.stringify({
+      input: 'Install Qwen-Edit.',
+      guidDraft: 'Install Qwen-Edit.',
+      creationRequestId: 'request-qwen',
+      creationRequest: { source: 'local', kind: 'image', family: 'qwen-edit', intent: 'install' },
+    });
+    sessionStorage.setItem('aionrs_initial_message_conv-1', stored);
+    bindComfy.mockRejectedValueOnce(new Error('COMFY_PROFILE_ID_MISMATCH'));
+    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    await waitFor(() =>
+      expect(addOrUpdateMessageMock).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'tips', content: expect.objectContaining({ type: 'error' }) }),
+        true
+      )
+    );
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem('aionrs_initial_message_conv-1')).toBe(stored);
   });
 
   it('does not warm up team session when draft content changes', async () => {

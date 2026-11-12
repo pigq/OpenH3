@@ -77,6 +77,32 @@ const validate = (file: string, evidence = context()) =>
   verifyComfySmokeArtifact({ path: file, mimeType: 'video/mp4' }, 'video', new AbortController().signal, evidence);
 
 describe('representative Comfy smoke media validation', () => {
+  it('validates the legacy H3 seconds-to-17n-plus-5 graph against its actual frame count', async () => {
+    const evidence = context({ durationSeconds: 6 });
+    evidence.profile.bindings.durationSeconds = [{ nodeId: 'seconds', input: 'value' }];
+    fs.writeFileSync(
+      evidence.profile.workflowPath,
+      JSON.stringify({
+        seconds: { class_type: 'PrimitiveFloat', inputs: { value: 6 } },
+        frames: {
+          class_type: 'ComfyMathExpression',
+          inputs: {
+            expression: 'max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17',
+            'values.a': ['seconds', 0],
+          },
+        },
+        latent: { class_type: 'MiniMaxH3ImageToVideo', inputs: { length: ['frames', 1] } },
+        output: { class_type: 'CreateVideo', inputs: { fps: 24 } },
+      })
+    );
+    const file = video('legacy-aligned.mp4', 'testsrc2=size=96x64:rate=24:duration=6.583333', false, '6.583333');
+    await expect(validate(file, evidence)).resolves.toBeUndefined();
+    fs.unlinkSync(evidence.profile.workflowPath);
+    await expect(validate(file, evidence)).rejects.toMatchObject({
+      message: 'COMFY_SMOKE_VIDEO_INVALID',
+      diagnosis: { category: 'output-validation', action: expect.stringContaining('expected=6') },
+    });
+  });
   it('decodes distributed video frames and the promised native audio against submitted dimensions and duration', async () => {
     const file = video('moving.mp4', 'testsrc2=size=96x64:rate=12:duration=1', true);
     await expect(validate(file, context({}, true))).resolves.toBeUndefined();
@@ -132,6 +158,31 @@ describe('representative Comfy smoke media validation', () => {
     const file = video('short-omni.mp4', 'testsrc2=size=96x64:rate=24:duration=1', true);
     await expect(validate(file, evidence)).rejects.toThrow('COMFY_SMOKE_VIDEO_INVALID');
   });
+  it.each(['smoke', 'generation'] as const)(
+    'rejects a truncated H3 frame-bound output during %s validation',
+    async (mode) => {
+      const evidence = { ...context({ durationSeconds: 3 }), mode };
+      evidence.profile.bindings = { frames: [{ nodeId: '1', input: 'length' }] };
+      evidence.profile.defaults = { fps: 12, frameMultiple: 8, frameOffset: 1 };
+      const file = video('short-h3.mp4', 'testsrc2=size=96x64:rate=12:duration=1');
+      await expect(validate(file, evidence)).rejects.toMatchObject({
+        message: 'COMFY_SMOKE_VIDEO_INVALID',
+        cause: expect.objectContaining({ message: 'unexpected duration' }),
+      });
+    }
+  );
+  it('validates frame alignment for H3 without an Omni-specific duration rule', async () => {
+    const evidence = context({ durationSeconds: 1 });
+    evidence.profile.bindings = { frames: [{ nodeId: '1', input: 'length' }] };
+    evidence.profile.defaults = { fps: 12, frameMultiple: 8, frameOffset: 1 };
+    const aligned = video('aligned-h3.mp4', 'testsrc2=size=96x64:rate=12:duration=1.416667', false, '1.416667');
+    await expect(validate(aligned, evidence)).resolves.toBeUndefined();
+    const unaligned = video('unaligned-h3.mp4', 'testsrc2=size=96x64:rate=12:duration=1');
+    await expect(validate(unaligned, evidence)).rejects.toMatchObject({
+      message: 'COMFY_SMOKE_VIDEO_INVALID',
+      cause: expect.objectContaining({ message: 'unexpected duration' }),
+    });
+  });
   it('accepts the 17n + 5 frame alignment and audio that starts after a silent intro', async () => {
     const evidence = context({ durationSeconds: 5 });
     evidence.profile.family = 'fasth3-omni';
@@ -166,6 +217,18 @@ describe('representative Comfy smoke media validation', () => {
 });
 
 describe('requested Comfy generation media validation', () => {
+  it.each([1, 8])('decodes a valid short %s-fps video without sampling beyond its final frame', async (fps) => {
+    const file = video(`short-${fps}.mp4`, `testsrc2=size=96x64:rate=${fps}:duration=1`);
+    await expect(
+      verifyComfySmokeArtifact(
+        { path: file, mimeType: 'video/mp4' },
+        'video',
+        new AbortController().signal,
+        undefined,
+        'generation'
+      )
+    ).resolves.toBeUndefined();
+  });
   it.each(['black', 'white'])('accepts a valid %s image requested by the user', async (color) => {
     const file = path.join(root, `${color}.png`);
     execFileSync(

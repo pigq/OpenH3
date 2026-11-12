@@ -105,7 +105,7 @@ async function main() {
     registerProductTool(
       server,
       name,
-      'Generate or edit images using the user-selected source and model. For a local creation session, use its currently selected registered ComfyUI image profile and the comfyui-local skill; the backend validates that profile before queueing a generic ComfyUI job and returning comfyJobId. Local inputs must be local image paths. For cloud sessions, use the configured provider. Pass all user-provided image inputs. Never silently switch source/model or install a missing local profile; prepare installation separately through openh3_comfy_install and UI consent. The client monitors queued local jobs; end your turn after submission.',
+      'Generate or edit images using the user-selected source and model. For a local creation session, use its currently selected registered ComfyUI image profile and the comfyui-local skill; the backend validates that profile before queueing a generic ComfyUI job and returning comfyJobId. Local inputs must be local image paths. For cloud sessions, use the configured provider. Pass all user-provided image inputs. Preserve explicitly selected source/model and reference roles. Diagnose and repair missing local prerequisites under the current session permissions. In ordinary chats use openh3_comfy_profiles and openh3_comfy_generate to choose a local model. When a local job is queued, retain comfyJobId and monitor that same job with openh3_comfy_job_status waitMs=30000 until terminal output, inspect it, and complete remaining authorized work before ending the turn.',
       {
         prompt: z
           .string()

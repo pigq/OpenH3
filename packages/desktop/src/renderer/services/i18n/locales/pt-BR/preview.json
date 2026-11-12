@@ -221,5 +221,9 @@
   "zoomIn": "Ampliar",
   "zoomOut": "Reduzir",
   "zoomReset": "Redefinir visualização",
-  "diagramZoomHint": "Role para ampliar • Arraste para mover • ESC para fechar"
+  "diagramZoomHint": "Role para ampliar • Arraste para mover • ESC para fechar",
+  "archive": {
+    "entries": "{{count}} arquivos e pastas",
+    "loadFailed": "Não foi possível visualizar este arquivo compactado"
+  }
 }

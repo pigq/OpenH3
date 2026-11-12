@@ -204,6 +204,8 @@ worktrees/
 # Superpowers brainstorm tool (runtime files, session data)
 .superpowers/
 docs/superpowers/
+resources/bundled-python
+resources/bundled-git
 resources/bundled-bun
 resources/bundled-openh3-core
 resources/bundled-aioncore
@@ -244,3 +246,6 @@ temp/
 .env.*
 !.env.example
 !.env.*.example
+
+# Local acceptance captures include machine paths and private conversations.
+/output/

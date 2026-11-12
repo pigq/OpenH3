@@ -6,11 +6,13 @@ import {
   comfyFamilySchema,
   comfyProfileSchema,
   type ComfyProfile,
+  type ComfyInventoryDiagnostic,
 } from '@/common/chat/document/creation/comfy';
 import { discoverComfyEnvironmentCandidates, type ComfyEnvironmentCandidate } from './environment';
 import { inspectComfyServiceIdentity, type ComfyServiceIdentity } from '../workflowEngine';
 import { loadComfyInstallCatalog } from '../planning/catalog';
 import { configuredModelDirectories, indexComfyModelFiles } from './modelPaths';
+import { scanApplicationComfyInventory, isApplicationComfyPath } from './applicationPaths';
 
 type JsonRecord = Record<string, unknown>;
 type CachedRoot = { signature: string; profiles: ComfyProfile[] };
@@ -20,6 +22,8 @@ export type ComfyProfileDiscoveryOptions = {
   workflowDirectory: string;
   resourcesRoot?: string;
   roots?: () => string[];
+  /** Complete application-owned trees, separate from shallow external discovery. */
+  applicationRoots?: () => string[];
   legacyProfiles?: () => ComfyProfile[];
   endpoints?: () => string[];
   fetchImpl?: typeof fetch;
@@ -138,7 +142,8 @@ function makeProfile(
   environment: ComfyProfile['environment'],
   models: string,
   workflowDirectory: string,
-  indexedFiles: Map<string, string[]>
+  indexedFiles: Map<string, string[]>,
+  readOnly = false
 ): ComfyProfile | undefined {
   const family = comfyFamilySchema.safeParse(candidate.family);
   if (!family.success) return undefined;
@@ -151,13 +156,15 @@ function makeProfile(
   const id = discoveredId(candidate, baseline, environment, components);
   if (!/^[a-zA-Z0-9][\w.-]{0,99}$/.test(id)) return undefined;
   const workflowPath = path.join(workflowDirectory, `${id}.json`);
-  fs.mkdirSync(workflowDirectory, { recursive: true });
+  if (!readOnly) fs.mkdirSync(workflowDirectory, { recursive: true });
   // Materialize the packaged baseline only in application-owned cache storage.
   // Never overwrite the user's workflow or a modified discovered baseline.
-  if (!fs.existsSync(workflowPath)) fs.writeFileSync(workflowPath, serialization, { flag: 'wx' });
-  if (!fs.lstatSync(workflowPath).isFile() || fs.statSync(workflowPath).size !== Buffer.byteLength(serialization))
-    return undefined;
-  if (digest(fs.readFileSync(workflowPath, 'utf8')) !== graphHash) return undefined;
+  if (!readOnly && !fs.existsSync(workflowPath)) fs.writeFileSync(workflowPath, serialization, { flag: 'wx' });
+  if (fs.existsSync(workflowPath)) {
+    if (!fs.lstatSync(workflowPath).isFile() || fs.statSync(workflowPath).size !== Buffer.byteLength(serialization))
+      return undefined;
+    if (digest(fs.readFileSync(workflowPath, 'utf8')) !== graphHash) return undefined;
+  }
   const parsed = comfyProfileSchema.safeParse({
     id,
     family: family.data,
@@ -184,7 +191,7 @@ export function createComfyProfileDiscovery(options: ComfyProfileDiscoveryOption
   const modelIndexes = new Map<string, { signature: string; value: ReturnType<typeof indexComfyModelFiles> }>();
   try {
     const saved = record(JSON.parse(fs.readFileSync(options.cacheFile, 'utf8')));
-    for (const [root, raw] of Object.entries(record(saved.roots)).slice(0, 32)) {
+    for (const [root, raw] of Object.entries(record(saved.roots))) {
       const entry = record(raw);
       const profiles = records(entry.profiles).flatMap((value) => {
         const parsed = comfyProfileSchema.safeParse(value);
@@ -198,9 +205,12 @@ export function createComfyProfileDiscovery(options: ComfyProfileDiscoveryOption
   let endpointCheckedAt = -Infinity;
   let running: ComfyEnvironmentCandidate[] = [];
   let pending: Promise<ComfyProfile[]> | undefined;
-  const discover = async (registered: ComfyProfile[]): Promise<ComfyProfile[]> => {
+  let lastSummary = '';
+  let diagnostics: ComfyInventoryDiagnostic[] = [];
+  const discover = async (registered: ComfyProfile[], lightweight = false): Promise<ComfyProfile[]> => {
+    diagnostics = [];
     const now = (options.now ?? Date.now)();
-    if (now - endpointCheckedAt >= (options.endpointRefreshMs ?? 30_000)) {
+    if (!lightweight && now - endpointCheckedAt >= (options.endpointRefreshMs ?? 30_000)) {
       endpointCheckedAt = now;
       running = (
         await Promise.all(
@@ -256,122 +266,234 @@ export function createComfyProfileDiscovery(options: ComfyProfileDiscoveryOption
       ).filter((candidate): candidate is ComfyEnvironmentCandidate => Boolean(candidate));
     }
     const catalog = (options.loadCatalog ?? (() => loadComfyInstallCatalog(options.resourcesRoot)))();
+    const applicationRoots = options.applicationRoots?.() ?? [];
+    const catalogComponents = catalog.candidates.flatMap((item) => records(item.components));
+    const categories = [...new Set(catalogComponents.map((item) => text(item.directory)).filter(safeFilename))];
+    const names = new Set(catalogComponents.map((item) => text(item.name)).filter(safeFilename));
+    const applicationInventory = applicationRoots.length
+      ? await scanApplicationComfyInventory(applicationRoots, names, (issue) => diagnostics.push(issue))
+      : {
+          environments: [],
+          modelFiles: new Map<string, string[]>(),
+          directories: [],
+          filesInspected: 0,
+          durationMs: 0,
+        };
+    const applicationEnvironments = applicationInventory.environments;
+    const applicationModelIndex = {
+      files: applicationInventory.modelFiles,
+      directories: applicationInventory.directories,
+    };
+    const applicationModelSignature = digest(JSON.stringify(applicationInventory.directories.map(fileState)));
     const candidates = discoverComfyEnvironmentCandidates({
       roots: [...registered.map((profile) => profile.environment.root), ...(options.roots?.() ?? []), ...cached.keys()],
       maxCandidates: 32,
     });
-    const result = [...(options.legacyProfiles?.() ?? [])];
+    // The legacy importer materializes workflows; the center uses already registered legacy profiles.
+    const result = lightweight ? [] : [...(options.legacyProfiles?.() ?? [])];
     const visited = new Set<string>();
-    for (const candidate of [...running, ...candidates]) {
+    for (const candidate of [...running, ...applicationEnvironments, ...candidates]) {
       const key = process.platform === 'win32' ? candidate.root.toLowerCase() : candidate.root;
       if (visited.has(key)) continue;
       visited.add(key);
-      const existing = registered.find((profile) => samePath(profile.environment.root, candidate.root));
-      const python = candidate.python ?? existing?.environment.python;
-      if (!python) continue;
-      const environment = {
-        ...existing?.environment,
-        root: candidate.root,
-        python,
-        baseUrl:
-          (candidate.reason === 'configured' ? candidate.baseUrl : undefined) ??
-          existing?.environment.baseUrl ??
-          candidate.baseUrl ??
-          'http://127.0.0.1:8188',
-      };
-      const models = existing ? modelRoot(existing) : path.join(candidate.root, 'models');
-      const config = path.join(candidate.root, 'extra_model_paths.yaml');
-      const components = catalog.candidates.flatMap((item) => records(item.components));
-      const categories = [...new Set(components.map((item) => text(item.directory)).filter(safeFilename))];
-      const names = new Set(components.map((item) => text(item.name)).filter(safeFilename));
-      const configuredDirectories = configuredModelDirectories(candidate.root, models, categories);
-      const priorIndex = modelIndexes.get(candidate.root);
-      const directorySignature = digest(
-        JSON.stringify([
+      try {
+        const existing = registered.find((profile) => samePath(profile.environment.root, candidate.root));
+        const python = candidate.python ?? existing?.environment.python;
+        if (!python) {
+          if (isApplicationComfyPath(candidate.root, applicationRoots)) {
+            diagnostics.push({ code: 'COMFY_INVENTORY_INTERPRETER_UNCONFIRMED', path: candidate.root });
+          }
+          continue;
+        }
+        const environment = {
+          ...existing?.environment,
+          root: candidate.root,
+          python,
+          baseUrl:
+            (candidate.reason === 'configured' ? candidate.baseUrl : undefined) ??
+            existing?.environment.baseUrl ??
+            `http://127.0.0.1:${18188 + (Number.parseInt(digest(candidate.root).slice(0, 3), 16) % 1000)}`,
+        };
+        const models = existing ? modelRoot(existing) : path.join(candidate.root, 'models');
+        const config = path.join(candidate.root, 'extra_model_paths.yaml');
+        const completeModelIndex = isApplicationComfyPath(candidate.root, applicationRoots);
+        const configuredDirectories = configuredModelDirectories(
+          candidate.root,
           models,
-          config,
-          [...configuredDirectories, ...(priorIndex?.value.directories ?? [])].map(fileState),
-          fileState(config),
-        ])
-      );
-      const index =
-        priorIndex?.signature === directorySignature
-          ? priorIndex.value
-          : indexComfyModelFiles(configuredDirectories, names);
-      modelIndexes.set(candidate.root, {
-        value: index,
-        signature: digest(
+          categories,
+          completeModelIndex
+        );
+        // A weight belonging to another checkout must not synthesize a profile here.
+        // Shared app-data model stores remain discoverable, but are still unverified.
+        const contains = (directory: string, file: string): boolean => {
+          const relative = path.relative(directory, file);
+          return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+        };
+        const eligibleApplicationFiles = new Map(
+          [...applicationModelIndex.files].map(([name, files]) => [
+            name,
+            files.filter(
+              (file) =>
+                configuredDirectories.some((directory) => contains(directory, file)) ||
+                ![...applicationEnvironments, ...running, ...candidates].some((environment) =>
+                  contains(environment.root, file)
+                )
+            ),
+          ])
+        );
+        const additionalDirectories = completeModelIndex
+          ? configuredDirectories.filter((directory) => !isApplicationComfyPath(directory, applicationRoots))
+          : configuredDirectories;
+        const priorIndex = modelIndexes.get(candidate.root);
+        const directorySignature = digest(
           JSON.stringify([
             models,
             config,
-            [...configuredDirectories, ...index.directories].map(fileState),
+            completeModelIndex,
+            completeModelIndex ? applicationModelSignature : '',
+            [...configuredDirectories, ...(priorIndex?.value.directories ?? [])].map(fileState),
             fileState(config),
           ])
-        ),
-      });
-      const workflowFiles = catalog.candidates.flatMap((item) => {
-        const baseline = catalog.baselines.find((workflow) => workflow.candidateId === item.id);
-        const components = findComponents(item, models, index.files);
-        return baseline && components
-          ? [path.join(options.workflowDirectory, `${discoveredId(item, baseline, environment, components)}.json`)]
-          : [];
-      });
-      const watched = [
-        path.join(candidate.root, 'main.py'),
-        python,
-        path.join(candidate.root, 'custom_nodes'),
-        config,
-        ...index.directories,
-        ...[...index.files.values()].flat(),
-        ...workflowFiles,
-      ];
-      for (const item of catalog.candidates)
-        for (const component of records(item.components)) {
-          const file = componentFile(models, component);
-          if (file) watched.push(file);
-        }
-      const currentSignature = () => digest(JSON.stringify([environment, models, catalog, watched.map(fileState)]));
-      const signature = currentSignature();
-      let entry = cached.get(candidate.root);
-      if (entry?.signature !== signature) {
-        const profiles = catalog.candidates.flatMap((item) => {
-          const baseline = catalog.baselines.find((workflow) => workflow.candidateId === item.id);
-          if (!baseline) return [];
-          const profile = makeProfile(item, baseline, environment, models, options.workflowDirectory, index.files);
-          return profile ? [profile] : [];
+        );
+        const index =
+          priorIndex?.signature === directorySignature
+            ? priorIndex.value
+            : (() => {
+                const local = indexComfyModelFiles(additionalDirectories, names);
+                const files = new Map(completeModelIndex ? eligibleApplicationFiles : []);
+                for (const [name, paths] of local.files)
+                  files.set(name, [...new Set([...(files.get(name) ?? []), ...paths])]);
+                return {
+                  files,
+                  directories: [
+                    ...new Set([
+                      ...configuredDirectories,
+                      ...(completeModelIndex ? applicationModelIndex.directories : []),
+                      ...local.directories,
+                    ]),
+                  ],
+                };
+              })();
+        modelIndexes.set(candidate.root, {
+          value: index,
+          signature: digest(
+            JSON.stringify([
+              models,
+              config,
+              completeModelIndex,
+              completeModelIndex ? applicationModelSignature : '',
+              [...configuredDirectories, ...index.directories].map(fileState),
+              fileState(config),
+            ])
+          ),
         });
-        entry = { signature: currentSignature(), profiles };
-        cached.set(candidate.root, entry);
-      }
-      for (const profile of entry.profiles) {
-        if (
-          !result.some((item) => item.id === profile.id) &&
-          !registered.some(
-            (item) =>
-              item.family === profile.family &&
-              item.components.length === profile.components.length &&
-              item.components.every((component) =>
-                profile.components.some((other) => samePath(component.path, other.path))
-              )
+        const workflowFiles = catalog.candidates.flatMap((item) => {
+          const baseline = catalog.baselines.find((workflow) => workflow.candidateId === item.id);
+          const components = findComponents(item, models, index.files);
+          return baseline && components
+            ? [path.join(options.workflowDirectory, `${discoveredId(item, baseline, environment, components)}.json`)]
+            : [];
+        });
+        const watched = [
+          path.join(candidate.root, 'main.py'),
+          python,
+          path.join(candidate.root, 'custom_nodes'),
+          config,
+          ...index.directories,
+          ...[...index.files.values()].flat(),
+          ...workflowFiles,
+        ];
+        for (const item of catalog.candidates)
+          for (const component of records(item.components)) {
+            const file = componentFile(models, component);
+            if (file) watched.push(file);
+          }
+        const currentSignature = () =>
+          digest(
+            JSON.stringify([
+              environment,
+              models,
+              catalog,
+              completeModelIndex ? applicationModelSignature : '',
+              watched.map(fileState),
+            ])
+          );
+        const signature = currentSignature();
+        let entry = cached.get(candidate.root);
+        if (entry?.signature !== signature) {
+          const profiles = catalog.candidates.flatMap((item) => {
+            const baseline = catalog.baselines.find((workflow) => workflow.candidateId === item.id);
+            if (!baseline) return [];
+            const profile = makeProfile(
+              item,
+              baseline,
+              environment,
+              models,
+              options.workflowDirectory,
+              index.files,
+              lightweight
+            );
+            return profile ? [profile] : [];
+          });
+          entry = { signature: currentSignature(), profiles };
+          if (!lightweight) cached.set(candidate.root, entry);
+        }
+        for (const profile of entry.profiles) {
+          if (
+            !result.some((item) => item.id === profile.id) &&
+            !registered.some(
+              (item) =>
+                item.family === profile.family &&
+                item.components.length === profile.components.length &&
+                item.components.every((component) =>
+                  profile.components.some((other) => samePath(component.path, other.path))
+                )
+            )
           )
-        )
-          result.push(profile);
+            result.push(profile);
+        }
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        diagnostics.push({
+          code: detail.match(/^COMFY_[A-Z_]+/)?.[0] ?? 'COMFY_INVENTORY_ENVIRONMENT_INCOMPLETE',
+          path: candidate.root,
+        });
       }
     }
-    try {
-      fs.mkdirSync(path.dirname(options.cacheFile), { recursive: true });
-      const serialized = JSON.stringify({ roots: Object.fromEntries([...cached].slice(-32)) });
-      if (!fs.existsSync(options.cacheFile) || fs.readFileSync(options.cacheFile, 'utf8') !== serialized)
-        fs.writeFileSync(options.cacheFile, serialized, { mode: 0o600 });
-    } catch {
-      // Persistence is a performance optimization; discovery results remain valid.
+    if (!lightweight)
+      try {
+        fs.mkdirSync(path.dirname(options.cacheFile), { recursive: true });
+        const serialized = JSON.stringify({ roots: Object.fromEntries(cached) });
+        if (!fs.existsSync(options.cacheFile) || fs.readFileSync(options.cacheFile, 'utf8') !== serialized)
+          fs.writeFileSync(options.cacheFile, serialized, { mode: 0o600 });
+      } catch {
+        // Persistence is a performance optimization; discovery results remain valid.
+      }
+    const summary = JSON.stringify({
+      environments: visited.size,
+      profiles: result.length,
+      families: [...new Set(result.map((profile) => profile.family))],
+      applicationFilesInspected: applicationInventory.filesInspected,
+      applicationScanMs: applicationInventory.durationMs,
+      diagnostics,
+    });
+    if (summary !== lastSummary) {
+      console.info('[comfy] local discovery inventory', JSON.parse(summary) as unknown);
+      lastSummary = summary;
     }
     return result;
   };
-  return (registered: ComfyProfile[]): Promise<ComfyProfile[]> => {
-    pending ??= discover(registered).finally(() => {
-      pending = undefined;
-    });
-    return pending;
-  };
+  return Object.assign(
+    (registered: ComfyProfile[]): Promise<ComfyProfile[]> => {
+      pending ??= discover(registered).finally(() => {
+        pending = undefined;
+      });
+      return pending;
+    },
+    {
+      diagnostics: () => structuredClone(diagnostics),
+      // Reuse filesystem inventory and previously identified endpoints, without a Python process inspector.
+      lightweight: (registered: ComfyProfile[]) => discover(registered, true),
+    }
+  );
 }

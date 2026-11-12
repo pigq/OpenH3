@@ -30,6 +30,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import path from 'node:path';
 import { buildMcpSpawnCommand, resolveBridgeToken, resolveBrowserUrl } from './browserServerPort';
 
 /**
@@ -151,14 +152,21 @@ const spawnPlan = buildMcpSpawnCommand({
   platform: process.platform,
   version: CHROME_DEVTOOLS_MCP_VERSION,
   browserUrl,
+  nodeExecutable: process.execPath,
+  npmCliPath: process.env.OPENH3_NPX_CLI,
 });
 
+const nodeDirectory = path.dirname(spawnPlan.command);
+const spawnEnv = {
+  ...process.env,
+  PATH: [nodeDirectory, process.env.PATH].filter(Boolean).join(path.delimiter),
+};
 const child = spawn(spawnPlan.command, spawnPlan.args, {
   // stdio 直通：这个进程只是转发者，MCP 协议流不能被中间层缓冲或改写
   // Pass stdio straight through: this process is a forwarder, and the MCP
   // protocol stream must not be buffered or rewritten in between.
   stdio: 'inherit',
-  env: process.env,
+  env: spawnEnv,
 });
 
 child.on('error', (error) => {

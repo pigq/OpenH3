@@ -6,12 +6,18 @@ import { pipeline } from 'node:stream/promises';
 import { spawn, type ChildProcess } from 'node:child_process';
 import {
   validateComfyGenerationInputForFamily,
+  assertComfyReferenceBindings,
+  resolveComfyReferenceBindings,
+  unsupportedComfyInputs,
+  type ComfyReference,
   type ComfyProfile,
   type ComfyGenerationInput,
   type ComfyDiagnosis,
+  type ComfyInstallPlan,
 } from '@/common/chat/document/creation/comfy';
 import {
   validateComfyWorkflow,
+  validateComfyReferenceOutputPaths,
   type ComfyGraph,
   type ComfyRegistry,
 } from '@/process/services/runtime/h3WorkflowPreflight';
@@ -19,6 +25,7 @@ import { diagnoseComfyError } from '@/process/services/runtime/h3ComfyError';
 import { MATLOWAI_CUSTOM_NODE_ARCHIVES } from '@/process/services/runtime/h3OfflineBundle';
 import { H3ReferencePreflight } from '@/process/services/runtime/H3ReferencePreflight';
 import { withComfyReferenceVideo } from './referenceVideo';
+import { resolveComfyModelFiles } from './routing/modelFiles';
 import {
   readPythonRuntime,
   readComfyHardwareIdentity,
@@ -230,11 +237,15 @@ function assertEnvironment(profile: ComfyProfile): void {
 }
 function graphFromProfile(profile: ComfyProfile): ComfyGraph {
   let data: unknown;
+  let source: string;
   try {
-    data = JSON.parse(fs.readFileSync(profile.workflowPath, 'utf8'));
+    source = fs.readFileSync(profile.workflowPath, 'utf8');
+    data = JSON.parse(source);
   } catch {
     throw new Error('COMFY_WORKFLOW_INVALID_JSON');
   }
+  if (profile.workflowSha256 && hash(source) !== profile.workflowSha256.toLowerCase())
+    throw new Error('COMFY_WORKFLOW_HASH_MISMATCH');
   const graph = record(data);
   if (
     !Object.keys(graph).length ||
@@ -256,12 +267,9 @@ function applyBindings(graph: ComfyGraph, profile: ComfyProfile, values: Record<
   }
 }
 function generationValues(profile: ComfyProfile, input: ComfyGenerationInput): Record<string, unknown> {
-  const { imagePaths: _imagePaths, references: _references, ...values } = input;
-  for (const [key, value] of Object.entries(values)) {
-    if (value === undefined) continue;
-    if (!profile.bindings[key]?.length && !(key === 'durationSeconds' && profile.bindings.frames?.length))
-      throw new Error(`COMFY_INPUT_UNSUPPORTED:${key}`);
-  }
+  const { imagePaths: _imagePaths, references: _references, requirements: _requirements, ...values } = input;
+  const [unsupported] = unsupportedComfyInputs(profile, input);
+  if (unsupported) throw new Error(unsupported);
   const result: Record<string, unknown> = { ...profile.defaults, ...values };
   if (input.durationSeconds !== undefined && profile.bindings.frames?.length) {
     const fps = profile.defaults.fps;
@@ -314,6 +322,7 @@ function validateKnownModelBindings(profile: ComfyProfile, graph: ComfyGraph): v
     },
     LoraLoader: { lora_name: ['loras'] },
     LoraLoaderModelOnly: { lora_name: ['loras'] },
+    ModelPatchLoader: { name: ['model_patches'] },
   };
   for (const node of Object.values(graph)) {
     for (const [input, directories] of Object.entries(classes[node.class_type ?? ''] ?? {})) {
@@ -663,11 +672,16 @@ export class ComfyWorkflowEngine {
     const previous = this.owned.get(url.origin);
     if (previous && !previous.exited) throw new Error('COMFY_OWNED_SERVER_UNHEALTHY');
     const args = profile.environment.launchArgs ?? [];
-    if (
-      args.some((arg) => /^--(?:listen|port|base-directory|output-directory|input-directory)(?:=|$)/.test(arg)) ||
-      args.some((arg) => arg.includes('\0'))
-    )
-      throw new Error('COMFY_LAUNCH_ARGS_INVALID');
+    const reservedFlags = args
+      .filter((arg) => /^--(?:listen|port|base-directory|output-directory|input-directory)(?:=|$)/.test(arg))
+      .map((arg) => arg.split('=')[0]);
+    if (reservedFlags.length)
+      throw new Error(
+        `COMFY_LAUNCH_ARGS_INVALID:reserved flags ${[...new Set(reservedFlags)].join(', ')}; remove them from environment.launchArgs. The application manages listener and runtime/media directories. Set the listening port in environment.baseUrl (for example http://127.0.0.1:8190), not --port.`
+      );
+    const nulIndex = args.findIndex((arg) => arg.includes('\0'));
+    if (nulIndex >= 0)
+      throw new Error(`COMFY_LAUNCH_ARGS_INVALID:environment.launchArgs[${nulIndex}] contains a NUL character`);
     if (await this.options.startRuntime?.(structuredClone(profile))) {
       const ready = await this.stats(profile);
       if (!ready) throw new Error('COMFY_STARTUP_FAILED');
@@ -832,12 +846,26 @@ export class ComfyWorkflowEngine {
           environment: profile.environment,
           workflowPath: profile.workflowPath,
           workflowSha256,
+          ...(profile.workflowMetadata
+            ? {
+                workflowMetadata: {
+                  id: profile.workflowMetadata.id,
+                  revision: profile.workflowMetadata.revision,
+                  tasks: profile.workflowMetadata.tasks,
+                  inputs: profile.workflowMetadata.inputs,
+                  adapter: profile.workflowMetadata.adapter,
+                },
+              }
+            : {}),
           bindings: profile.bindings,
           defaults: profile.defaults,
           memoryPolicy: profile.memoryPolicy,
           nodes: profile.nodes,
         },
-        components: profile.components.map((component) => ({ ...component, file: stat(component.path) })),
+        components: resolveComfyModelFiles(profile).components.map((component) => ({
+          ...component,
+          file: stat(component.path),
+        })),
         dependencies: this.runtimes.get(runtimeKey(profile))!.files.map(stat),
         hardware,
         python: {
@@ -887,7 +915,7 @@ export class ComfyWorkflowEngine {
   }> {
     const frozen = structuredClone(profile);
     if (signal) this.throwAborted(signal);
-    for (const component of frozen.components) {
+    for (const component of resolveComfyModelFiles(frozen).components) {
       if (
         !path.isAbsolute(component.path) ||
         !fs.existsSync(component.path) ||
@@ -1013,20 +1041,13 @@ export class ComfyWorkflowEngine {
   private async inputImages(
     profile: ComfyProfile,
     graph: ComfyGraph,
-    imagePaths: string[],
+    references: ComfyReference[],
     signal: AbortSignal
-  ): Promise<void> {
-    if (!imagePaths.length) return;
-    const destinations =
-      profile.bindings.image ??
-      profile.bindings.images ??
-      profile.bindings.imagePaths ??
-      profile.bindings.inputImage ??
-      [];
-    if (!destinations.length || imagePaths.length > destinations.length)
-      throw new Error('COMFY_IMAGE_BINDINGS_MISSING');
-    for (let index = 0; index < imagePaths.length; index++) {
-      const imagePath = imagePaths[index];
+  ): Promise<string[]> {
+    if (!references.length) return [];
+    const destinations = resolveComfyReferenceBindings(profile, { prompt: 'binding', references });
+    for (let index = 0; index < references.length; index++) {
+      const imagePath = references[index].path;
       if (!path.isAbsolute(imagePath) || !fs.existsSync(imagePath) || !fs.statSync(imagePath).isFile())
         throw new Error('COMFY_INPUT_IMAGE_MISSING');
       if (!mimeType(imagePath).startsWith('image/')) throw new Error('COMFY_INPUT_IMAGE_FORMAT');
@@ -1050,6 +1071,7 @@ export class ComfyWorkflowEngine {
         throw new Error('COMFY_BINDING_INVALID:image');
       node.inputs[destination.input] = [subfolder, uploaded.name].filter(Boolean).join('/');
     }
+    return destinations.map((destination) => destination.nodeId);
   }
 
   private async inputReferences(
@@ -1058,15 +1080,18 @@ export class ComfyWorkflowEngine {
     references: NonNullable<ComfyGenerationInput['references']>,
     media: Map<string, { duration: number; audio: boolean; fps?: number }>,
     signal: AbortSignal
-  ): Promise<string> {
-    const target = Object.values(graph).find((node) => node.class_type === 'MiniMaxH3ReferenceToVideo');
-    if (!target?.inputs) throw new Error('COMFY_OMNI_REFERENCE_BINDING_MISSING');
+  ): Promise<{ tags: string; nodeIds: string[] }> {
+    const selected = Object.entries(graph).find(([, node]) => node.class_type === 'MiniMaxH3ReferenceToVideo');
+    if (!selected?.[1].inputs) throw new Error('COMFY_OMNI_REFERENCE_BINDING_MISSING');
+    const [targetId, target] = selected;
+    const nodeIds = [targetId];
     for (const key of Object.keys(target.inputs)) {
       if (/^ref_(images|videos|video_audios|audios)(?:\.|$)/.test(key)) delete target.inputs[key];
     }
     const add = (class_type: string, inputs: Record<string, unknown>): string => {
       const id = String(Math.max(0, ...Object.keys(graph).map(Number).filter(Number.isFinite)) + 1);
       graph[id] = { class_type, inputs };
+      nodeIds.push(id);
       return id;
     };
     const counts = { image: 0, video: 0, audio: 0 };
@@ -1123,7 +1148,7 @@ export class ComfyWorkflowEngine {
         tags.push(`<Video ${index + 1}>`);
       });
     for (let index = 0; index < counts.audio; index++) tags.push(`<Audio ${++audioIndex}>`);
-    return tags.join(' ');
+    return { tags: tags.join(' '), nodeIds };
   }
 
   /** Submit exactly once, poll bounded history, then copy ComfyUI artifacts into application-owned output storage. */
@@ -1133,7 +1158,8 @@ export class ComfyWorkflowEngine {
     signal: AbortSignal,
     onProgress?: (progress: number) => void,
     onSubmitted?: (promptId: string) => void,
-    onSubmitting?: (promptId: string) => void
+    onSubmitting?: (promptId: string) => void,
+    executionWorkflow?: { path: string; sha256: string }
   ): Promise<ComfyGenerationResult> {
     const prepared = await this.prepareInput(profile, input, signal);
     let submitted = false;
@@ -1154,7 +1180,8 @@ export class ComfyWorkflowEngine {
             submitted = true;
             onSubmitting?.(promptId);
           },
-          reservedPromptId
+          reservedPromptId,
+          executionWorkflow
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -1275,8 +1302,7 @@ export class ComfyWorkflowEngine {
     const references =
       requestInput.references ?? requestInput.imagePaths?.map((file) => ({ type: 'image' as const, path: file })) ?? [];
     this.throwAborted(signal);
-    if (frozen.family !== 'fasth3-omni' && references.some((reference) => reference.type !== 'image'))
-      throw new Error('COMFY_MULTIMODAL_WORKFLOW_REQUIRED');
+    assertComfyReferenceBindings(frozen, requestInput);
     if (
       frozen.family !== 'fasth3-omni' &&
       (frozen.family === 'qwen-edit' ||
@@ -1316,31 +1342,34 @@ export class ComfyWorkflowEngine {
     onProgress?: (progress: number) => void,
     onSubmitted?: (promptId: string) => void,
     onSubmitting?: (promptId: string) => void,
-    reservedPromptId = crypto.randomUUID()
+    reservedPromptId = crypto.randomUUID(),
+    executionWorkflow?: { path: string; sha256: string }
   ): Promise<ComfyGenerationResult> {
     const { frozen, requestInput, references, media } = prepared;
+    const values = generationValues(frozen, requestInput);
     await this.ensureStarted(frozen);
     const current = await this.snapshotFingerprint(frozen);
     if (frozen.validation && frozen.validation.fingerprint !== current) throw new Error('COMFY_PROFILE_CHANGED');
-    const graph = graphFromProfile(frozen);
-    applyBindings(graph, frozen, generationValues(frozen, requestInput));
+    const graph = graphFromProfile(
+      executionWorkflow
+        ? { ...frozen, workflowPath: executionWorkflow.path, workflowSha256: executionWorkflow.sha256 }
+        : frozen
+    );
+    applyBindings(graph, frozen, values);
     validateKnownModelBindings(frozen, graph);
+    let referenceNodeIds: string[];
     if (frozen.family === 'fasth3-omni') {
-      const tags = await this.inputReferences(frozen, graph, references, media, signal);
+      const { tags, nodeIds } = await this.inputReferences(frozen, graph, references, media, signal);
+      referenceNodeIds = nodeIds;
       const missing = tags
         .split('> ')
         .map((tag) => (tag.endsWith('>') ? tag : `${tag}>`))
         .filter((tag) => !requestInput.prompt.includes(tag));
       if (missing.length) applyBindings(graph, frozen, { prompt: `${requestInput.prompt}\n${missing.join(' ')}` });
-    } else
-      await this.inputImages(
-        frozen,
-        graph,
-        references.map((reference) => reference.path),
-        signal
-      );
+    } else referenceNodeIds = await this.inputImages(frozen, graph, references, signal);
     const registry = (await this.json(frozen, '/object_info', {}, signal)) as ComfyRegistry;
     validateComfyWorkflow(graph, registry);
+    validateComfyReferenceOutputPaths(graph, registry, referenceNodeIds);
     this.throwAborted(signal);
     onProgress?.(0);
     let response: Response;
@@ -1780,8 +1809,46 @@ export class ComfyWorkflowEngine {
     throw new Error('COMFY_CANCEL_UNCONFIRMED');
   }
 
+  /** Check loader support before downloading into an existing environment. Startup occurs only after plan approval. */
+  async validateInstallRuntime(plan: ComfyInstallPlan): Promise<void> {
+    if (plan.commands.length || !fs.existsSync(path.join(plan.environment.root, 'main.py'))) return;
+    const profile: ComfyProfile = { ...plan, state: 'downloaded' };
+    const origin = loopbackUrl(profile).origin;
+    const previous = this.owned.get(origin);
+    try {
+      await this.ensureStarted(profile);
+      const stats = await this.stats(profile);
+      await this.assertIdentity(profile, stats ?? {});
+      for (const node of profile.nodes) await this.checkNodeRevision(profile, node, record(stats?.system));
+      const registry = (await this.json(profile, '/object_info')) as ComfyRegistry;
+      const { validateInstallationSchema } = await import('./planning/environmentSelection');
+      try {
+        validateInstallationSchema(
+          { graph: plan.workflow, bindings: plan.bindings },
+          { components: plan.components },
+          registry
+        );
+      } catch (cause) {
+        throw new Error('COMFY_EXISTING_RUNTIME_INCOMPATIBLE:WORKFLOW_NODE_OR_INPUT_UNSUPPORTED', { cause });
+      }
+    } catch (cause) {
+      const current = this.owned.get(origin);
+      if (current && current !== previous && current.environmentKey === environmentKey(profile)) {
+        try {
+          await this.stopOwned(profile);
+        } catch (cleanupError) {
+          throw new Error(
+            `${cause instanceof Error ? cause.message : 'COMFY_RUNTIME_PREFLIGHT_FAILED'}; COMFY_PREFLIGHT_CLEANUP_FAILED:${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+            { cause }
+          );
+        }
+      }
+      throw cause;
+    }
+  }
+
   /** Check that installation will not mutate a busy or externally owned live environment. */
-  async assertInstallable(profile: ComfyProfile): Promise<void> {
+  async assertInstallable(profile: ComfyProfile, options: { additive?: boolean } = {}): Promise<void> {
     const stats = await this.stats(profile);
     if (!stats) return;
     await this.assertIdentity(profile, stats);
@@ -1790,7 +1857,7 @@ export class ComfyWorkflowEngine {
       throw new Error('COMFY_QUEUE_INVALID_RESPONSE');
     if (queue.queue_running.length || queue.queue_pending.length) throw new Error('COMFY_RUNTIME_BUSY');
     const owned = this.owned.get(loopbackUrl(profile).origin);
-    if (!owned || owned.exited || owned.environmentKey !== environmentKey(profile))
+    if (!options.additive && (!owned || owned.exited || owned.environmentKey !== environmentKey(profile)))
       throw new Error('COMFY_EXTERNAL_RUNTIME_RUNNING');
   }
 

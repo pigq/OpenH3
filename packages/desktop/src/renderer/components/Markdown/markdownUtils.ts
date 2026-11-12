@@ -35,7 +35,7 @@ export const logicRender = <T, F>(condition: boolean, trueComponent: T, falseCom
   return condition ? trueComponent : (falseComponent as F);
 };
 
-const safeDecodeURIComponent = (value: string): string => {
+export const safeDecodeURIComponent = (value: string): string => {
   try {
     return decodeURIComponent(value);
   } catch {
@@ -104,7 +104,9 @@ const normalizeLocalFileHrefToPath = (href: string): LocalFilePathCandidate | nu
   if (/^file:/i.test(href)) {
     try {
       const url = new URL(href);
-      const path = normalizeFilePath(safeDecodeURIComponent(url.pathname));
+      const path = url.hostname
+        ? `//${url.hostname}${safeDecodeURIComponent(url.pathname)}`
+        : normalizeFilePath(safeDecodeURIComponent(url.pathname));
       const rawHash = safeDecodeURIComponent(url.hash);
       if (!rawHash) return { filePath: path };
 
@@ -120,8 +122,11 @@ const normalizeLocalFileHrefToPath = (href: string): LocalFilePathCandidate | nu
     }
   }
 
-  const candidate = splitHashLocation(href);
+  const rawCandidate = splitHashLocation(href);
+  const candidate = { ...rawCandidate, filePath: safeDecodeURIComponent(rawCandidate.filePath) };
   const path = candidate.filePath;
+
+  if (/^\\\\[^\\]+\\[^\\]+/.test(path)) return candidate;
 
   if (/^[A-Za-z]:[\\/]/.test(path)) {
     return {
@@ -185,12 +190,22 @@ const formatRawReference = (
 
 export const resolveLocalFileLinkReference = (
   rawHref: string,
-  resolvedHref?: string
+  resolvedHref?: string,
+  baseDirectory?: string
 ): LocalFileLinkReference | null => {
-  const href = safeDecodeURIComponent((rawHref || resolvedHref || '').trim());
+  const href = (rawHref || resolvedHref || '').trim();
   if (!href) return null;
 
-  const candidate = normalizeLocalFileHrefToPath(href);
+  let candidate = normalizeLocalFileHrefToPath(href);
+  // Only file-like relative links have a local meaning in the agent's cwd.
+  // Never resolve web URLs, application routes or fragment-only links as files.
+  if (!candidate && baseDirectory && !/^(?:[a-z][a-z\d+.-]*:|[\\/#?])/i.test(href)) {
+    const path = splitHashLocation(href).filePath;
+    if (/\.[^/\\?#.]+(?::\d+(?::\d+)?)?$/.test(path)) {
+      const base = toLocalFileHref(`${baseDirectory.replace(/[\\/]+$/, '')}/`);
+      candidate = normalizeLocalFileHrefToPath(new URL(href.replace(/\\/g, '/'), base).href);
+    }
+  }
   if (!candidate || candidate.hasInvalidHash) return null;
 
   const colonReference = splitLocationSuffix(candidate.filePath);
@@ -201,8 +216,6 @@ export const resolveLocalFileLinkReference = (
           ...candidate.hashLocation,
           filePath: colonReference.filePath,
         };
-
-  if (!normalizeLocalFileHrefToPath(reference.filePath)) return null;
 
   const source = candidate.hashLocation?.line == null ? colonReference.source : 'hash';
   const { source: _source, ...publicReference } = reference;
@@ -219,7 +232,7 @@ export const resolveLocalFileLinkPath = (rawHref: string, resolvedHref?: string)
 export const toLocalFileHref = (filePath: string): string => {
   const normalized = filePath.replace(/\\/g, '/');
   const withScheme = /^[A-Za-z]:\//.test(normalized) ? `file:///${normalized}` : `file://${normalized}`;
-  return encodeURI(withScheme);
+  return encodeURI(withScheme).replace(/#/g, '%23').replace(/\?/g, '%3F');
 };
 
 /**

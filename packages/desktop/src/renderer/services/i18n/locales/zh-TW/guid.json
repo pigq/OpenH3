@@ -1,9 +1,18 @@
 {
-  "promptExamplesHint": "試試這些指令",
+  "promptExamplesHint": "從一個創作想法開始",
   "defaultPrompts": {
-    "understand": "了解一下這個專案，用白話告訴我它是做什麼的、從哪裡入手",
-    "cleanup": "幫我找出這個資料夾裡重複和沒用的檔案，列出來讓我確認",
-    "create": "幫我做一個精美的個人主頁網頁，做好後直接打開給我看"
+    "image": "生成一張電影感的雨夜街景，直式 3:4",
+    "reference": "用我上傳的照片製作人物海報，保留人物身分",
+    "story": "製作一段外送員的日常故事影片，完成剪輯與配樂",
+    "models": "檢測我的電腦，安裝適合的本機模型並驗證出圖",
+    "product": "為咖啡品牌設計一張極簡產品廣告圖，橫式 16:9",
+    "portrait": "把我上傳的人像改成自然光雜誌封面，保留五官",
+    "travel": "製作一段海邊旅行短片，自主規劃鏡頭並剪輯配樂",
+    "repair": "檢查既有本機模型，修復有問題的設定並驗證生成",
+    "poster": "設計一張春日花展海報，標題為「花間來信」，直式 3:4",
+    "restyle": "把我上傳的照片改成水彩插畫，保留原圖主體和構圖",
+    "storyboard": "把「凌晨開門的麵包店」做成三幕故事影片，統一畫面風格",
+    "edit": "將我提供的影片剪成節奏明快的短片，加入字幕和配樂"
   },
   "selectAssistantHint": "選擇一位助手開始任務",
   "workspace": {
@@ -33,18 +42,19 @@
       "moss-image-sft": "中文文字與版面生圖（SFT）"
     },
     "actions": {
-      "install": "引導安裝",
+      "install": "開始安裝",
       "repair": "檢查 / 修復",
       "install-other": "其他版本",
       "generate": "生成"
     },
     "intentSummary": "本機模型：{{model}} · {{intent}} · {{profile}}。",
     "prompts": {
-      "install": "呼叫 comfyui-local，自動偵測裝置並選配、下載安裝本機 {{family}} 及相符工作流程。",
-      "repair": "呼叫 comfyui-local，偵測並修復本機 {{family}} 設定 {{profile}}，保留其他可用設定。",
-      "install-other": "呼叫 comfyui-local，自動偵測裝置並選配、下載安裝本機 {{family}} 的獨立其他版本及相符工作流程，保留現有可用版本。"
+      "install": "幫我安裝本機 {{family}} 及配套工作流程。優先重用既有環境與檔案，自動選擇相容方案、診斷修復錯誤，實際生成驗證成功後再回報完成。",
+      "repair": "幫我檢查並修復本機 {{family}} 設定 {{profile}}，保留其他可用環境與模型，實際生成驗證成功後再回報完成。",
+      "install-other": "幫我為本機 {{family}} 安裝獨立的其他版本與工作流程，保留既有可用版本，自動處理安裝問題並驗證實際生成。"
     },
     "operation": {
+      "recovering": "Agent 正在診斷並修復此任務。",
       "title": "ComfyUI 模型方案",
       "authorize": "確認方案並讓助手繼續",
       "continue": "讓助手繼續",
@@ -68,9 +78,11 @@
       },
       "snapshotDirectory": "復原快照",
       "submittedContext": "應用程式已提交安裝工作 {{id}}（{{state}}），工作進度面板會自動更新。請說明現有工作狀態，不要重複提交安裝或在聊天中再次要求確認。",
-      "preparationFailed": "安裝準備未完成：{{reason}}。請求已保留，請查看工作進度中的具體診斷。"
+      "preparationFailed": "安裝準備未完成：{{reason}}。請求已保留，請查看工作進度中的具體診斷。",
+      "agentPreparing": "已交給 Agent，等待檢查安裝環境。",
+      "agentRetry": "請繼續處理 {{model}} 的安裝。先檢查既有任務和錯誤，依 comfyui-local 診斷修復並續裝，不要重複建立安裝任務。"
     },
-    "profileSummary": "已選本地設定：{{profile}}。請使用此設定。",
+    "profileSummary": "已選本地設定：{{profile}}。保留其模型、精度和使用者要求的參數；為完成修復，可採用已驗證的修復變體。",
     "session": {
       "title": "本機生成設定",
       "hint": "套用於下一次生成，已提交的任務繼續使用原設定。",
@@ -90,7 +102,9 @@
       },
       "adjusted": "已在此模型配置核准的範圍內調整參數。",
       "actualInput": "實際生成參數",
-      "submissionUncertain": "尚未確認請求已提交。重新提交前，請先檢查目前的 ComfyUI 佇列。"
+      "submissionUncertain": "尚未確認請求已提交。重新提交前，請先檢查目前的 ComfyUI 佇列。",
+      "recovered": "已恢復 · 查看先前失敗記錄",
+      "elapsed": "總耗時：{{seconds}} 秒"
     },
     "illustrativeCover": "用途示意圖",
     "preview": {
@@ -112,7 +126,34 @@
       "krea2": "comfyui-local: references/z-image.md#krea2 — BF16 / FP8 / INT8-ConvRot / NVFP4; Turbo steps=8, CFG=1; CLIPLoader.type=krea2. 預設使用 Turbo，不可混入 Raw 或自動加入風格 LoRA。此處只驗證文字生圖，風格參考需要獨立匹配工作流程。",
       "moss-image-sft": "comfyui-local: references/z-image.md#moss-image-sft — MOSS-Image-SFT, BF16 / INT8-ConvRot / INT8-ConvRot+W4A8; steps=50, CFG=3; CLIPLoader.type=moss_image. Keep SFT separate from Base and use the fixed native moss_image ComfyUI route with shift=5 and negative-branch SLG layer=22. Prefer ModelScope, then verified domestic mirror, then upstream with fixed revision, size and SHA-256; only real generation verification marks the profile usable."
     },
-    "imageRecipeRequirements": "透過 openh3_comfy_environment 檢查系統、GPU 架構、驅動、Python/Torch、實際精度與注意力核心、可用顯存、記憶體、卸載條件及磁碟；區分「設備條件不足」與「偵測未完成」，列出具體缺項，不可只按顯存容量選模型。NVFP4 僅限相容 Blackwell。依序選擇 ModelScope 已核驗檔案、SHA-256 一致的 hf-mirror.com、官方來源；固定 revision、大小及 SHA-256，重用斷點續傳。來源未核驗或需要授權時明確說明，不可編造下載版本。只有實際生圖驗證通過才標記可用。"
+    "imageRecipeRequirements": "透過 openh3_comfy_environment 檢查系統、GPU 架構、驅動、Python/Torch、實際精度與注意力核心、可用顯存、記憶體、卸載條件及磁碟；區分「設備條件不足」與「偵測未完成」，列出具體缺項，不可只按顯存容量選模型。NVFP4 僅限相容 Blackwell。依序選擇 ModelScope 已核驗檔案、SHA-256 一致的 hf-mirror.com、官方來源；固定 revision、大小及 SHA-256，重用斷點續傳。來源未核驗或需要授權時明確說明，不可編造下載版本。只有實際生圖驗證通過才標記可用。",
+    "workflows": {
+      "advanced": "進階工作流",
+      "mode": "工作流選擇",
+      "auto": "自動選擇工作流",
+      "fixed": "固定工作流",
+      "autoHint": "依據任務在目前模型內自動選擇工作流；固定後始終使用指定路線。",
+      "details": "詳情",
+      "environment": "執行環境",
+      "workflow": "工作流",
+      "states": {
+        "verified": "已驗證",
+        "pending-validation": "待驗證",
+        "needs-preparation": "需準備",
+        "needs-repair": "需修復"
+      },
+      "tasks": {
+        "text-to-image": "文生圖",
+        "image-to-image": "圖生圖",
+        "image-edit": "圖片編輯",
+        "multi-reference-image": "多圖參考",
+        "inpaint": "局部重繪",
+        "text-to-video": "文生影片",
+        "image-to-video": "圖生影片",
+        "reference-to-video": "參考生成影片",
+        "first-last-frame-video": "首尾幀影片"
+      }
+    }
   },
   "creation": {
     "states": {
@@ -140,7 +181,7 @@
     "cloudVideo": "雲端影片模型",
     "manageLocal": "管理本地模型",
     "configureCloud": "設定雲端 API",
-    "requestSummary": "創作設定：{{kind}} · {{source}} · {{model}}（{{state}}）。請使用選定模型；若不可用，請先詢問我是否安裝或設定。不要自動切換至其他模型或雲端服務。",
+    "requestSummary": "創作設定（應用程式提供的脈絡，使用者指令優先）：{{kind}} · {{source}} · {{model}}（{{state}}）。使用所選模型，保留使用者要求的參數。若無法使用，依目前的審批模式診斷、設定或修復，並繼續完成任務。全自動模式無須額外的聊天確認，仍須遵守實際工具權限。僅在缺少必要輸入，或必須更改使用者明確要求保留的模型或參數時，詢問必要資訊或選擇。",
     "toolsUnavailable": "創作工具尚未準備好，請稍後再試。",
     "install": {
       "states": {
@@ -181,11 +222,25 @@
       "invalid": "Check the service name, API URL and model. OpenAI Videos requires a model and API key.",
       "uncertain": "The server may have received this request. Automatic resubmission is disabled to prevent duplicate generation.",
       "retrying": "Waiting for the cloud service to respond. This task will be checked again automatically.",
-      "failed": "Video generation could not complete. Check the service status or task details before starting a new request."
+      "failed": "Video generation could not complete. Check the service status or task details before starting a new request.",
+      "stages": {
+        "submitting": "正在提交",
+        "queued": "雲端排隊中",
+        "generating": "雲端生成中",
+        "downloading": "正在下載結果",
+        "completed": "已完成",
+        "failed": "失敗"
+      },
+      "background": "雲端任務仍在進行，你可以繼續對話。",
+      "progressUnknown": "上游未提供生成百分比，正在自動查詢實際狀態。",
+      "elapsed": "已等待 {{seconds}} 秒",
+      "lastChecked": "{{seconds}} 秒前收到雲端狀態"
     },
     "noLocalModels": "尚未安裝本機模型",
     "noLocalModelsHint": "尚未找到本機模型，請先安裝或新增",
-    "addCloud": "新增雲端 API"
+    "addCloud": "新增雲端 API",
+    "inventoryIncomplete": "查看模型掃描詳情",
+    "inventoryIncompleteHint": "部分路徑未完成偵測，已識別的模型仍會保留。可複製以下資訊協助排查。"
   },
   "aiCreation": "AI 創作",
   "aiCreationSubtitle": "把想像變成作品",
@@ -417,5 +472,142 @@
   },
   "templateReferenceRequired": "需參考圖",
   "templateReferenceHint": "請先上傳人物或原圖參考，再傳送生成請求。",
-  "templateReferencePrompt": "請使用我上傳的參考圖片完成這個範本，按範本要求保留人物身分或原圖主體。若未上傳參考圖，請先提示我上傳，不要擅自補造參考內容。輸出比例：{{ratio}}。\n\n{{prompt}}"
+  "templateReferencePrompt": "請使用我上傳的參考圖片完成這個範本，按範本要求保留人物身分或原圖主體。若未上傳參考圖，請先提示我上傳，不要擅自補造參考內容。輸出比例：{{ratio}}。\n\n{{prompt}}",
+  "localModels": {
+    "title": "本機模型",
+    "subtitle": "依裝置能力選擇模型，管理你的本機創作工具。",
+    "preview": "{{name}} 效果範例",
+    "noPreview": "暫無效果範例",
+    "play": "播放範例",
+    "pause": "暫停範例",
+    "unknown": "未偵測",
+    "device": "目前裝置",
+    "checkedAt": "偵測於 {{time}}",
+    "refresh": "重新偵測",
+    "graphics": "顯示卡",
+    "vram": "視訊記憶體",
+    "sharedMemory": "共享記憶體",
+    "ram": "系統記憶體",
+    "available": "可用 {{value}}",
+    "cpu": "處理器",
+    "system": "作業系統",
+    "driver": "顯示卡驅動程式",
+    "disk": "磁碟空間",
+    "directory": "安裝目錄",
+    "changeDirectory": "選擇目錄",
+    "environment": "查看環境詳情",
+    "environmentHint": "安裝時，Agent 會檢查或準備 Python 與 ComfyUI。尚未設定環境不代表裝置不相容。",
+    "python": "Python",
+    "workflowCount": "{{count}} 個工作流程",
+    "downloadSize": "需下載 {{value}}",
+    "reusedSize": "可重用 {{value}}",
+    "details": "查看詳情",
+    "assessment": "裝置相容性評估",
+    "assessmentHint": "容量需求為估算值。安裝前，Agent 會檢查實際工作流程與執行環境。",
+    "totalSize": "元件總大小",
+    "download": "需要下載",
+    "reused": "已可重用",
+    "versions": "版本與工作流程",
+    "noVersions": "安裝時，Agent 會選擇合適的版本和工作流程。",
+    "workflow": "工作流程",
+    "components": "模型元件",
+    "evidence": "驗證紀錄",
+    "noEvidence": "尚無成功生成的驗證紀錄。",
+    "loading": "正在偵測裝置與模型",
+    "unavailable": "暫時無法讀取本機模型資訊。",
+    "retry": "重試",
+    "models": "模型庫",
+    "catalogHint": "結合裝置容量和現有元件，篩選適合的模型。",
+    "search": "搜尋模型或版本",
+    "filter": "模型類型",
+    "noModels": "沒有符合的模型。請調整篩選條件，或查看全部模型。",
+    "tabs": {
+      "recommended": "為你推薦",
+      "all": "全部模型",
+      "installed": "已安裝"
+    },
+    "filters": {
+      "all": "全部類型",
+      "image": "圖片",
+      "video": "影片"
+    },
+    "actions": {
+      "install": "開始安裝",
+      "use": "使用模型",
+      "progress": "查看進度",
+      "repair": "檢查／修復"
+    },
+    "status": {
+      "verified": "已驗證",
+      "compatible": "容量適用",
+      "unknown": "待評估",
+      "insufficient": "需調整設定"
+    },
+    "purpose": {
+      "image-generation": "圖片生成",
+      "image-edit": "圖片編輯",
+      "video": "影片生成"
+    },
+    "errors": {
+      "load": "裝置資訊更新失敗，請重試後再開始安裝。",
+      "action": "無法開啟模型任務，請重試。",
+      "directory": "無法開啟目錄選擇器，請重試。"
+    },
+    "reasons": {
+      "verified-workflow": "現有工作流程已通過生成驗證，可直接創作。",
+      "component-metadata-missing": "元件大小尚未確認，Agent 會進一步評估安裝方案。",
+      "workflow-missing": "仍需準備適用的工作流程。",
+      "hardware-unknown": "暫未測得顯示卡容量，Agent 會進一步檢查裝置。",
+      "platform-unknown": "仍需評估此平台的相容性。",
+      "gpu-architecture-insufficient": "此版本需要不同的顯示卡架構。",
+      "native-kernel-unverified": "仍需在目前裝置上驗證原生運算子。",
+      "runtime-unverified": "仍需驗證 Python 與 ComfyUI 執行環境。",
+      "memory-insufficient": "可用記憶體低於此版本的預估需求。",
+      "disk-insufficient": "所選磁碟的可用空間不足。",
+      "disk-unknown": "暫未測得所選目錄的可用空間。",
+      "temporary-memory-pressure": "其他應用程式正在佔用記憶體，執行前可先釋放部分容量。",
+      "offload-required": "此設定預計需要將部分運算卸載到系統記憶體。",
+      "capacity-compatible": "目前裝置符合已知的容量需求。"
+    },
+    "installContext": "新檔案必須安裝到 {{directory}}。重用現有的相容環境與檔案，不要移動它們。硬體偵測時間：{{checkedAt}}。建議方案：{{candidate}}（僅供參考，請檢查目前硬體並決定實際安裝方案）。",
+    "automaticCandidate": "自動選擇",
+    "newInstallLocation": "新安裝位置",
+    "newFilesOnly": "僅用於新檔案，現有檔案維持原位。",
+    "journey": {
+      "label": "本機創作流程",
+      "device": "檢測硬體",
+      "choose": "挑選模型",
+      "create": "開始創作",
+      "deviceHint": "了解這台電腦的可用資源",
+      "chooseHint": "找到適合你的圖片與影片模型",
+      "createHint": "由 Agent 完成安裝與驗證"
+    },
+    "recommendedHeading": "為這台電腦推薦",
+    "resourceHint": "顯示記憶體用於模型運算，記憶體用於元件載入。推薦會結合兩者與磁碟空間評估。",
+    "descriptions": {
+      "h3": "將文字或參考畫面變成影片，適合風景鏡頭、產品展示與故事分鏡。",
+      "fasth3-omni": "結合圖片、影片或音訊參考創作影片，適合角色短片、鏡頭延展與多素材創作。",
+      "qwen-edit": "用自然語言修改現有圖片，適合人物換裝、場景替換與產品素材調整。",
+      "z-image": "從文字創作圖片，適合人物寫真、產品概念圖與日常靈感草稿。",
+      "flux-3-image-klein": "輕量圖片生成模型，適合視覺構思、商品場景與創意草圖。",
+      "moss-image-base": "著重中文字與畫面布局，適合中文海報、資訊配圖與版式探索。",
+      "moss-image-sft": "經過微調的 MOSS 圖片模型，適合中文海報、人物創作與場景設計。",
+      "krea2": "側重風格化圖片創作，適合視覺概念、設計靈感與風格探索。",
+      "image": "根據文字描述創作圖片，可用於插畫、產品構思與場景設計。",
+      "editing": "支援圖片創作與編輯，可用於參考圖改編、場景調整與視覺設計。",
+      "video": "創作本機影片，可用於故事分鏡、產品短片與場景鏡頭。"
+    },
+    "agentHandlesSetup": "直接描述你想創作的內容，Agent 會檢查環境、選擇工作流，並在需要時處理修復。",
+    "technicalDetails": "技術詳情",
+    "precisionGuide": {
+      "full": "16 位精度，權重占用較大；適合資源充足、希望減少量化影響的創作。",
+      "int8": "整數 8 位量化，比 16 位減少權重占用；適合日常創作與節省資源。",
+      "fp8": "浮點 8 位方案，減少權重占用；適合支援相應運算的顯示卡。",
+      "w4a8": "主模型 INT8，文字編碼器進一步壓縮為 4 位權重；適合比一般 INT8 更省資源的設定。",
+      "nvfp4": "4 位浮點量化，進一步縮小權重；適合支援 NVFP4 的顯示卡，安裝時由 Agent 檢查。",
+      "mixed": "不同元件分別量化，兼顧權重占用與元件需求；需顯示卡支援對應執行方式。",
+      "hint": "同一模型的這些版本主要差別在資源占用與量化方式，創作用途相同。速度與畫質也取決於顯示卡、工作流和輸入；不確定時可先選「為你推薦」。"
+    }
+  },
+  "refreshPrompts": "換一組"
 }

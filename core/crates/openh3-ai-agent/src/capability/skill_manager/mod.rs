@@ -246,7 +246,7 @@ impl AcpSkillManager {
         &self,
         user_id: &str,
     ) -> Result<Vec<openh3_extension::SkillListItem>, openh3_extension::ExtensionError> {
-        if let Some(repo) = &self.skill_repo {
+        let items = if let Some(repo) = &self.skill_repo {
             openh3_extension::list_available_skills_with_repo_for_user(&self.paths, repo.as_ref(), user_id).await
         } else {
             // No skill repo → fall back to unscoped on-disk discovery. This
@@ -258,7 +258,21 @@ impl AcpSkillManager {
                 "skill_repo not configured; using unscoped on-disk skill discovery fallback (must not happen in production)"
             );
             openh3_extension::list_available_skills(&self.paths).await
+        }?;
+        // The settings catalog may retain moved/deleted user skills; the Agent index must match loadable files.
+        let mut available = Vec::new();
+        for item in items {
+            let location = std::path::Path::new(&item.location);
+            let manifest = if location.is_dir() {
+                location.join("SKILL.md")
+            } else {
+                location.to_path_buf()
+            };
+            if tokio::fs::try_exists(manifest).await.unwrap_or(false) {
+                available.push(item);
+            }
         }
+        Ok(available)
     }
 
     /// Resolve `names` to their REAL on-disk skill directories.
@@ -434,6 +448,35 @@ fn extract_body(content: &str) -> String {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn missing_registered_skill_is_not_advertised_to_agent() {
+        use openh3_db::{SqliteSkillRepository, UpsertSkillParams};
+        let tmp = TempDir::new().unwrap();
+        let paths = Arc::new(openh3_extension::resolve_skill_paths(tmp.path(), tmp.path()));
+        let db = openh3_db::init_database_memory().await.unwrap();
+        let repo = Arc::new(SqliteSkillRepository::new(db.pool().clone()));
+        let skill_dir = tmp.path().join("removed-skill");
+        repo.upsert_for_user(
+            "system_default_user",
+            UpsertSkillParams {
+                name: "removed-skill",
+                description: Some("Old batch video skill"),
+                path: skill_dir.to_str().unwrap(),
+                source: "user",
+                enabled: true,
+            },
+        )
+        .await
+        .unwrap();
+        let mgr = AcpSkillManager::new_with_repo(paths, repo);
+        let names = vec!["removed-skill".to_owned()];
+        assert!(mgr.discover_by_names(&names).await.is_empty());
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        assert!(mgr.discover_by_names(&names).await.is_empty());
+        std::fs::write(skill_dir.join("SKILL.md"), "---\nname: removed-skill\n---\nRestored").unwrap();
+        assert_eq!(mgr.discover_by_names(&names).await.len(), 1);
+    }
 
     #[tokio::test]
     async fn new_accepts_skill_paths() {

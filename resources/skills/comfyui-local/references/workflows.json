@@ -755,7 +755,37 @@
         "No kernels, loader behavior, model precision metadata, GPU memory budget or media output have been validated on this computer",
         "Select only after actual hardware/runtime evidence fits the atomic pinned component set; live object_info and representative smoke validation remain mandatory",
         "Dynamic model/image choices in the planning schema describe proposed filenames, not assets found on this computer"
-      ]
+      ],
+      "workflowMetadata": {
+        "id": "z-image-turbo-bf16-api-discovery",
+        "revision": "805ecff78dbb5693fe104b532316d8926563d394c41b42499cbdc3897244dce9",
+        "tasks": ["text-to-image"],
+        "inputs": [],
+        "adapter": "native",
+        "preparation": "pending",
+        "source": {
+          "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/020a271ba4cf341096f70dfb6f4fe85bd5df2f5e/templates/image_z_image_turbo.json",
+          "sha256": "baaf937ff071970cc6b1e2fa0093a4dd664a4cc734d38adc4c7810e535c1f1d3"
+        },
+        "evidence": [
+          {
+            "kind": "recipe",
+            "workflowHash": "805ecff78dbb5693fe104b532316d8926563d394c41b42499cbdc3897244dce9",
+            "checkedAt": "2026-11-10T00:00:00.000Z",
+            "inputRoles": []
+          }
+        ]
+      },
+      "preparation": {
+        "policy": "with-base",
+        "sharedComponentHashes": [
+          "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+          "6c671498573ac2f7a5501502ccce8d2b08ea6ca2f661c458e708f36b36edfc5a",
+          "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"
+        ],
+        "additionalComponents": [],
+        "additionalBytes": 0
+      }
     },
     {
       "id": "qwen-edit-2511-fp8mixed-lightning-single-image-api-discovery",
@@ -1924,7 +1954,47 @@
         "No kernels, loader behavior, model precision metadata, GPU memory budget or media output have been validated on this computer",
         "Select only after actual hardware/runtime evidence fits the atomic pinned component set; live object_info and representative smoke validation remain mandatory",
         "Dynamic model/image choices in the planning schema describe proposed filenames, not assets found on this computer"
-      ]
+      ],
+      "workflowMetadata": {
+        "id": "qwen-edit-2511-fp8mixed-lightning-single-image-api-discovery",
+        "revision": "b8d4a601cefe11c9509a09eedc18ff5aed549400187cfb7043c012787356d533",
+        "tasks": ["image-edit"],
+        "inputs": [
+          {
+            "role": "edit-source",
+            "type": "image",
+            "minCount": 1,
+            "maxCount": 1,
+            "binding": "image",
+            "bindingIndex": 0
+          }
+        ],
+        "adapter": "native",
+        "preparation": "pending",
+        "source": {
+          "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/020a271ba4cf341096f70dfb6f4fe85bd5df2f5e/templates/image_qwen_image_edit_2511.json",
+          "sha256": "b23103935f437e1fe3184247fa5bafb891a28113d0c63de7449b7cdfb0419111"
+        },
+        "evidence": [
+          {
+            "kind": "recipe",
+            "workflowHash": "b8d4a601cefe11c9509a09eedc18ff5aed549400187cfb7043c012787356d533",
+            "checkedAt": "2026-11-10T00:00:00.000Z",
+            "inputRoles": ["edit-source"]
+          }
+        ]
+      },
+      "preparation": {
+        "policy": "with-base",
+        "sharedComponentHashes": [
+          "cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4",
+          "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f",
+          "c9fdc158e46d3b61ef75f21ae866ca2fe808bf4a53643120d1c1e87c19280a4e",
+          "22226e8d05d354bb356627d428809f5afd7819399b077238a2b70a82883a904f"
+        ],
+        "additionalComponents": [],
+        "additionalBytes": 0
+      }
     }
   ],
   "omni": {
@@ -2552,7 +2622,57 @@
           "VAEDecode",
           "VAEDecodeAudio",
           "VAELoader"
-        ]
+        ],
+        "workflowMetadata": {
+          "id": "fasth3-omni-bf16-r2v-api-discovery",
+          "revision": "9ee4c08ce5159ee0c82f8f89b81f9c28540fd182222389daf6742565876d0bab",
+          "tasks": ["reference-to-video"],
+          "inputs": [
+            {
+              "role": "reference",
+              "type": "image",
+              "minCount": 0,
+              "maxCount": 9
+            },
+            {
+              "role": "reference",
+              "type": "video",
+              "minCount": 0,
+              "maxCount": 3
+            },
+            {
+              "role": "reference",
+              "type": "audio",
+              "minCount": 0,
+              "maxCount": 3
+            }
+          ],
+          "adapter": "fasth3-omni",
+          "preparation": "pending",
+          "source": {
+            "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/020a271ba4cf341096f70dfb6f4fe85bd5df2f5e/templates/video_minimax_h3_r2v.json",
+            "sha256": "afeea99e9fd5a1456df348e0573e289c1243f2f28546fc95c1c963f808d61ddb"
+          },
+          "evidence": [
+            {
+              "kind": "recipe",
+              "workflowHash": "9ee4c08ce5159ee0c82f8f89b81f9c28540fd182222389daf6742565876d0bab",
+              "checkedAt": "2026-11-10T00:00:00.000Z",
+              "inputRoles": ["reference", "reference", "reference"]
+            }
+          ]
+        },
+        "preparation": {
+          "policy": "with-base",
+          "sharedComponentHashes": [
+            "c0fac98c0317eb85215bd186b250be9b113675baab1323add40f26262f552ed9",
+            "600d567f6a9629c8574e8e7041b199bdd9c59a986afa7906910a81919610607d",
+            "7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522",
+            "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48"
+          ],
+          "additionalComponents": [],
+          "additionalBytes": 0
+        }
       },
       {
         "id": "fasth3-omni-int8-r2v-api-discovery",
@@ -2818,7 +2938,57 @@
           "VAEDecode",
           "VAEDecodeAudio",
           "VAELoader"
-        ]
+        ],
+        "workflowMetadata": {
+          "id": "fasth3-omni-int8-r2v-api-discovery",
+          "revision": "2b854b573f4cb66005859ebb41e52a4d4bb97ae39db82e755d4d5a65791d70fe",
+          "tasks": ["reference-to-video"],
+          "inputs": [
+            {
+              "role": "reference",
+              "type": "image",
+              "minCount": 0,
+              "maxCount": 9
+            },
+            {
+              "role": "reference",
+              "type": "video",
+              "minCount": 0,
+              "maxCount": 3
+            },
+            {
+              "role": "reference",
+              "type": "audio",
+              "minCount": 0,
+              "maxCount": 3
+            }
+          ],
+          "adapter": "fasth3-omni",
+          "preparation": "pending",
+          "source": {
+            "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/020a271ba4cf341096f70dfb6f4fe85bd5df2f5e/templates/video_minimax_h3_r2v.json",
+            "sha256": "afeea99e9fd5a1456df348e0573e289c1243f2f28546fc95c1c963f808d61ddb"
+          },
+          "evidence": [
+            {
+              "kind": "recipe",
+              "workflowHash": "2b854b573f4cb66005859ebb41e52a4d4bb97ae39db82e755d4d5a65791d70fe",
+              "checkedAt": "2026-11-10T00:00:00.000Z",
+              "inputRoles": ["reference", "reference", "reference"]
+            }
+          ]
+        },
+        "preparation": {
+          "policy": "with-base",
+          "sharedComponentHashes": [
+            "851b2dc9670ed864b7f1e951ac9da047d83b1c04ded9bfcc1a9e5bba0ee33f80",
+            "bc2ced0fbea64757fa9acddccfc0b3f4819d1dcf1da6c124d690d368be283923",
+            "52a2c8c73583c86e4f41cdcce3a6ad0ea562987bc0bf3d60a0cef5f5c8e60c0e",
+            "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48"
+          ],
+          "additionalComponents": [],
+          "additionalBytes": 0
+        }
       },
       {
         "id": "fasth3-omni-fp8-r2v-api-discovery",
@@ -3084,7 +3254,57 @@
           "VAEDecode",
           "VAEDecodeAudio",
           "VAELoader"
-        ]
+        ],
+        "workflowMetadata": {
+          "id": "fasth3-omni-fp8-r2v-api-discovery",
+          "revision": "07e0ab89caf3046490de7c562a7e13fb684c40cbe4ca3e6edb305492824ec798",
+          "tasks": ["reference-to-video"],
+          "inputs": [
+            {
+              "role": "reference",
+              "type": "image",
+              "minCount": 0,
+              "maxCount": 9
+            },
+            {
+              "role": "reference",
+              "type": "video",
+              "minCount": 0,
+              "maxCount": 3
+            },
+            {
+              "role": "reference",
+              "type": "audio",
+              "minCount": 0,
+              "maxCount": 3
+            }
+          ],
+          "adapter": "fasth3-omni",
+          "preparation": "pending",
+          "source": {
+            "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/020a271ba4cf341096f70dfb6f4fe85bd5df2f5e/templates/video_minimax_h3_r2v.json",
+            "sha256": "afeea99e9fd5a1456df348e0573e289c1243f2f28546fc95c1c963f808d61ddb"
+          },
+          "evidence": [
+            {
+              "kind": "recipe",
+              "workflowHash": "07e0ab89caf3046490de7c562a7e13fb684c40cbe4ca3e6edb305492824ec798",
+              "checkedAt": "2026-11-10T00:00:00.000Z",
+              "inputRoles": ["reference", "reference", "reference"]
+            }
+          ]
+        },
+        "preparation": {
+          "policy": "with-base",
+          "sharedComponentHashes": [
+            "d3aa751e151df957b6248db7dbe4a159549dfefe78ba884056b12b0425b019f3",
+            "600d567f6a9629c8574e8e7041b199bdd9c59a986afa7906910a81919610607d",
+            "7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522",
+            "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48"
+          ],
+          "additionalComponents": [],
+          "additionalBytes": 0
+        }
       },
       {
         "id": "fasth3-omni-nvfp4-r2v-api-discovery",
@@ -3350,7 +3570,57 @@
           "VAEDecode",
           "VAEDecodeAudio",
           "VAELoader"
-        ]
+        ],
+        "workflowMetadata": {
+          "id": "fasth3-omni-nvfp4-r2v-api-discovery",
+          "revision": "ec6cd84d0d5948ab163828a957b105c92dbde594c9c445579603e0b1a9591fed",
+          "tasks": ["reference-to-video"],
+          "inputs": [
+            {
+              "role": "reference",
+              "type": "image",
+              "minCount": 0,
+              "maxCount": 9
+            },
+            {
+              "role": "reference",
+              "type": "video",
+              "minCount": 0,
+              "maxCount": 3
+            },
+            {
+              "role": "reference",
+              "type": "audio",
+              "minCount": 0,
+              "maxCount": 3
+            }
+          ],
+          "adapter": "fasth3-omni",
+          "preparation": "pending",
+          "source": {
+            "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/020a271ba4cf341096f70dfb6f4fe85bd5df2f5e/templates/video_minimax_h3_r2v.json",
+            "sha256": "afeea99e9fd5a1456df348e0573e289c1243f2f28546fc95c1c963f808d61ddb"
+          },
+          "evidence": [
+            {
+              "kind": "recipe",
+              "workflowHash": "ec6cd84d0d5948ab163828a957b105c92dbde594c9c445579603e0b1a9591fed",
+              "checkedAt": "2026-11-10T00:00:00.000Z",
+              "inputRoles": ["reference", "reference", "reference"]
+            }
+          ]
+        },
+        "preparation": {
+          "policy": "with-base",
+          "sharedComponentHashes": [
+            "bf25ee58df65b4dfee349d612f7ac62a2fea0dddd1e68eb37e75c8ce8b166f5a",
+            "35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6",
+            "52a2c8c73583c86e4f41cdcce3a6ad0ea562987bc0bf3d60a0cef5f5c8e60c0e",
+            "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48"
+          ],
+          "additionalComponents": [],
+          "additionalBytes": 0
+        }
       }
     ],
     "source": "https://huggingface.co/FastVideo/FastH3-Omni-Comfy",
@@ -4176,6 +4446,36 @@
             "Official ModelScope repository is gated; anonymous repo/files returned 404 on 2026-10-22. Do not invent a revision or infer equivalence from underscore versus hyphen filenames. Re-check authorized metadata before adding it as a transport.",
             "Hugging Face/hf-mirror gated access still needs legitimate repository access. Authentication failure is not a hardware failure."
           ]
+        },
+        "workflowMetadata": {
+          "id": "flux-3-image-klein-bf16-t2i-api-discovery",
+          "revision": "a0e9218bea2aa6d276aa441c1deba62543025ab7bf5d78bec877542fc18d4562",
+          "tasks": ["text-to-image"],
+          "inputs": [],
+          "adapter": "native",
+          "preparation": "pending",
+          "source": {
+            "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/447747bf37b7e2f6d5fab3f15288e03bf889b82f/templates/image_flux3_klein_distilled_t2i.json",
+            "sha256": "253fa4e783da734acd03b804a8731d0a7a8c564b73961837762800eb5cf85388"
+          },
+          "evidence": [
+            {
+              "kind": "recipe",
+              "workflowHash": "a0e9218bea2aa6d276aa441c1deba62543025ab7bf5d78bec877542fc18d4562",
+              "checkedAt": "2026-11-10T00:00:00.000Z",
+              "inputRoles": []
+            }
+          ]
+        },
+        "preparation": {
+          "policy": "with-base",
+          "sharedComponentHashes": [
+            "c3e9813cdd049c831c836b2e9db61150e49a93fc1a4c63b256494642fee0bd7c",
+            "f0b24fc5c8d7c0ea6ca909da14c20af5cac53f22506be942c6c956f838b9630f",
+            "868fe7b343cc8f3a19dbcfcafbc3d5f888802be3f89bd81b65b3621a066ce8f3"
+          ],
+          "additionalComponents": [],
+          "additionalBytes": 0
         }
       },
       {
@@ -4344,6 +4644,36 @@
             "Official ModelScope repository is gated; anonymous repo/files returned 404 on 2026-10-22. Do not invent a revision or infer equivalence from underscore versus hyphen filenames. Re-check authorized metadata before adding it as a transport.",
             "Hugging Face/hf-mirror gated access still needs legitimate repository access. Authentication failure is not a hardware failure."
           ]
+        },
+        "workflowMetadata": {
+          "id": "flux-3-image-klein-int8-t2i-api-discovery",
+          "revision": "470250ba87f128c643ed6d03ecc7e191adafe9c79a8cbf54ae2a5dd66f13b10c",
+          "tasks": ["text-to-image"],
+          "inputs": [],
+          "adapter": "native",
+          "preparation": "pending",
+          "source": {
+            "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/447747bf37b7e2f6d5fab3f15288e03bf889b82f/templates/image_flux3_klein_distilled_t2i.json",
+            "sha256": "253fa4e783da734acd03b804a8731d0a7a8c564b73961837762800eb5cf85388"
+          },
+          "evidence": [
+            {
+              "kind": "recipe",
+              "workflowHash": "470250ba87f128c643ed6d03ecc7e191adafe9c79a8cbf54ae2a5dd66f13b10c",
+              "checkedAt": "2026-11-10T00:00:00.000Z",
+              "inputRoles": []
+            }
+          ]
+        },
+        "preparation": {
+          "policy": "with-base",
+          "sharedComponentHashes": [
+            "847d8933548afd93df4af2cac2498e70891bf28d9dae06d695f536992e168fe2",
+            "32de113cbf8282b02cbff0794b637b9d6676da09314a1db5a30bcea9bf4ee01c",
+            "868fe7b343cc8f3a19dbcfcafbc3d5f888802be3f89bd81b65b3621a066ce8f3"
+          ],
+          "additionalComponents": [],
+          "additionalBytes": 0
         }
       },
       {
@@ -4512,6 +4842,36 @@
             "Official ModelScope repository is gated; anonymous repo/files returned 404 on 2026-10-22. Do not invent a revision or infer equivalence from underscore versus hyphen filenames. Re-check authorized metadata before adding it as a transport.",
             "Hugging Face/hf-mirror gated access still needs legitimate repository access. Authentication failure is not a hardware failure."
           ]
+        },
+        "workflowMetadata": {
+          "id": "flux-3-image-klein-nvfp4-t2i-api-discovery",
+          "revision": "0311f86a9c389f380101fded4234aee2cccb10c43f84c246708c8160f312f3f3",
+          "tasks": ["text-to-image"],
+          "inputs": [],
+          "adapter": "native",
+          "preparation": "pending",
+          "source": {
+            "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/447747bf37b7e2f6d5fab3f15288e03bf889b82f/templates/image_flux3_klein_distilled_t2i.json",
+            "sha256": "253fa4e783da734acd03b804a8731d0a7a8c564b73961837762800eb5cf85388"
+          },
+          "evidence": [
+            {
+              "kind": "recipe",
+              "workflowHash": "0311f86a9c389f380101fded4234aee2cccb10c43f84c246708c8160f312f3f3",
+              "checkedAt": "2026-11-10T00:00:00.000Z",
+              "inputRoles": []
+            }
+          ]
+        },
+        "preparation": {
+          "policy": "with-base",
+          "sharedComponentHashes": [
+            "15d421e2558443fcf83ba46f3cd884d9d181c2c7a0a7bdcd2974af234a2d4f5c",
+            "32de113cbf8282b02cbff0794b637b9d6676da09314a1db5a30bcea9bf4ee01c",
+            "868fe7b343cc8f3a19dbcfcafbc3d5f888802be3f89bd81b65b3621a066ce8f3"
+          ],
+          "additionalComponents": [],
+          "additionalBytes": 0
         }
       },
       {
@@ -4696,6 +5056,36 @@
             "Preserves MOSS-Image-Base, never substitutes SFT. Uses source-model reference settings: Euler, 50 steps, CFG 3, native shift 5 and negative-branch layer 22 skipping for the full trajectory. The inspected UI default instead disables SLG and uses 25 steps/CFG 2.5.",
             "The pinned core includes native moss_image support; v0.41.3 does not. Never carry ModelSamplingSD3 from the old plugin into the native graph."
           ]
+        },
+        "workflowMetadata": {
+          "id": "moss-image-base-bf16-t2i-api-discovery",
+          "revision": "5a0bbec16ff26fc568698479415e7157825571ca4fda1250ac7e645c3180cc58",
+          "tasks": ["text-to-image"],
+          "inputs": [],
+          "adapter": "native",
+          "preparation": "pending",
+          "source": {
+            "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/447747bf37b7e2f6d5fab3f15288e03bf889b82f/templates/image_moss_image_base_t2i.json",
+            "sha256": "79f897bcc9d8ae049f731f633110b6b919042198575cf7794ed9e023055c540a"
+          },
+          "evidence": [
+            {
+              "kind": "recipe",
+              "workflowHash": "5a0bbec16ff26fc568698479415e7157825571ca4fda1250ac7e645c3180cc58",
+              "checkedAt": "2026-11-10T00:00:00.000Z",
+              "inputRoles": []
+            }
+          ]
+        },
+        "preparation": {
+          "policy": "with-base",
+          "sharedComponentHashes": [
+            "cacd158728a1fb9e57c408a922b54752ec71fceb566b3821269927964e62b41f",
+            "7e6e9f08d598f829cb940e60ac0c698e1f1c27a47daffd7e598cd78c78b4cc53",
+            "d8d52ba036475f5fb07c8b435e176d3d97ebfa82f0d1a1c317f9cc1e25bd013b"
+          ],
+          "additionalComponents": [],
+          "additionalBytes": 0
         }
       },
       {
@@ -4880,6 +5270,36 @@
             "Preserves MOSS-Image-Base, never substitutes SFT. Uses source-model reference settings: Euler, 50 steps, CFG 3, native shift 5 and negative-branch layer 22 skipping for the full trajectory. The inspected UI default instead disables SLG and uses 25 steps/CFG 2.5.",
             "The pinned core includes native moss_image support; v0.41.3 does not. Never carry ModelSamplingSD3 from the old plugin into the native graph."
           ]
+        },
+        "workflowMetadata": {
+          "id": "moss-image-base-int8-t2i-api-discovery",
+          "revision": "5534de03c0e1c70927515f1554986fb3f3b4b9406b82732daf6725b1a787fd6a",
+          "tasks": ["text-to-image"],
+          "inputs": [],
+          "adapter": "native",
+          "preparation": "pending",
+          "source": {
+            "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/447747bf37b7e2f6d5fab3f15288e03bf889b82f/templates/image_moss_image_base_t2i.json",
+            "sha256": "79f897bcc9d8ae049f731f633110b6b919042198575cf7794ed9e023055c540a"
+          },
+          "evidence": [
+            {
+              "kind": "recipe",
+              "workflowHash": "5534de03c0e1c70927515f1554986fb3f3b4b9406b82732daf6725b1a787fd6a",
+              "checkedAt": "2026-11-10T00:00:00.000Z",
+              "inputRoles": []
+            }
+          ]
+        },
+        "preparation": {
+          "policy": "with-base",
+          "sharedComponentHashes": [
+            "f601c1e1161915fb3fea003da0c1782e374dd960fbb3978bc0e4e3fa1f2d8e6f",
+            "32e3787472f708fa5f83624acbf5ef23f7fc89c439e05065ea57cfe5a97f025a",
+            "d8d52ba036475f5fb07c8b435e176d3d97ebfa82f0d1a1c317f9cc1e25bd013b"
+          ],
+          "additionalComponents": [],
+          "additionalBytes": 0
         }
       },
       {
@@ -5064,6 +5484,36 @@
             "Preserves MOSS-Image-Base, never substitutes SFT. Uses source-model reference settings: Euler, 50 steps, CFG 3, native shift 5 and negative-branch layer 22 skipping for the full trajectory. The inspected UI default instead disables SLG and uses 25 steps/CFG 2.5.",
             "The pinned core includes native moss_image support; v0.41.3 does not. Never carry ModelSamplingSD3 from the old plugin into the native graph."
           ]
+        },
+        "workflowMetadata": {
+          "id": "moss-image-base-int8-w4a8-t2i-api-discovery",
+          "revision": "bad003983b29c72c07bf996b3b234602df31bdc2ba4c637fff9b9fb1ac1821dd",
+          "tasks": ["text-to-image"],
+          "inputs": [],
+          "adapter": "native",
+          "preparation": "pending",
+          "source": {
+            "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/447747bf37b7e2f6d5fab3f15288e03bf889b82f/templates/image_moss_image_base_t2i.json",
+            "sha256": "79f897bcc9d8ae049f731f633110b6b919042198575cf7794ed9e023055c540a"
+          },
+          "evidence": [
+            {
+              "kind": "recipe",
+              "workflowHash": "bad003983b29c72c07bf996b3b234602df31bdc2ba4c637fff9b9fb1ac1821dd",
+              "checkedAt": "2026-11-10T00:00:00.000Z",
+              "inputRoles": []
+            }
+          ]
+        },
+        "preparation": {
+          "policy": "with-base",
+          "sharedComponentHashes": [
+            "f601c1e1161915fb3fea003da0c1782e374dd960fbb3978bc0e4e3fa1f2d8e6f",
+            "4cc6a1543ad2061806da46f35f90cadb4801dcba246c44782cf42ec0feb6407c",
+            "d8d52ba036475f5fb07c8b435e176d3d97ebfa82f0d1a1c317f9cc1e25bd013b"
+          ],
+          "additionalComponents": [],
+          "additionalBytes": 0
         }
       },
       {
@@ -5230,6 +5680,36 @@
             "Do not select a smaller recipe because probes are incomplete, or change the original generation parameters automatically after OOM.",
             "Uses Turbo, not Raw, at 8 steps/CFG 1; optional prompt-enhancement, style LoRA and their UI switches are removed. No implicit image-edit or style-reference capability."
           ]
+        },
+        "workflowMetadata": {
+          "id": "krea2-bf16-t2i-api-discovery",
+          "revision": "2d0de35abb6386a7372458b7299424f0f23e843d8eeca0532ac71ae60582e80d",
+          "tasks": ["text-to-image"],
+          "inputs": [],
+          "adapter": "native",
+          "preparation": "pending",
+          "source": {
+            "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/447747bf37b7e2f6d5fab3f15288e03bf889b82f/templates/image_krea2_turbo_t2i.json",
+            "sha256": "c765bbcddb961b24ab0337b0e89ad6f736b96d06c8d0ae5cff8c769e030a35b7"
+          },
+          "evidence": [
+            {
+              "kind": "recipe",
+              "workflowHash": "2d0de35abb6386a7372458b7299424f0f23e843d8eeca0532ac71ae60582e80d",
+              "checkedAt": "2026-11-10T00:00:00.000Z",
+              "inputRoles": []
+            }
+          ]
+        },
+        "preparation": {
+          "policy": "with-base",
+          "sharedComponentHashes": [
+            "78bbf8f4165eda19cea3cb06c78089221932a39e2eed8af9da741f942c47ffb3",
+            "36f3ff447ef59201722e8f9ce6020c9819fdcfba6aa2608c4e09b1c0ce114e34",
+            "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"
+          ],
+          "additionalComponents": [],
+          "additionalBytes": 0
         }
       },
       {
@@ -5396,6 +5876,36 @@
             "Do not select a smaller recipe because probes are incomplete, or change the original generation parameters automatically after OOM.",
             "Uses Turbo, not Raw, at 8 steps/CFG 1; optional prompt-enhancement, style LoRA and their UI switches are removed. No implicit image-edit or style-reference capability."
           ]
+        },
+        "workflowMetadata": {
+          "id": "krea2-fp8-t2i-api-discovery",
+          "revision": "3d5cee5b56a4d29469f0c92e3fea2433e10520bcafa66c810a38eb6a1fc44551",
+          "tasks": ["text-to-image"],
+          "inputs": [],
+          "adapter": "native",
+          "preparation": "pending",
+          "source": {
+            "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/447747bf37b7e2f6d5fab3f15288e03bf889b82f/templates/image_krea2_turbo_t2i.json",
+            "sha256": "c765bbcddb961b24ab0337b0e89ad6f736b96d06c8d0ae5cff8c769e030a35b7"
+          },
+          "evidence": [
+            {
+              "kind": "recipe",
+              "workflowHash": "3d5cee5b56a4d29469f0c92e3fea2433e10520bcafa66c810a38eb6a1fc44551",
+              "checkedAt": "2026-11-10T00:00:00.000Z",
+              "inputRoles": []
+            }
+          ]
+        },
+        "preparation": {
+          "policy": "with-base",
+          "sharedComponentHashes": [
+            "eb4dd8c612cfd10f64f25b057e6e6bbcb5737c94a7372177e456dbf7579502f1",
+            "54bd5144df0bbc25dd6ccadfcb826b521445a1b06ae5a42570bdd2974ca87094",
+            "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"
+          ],
+          "additionalComponents": [],
+          "additionalBytes": 0
         }
       },
       {
@@ -5562,6 +6072,36 @@
             "Do not select a smaller recipe because probes are incomplete, or change the original generation parameters automatically after OOM.",
             "Uses Turbo, not Raw, at 8 steps/CFG 1; optional prompt-enhancement, style LoRA and their UI switches are removed. No implicit image-edit or style-reference capability."
           ]
+        },
+        "workflowMetadata": {
+          "id": "krea2-int8-t2i-api-discovery",
+          "revision": "6e6d38650241ddf9fe6c155aa98cefa64ad2ac8b1a2182e11c9830eafe83caf3",
+          "tasks": ["text-to-image"],
+          "inputs": [],
+          "adapter": "native",
+          "preparation": "pending",
+          "source": {
+            "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/447747bf37b7e2f6d5fab3f15288e03bf889b82f/templates/image_krea2_turbo_t2i_int8.json",
+            "sha256": "486dba5e7e971e8f5b03a8577c505c96d551d0cfcb79fbd2da56902042dec895"
+          },
+          "evidence": [
+            {
+              "kind": "recipe",
+              "workflowHash": "6e6d38650241ddf9fe6c155aa98cefa64ad2ac8b1a2182e11c9830eafe83caf3",
+              "checkedAt": "2026-11-10T00:00:00.000Z",
+              "inputRoles": []
+            }
+          ]
+        },
+        "preparation": {
+          "policy": "with-base",
+          "sharedComponentHashes": [
+            "8e4eeda70dd5037ab1ba2bef6b417f9f901e26093117cf397f741fc1fdaaf3f1",
+            "32de113cbf8282b02cbff0794b637b9d6676da09314a1db5a30bcea9bf4ee01c",
+            "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"
+          ],
+          "additionalComponents": [],
+          "additionalBytes": 0
         }
       },
       {
@@ -5728,6 +6268,36 @@
             "Do not select a smaller recipe because probes are incomplete, or change the original generation parameters automatically after OOM.",
             "Uses Turbo, not Raw, at 8 steps/CFG 1; optional prompt-enhancement, style LoRA and their UI switches are removed. No implicit image-edit or style-reference capability."
           ]
+        },
+        "workflowMetadata": {
+          "id": "krea2-nvfp4-t2i-api-discovery",
+          "revision": "a1d1baa430e45ef9d27c09bf80549cdfd696b91a05a3fc4ef5182e82bbc5c94f",
+          "tasks": ["text-to-image"],
+          "inputs": [],
+          "adapter": "native",
+          "preparation": "pending",
+          "source": {
+            "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/447747bf37b7e2f6d5fab3f15288e03bf889b82f/templates/image_krea2_turbo_t2i.json",
+            "sha256": "c765bbcddb961b24ab0337b0e89ad6f736b96d06c8d0ae5cff8c769e030a35b7"
+          },
+          "evidence": [
+            {
+              "kind": "recipe",
+              "workflowHash": "a1d1baa430e45ef9d27c09bf80549cdfd696b91a05a3fc4ef5182e82bbc5c94f",
+              "checkedAt": "2026-11-10T00:00:00.000Z",
+              "inputRoles": []
+            }
+          ]
+        },
+        "preparation": {
+          "policy": "with-base",
+          "sharedComponentHashes": [
+            "61527003b2d537055494d01bc8efe51d6e86e64192ba23e3721a5647231fe394",
+            "32de113cbf8282b02cbff0794b637b9d6676da09314a1db5a30bcea9bf4ee01c",
+            "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"
+          ],
+          "additionalComponents": [],
+          "additionalBytes": 0
         }
       },
       {
@@ -5922,6 +6492,36 @@
           "sha256": "91d76c158a1e427c09904c6222978065c1ed965c8b3f40ae323e649808af2198",
           "format": "ui",
           "apiConversionRequired": true
+        },
+        "workflowMetadata": {
+          "id": "moss-image-sft-bf16-t2i-api-discovery",
+          "revision": "88c2873029018173bddab2fcf1ab6ce455b37c3a2f82a9301f9da628f93708a8",
+          "tasks": ["text-to-image"],
+          "inputs": [],
+          "adapter": "native",
+          "preparation": "pending",
+          "source": {
+            "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/447747bf37b7e2f6d5fab3f15288e03bf889b82f/templates/image_moss_image_t2i.json",
+            "sha256": "91d76c158a1e427c09904c6222978065c1ed965c8b3f40ae323e649808af2198"
+          },
+          "evidence": [
+            {
+              "kind": "recipe",
+              "workflowHash": "88c2873029018173bddab2fcf1ab6ce455b37c3a2f82a9301f9da628f93708a8",
+              "checkedAt": "2026-11-10T00:00:00.000Z",
+              "inputRoles": []
+            }
+          ]
+        },
+        "preparation": {
+          "policy": "with-base",
+          "sharedComponentHashes": [
+            "f96738d8116d78b7316b57c663d8c98591ddafab7488f48e3099b7655e34ab6f",
+            "7e6e9f08d598f829cb940e60ac0c698e1f1c27a47daffd7e598cd78c78b4cc53",
+            "d8d52ba036475f5fb07c8b435e176d3d97ebfa82f0d1a1c317f9cc1e25bd013b"
+          ],
+          "additionalComponents": [],
+          "additionalBytes": 0
         }
       },
       {
@@ -6116,6 +6716,36 @@
           "sha256": "91d76c158a1e427c09904c6222978065c1ed965c8b3f40ae323e649808af2198",
           "format": "ui",
           "apiConversionRequired": true
+        },
+        "workflowMetadata": {
+          "id": "moss-image-sft-int8-t2i-api-discovery",
+          "revision": "1c3231bc7f2c703065926512f8ba9fd8234e7f6c46332daaae31da6f596fc36b",
+          "tasks": ["text-to-image"],
+          "inputs": [],
+          "adapter": "native",
+          "preparation": "pending",
+          "source": {
+            "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/447747bf37b7e2f6d5fab3f15288e03bf889b82f/templates/image_moss_image_t2i.json",
+            "sha256": "91d76c158a1e427c09904c6222978065c1ed965c8b3f40ae323e649808af2198"
+          },
+          "evidence": [
+            {
+              "kind": "recipe",
+              "workflowHash": "1c3231bc7f2c703065926512f8ba9fd8234e7f6c46332daaae31da6f596fc36b",
+              "checkedAt": "2026-11-10T00:00:00.000Z",
+              "inputRoles": []
+            }
+          ]
+        },
+        "preparation": {
+          "policy": "with-base",
+          "sharedComponentHashes": [
+            "b4d1475bc7eeffd7b809e82ea13a1fba1fb85c4e18365af3813722faa5c0fe4f",
+            "32e3787472f708fa5f83624acbf5ef23f7fc89c439e05065ea57cfe5a97f025a",
+            "d8d52ba036475f5fb07c8b435e176d3d97ebfa82f0d1a1c317f9cc1e25bd013b"
+          ],
+          "additionalComponents": [],
+          "additionalBytes": 0
         }
       },
       {
@@ -6310,8 +6940,1869 @@
           "sha256": "91d76c158a1e427c09904c6222978065c1ed965c8b3f40ae323e649808af2198",
           "format": "ui",
           "apiConversionRequired": true
+        },
+        "workflowMetadata": {
+          "id": "moss-image-sft-int8-w4a8-t2i-api-discovery",
+          "revision": "71caa6ff354043aa4551e4b6b077125e200630b6b6b702b27e217ff17ff5e5cc",
+          "tasks": ["text-to-image"],
+          "inputs": [],
+          "adapter": "native",
+          "preparation": "pending",
+          "source": {
+            "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/447747bf37b7e2f6d5fab3f15288e03bf889b82f/templates/image_moss_image_t2i.json",
+            "sha256": "91d76c158a1e427c09904c6222978065c1ed965c8b3f40ae323e649808af2198"
+          },
+          "evidence": [
+            {
+              "kind": "recipe",
+              "workflowHash": "71caa6ff354043aa4551e4b6b077125e200630b6b6b702b27e217ff17ff5e5cc",
+              "checkedAt": "2026-11-10T00:00:00.000Z",
+              "inputRoles": []
+            }
+          ]
+        },
+        "preparation": {
+          "policy": "with-base",
+          "sharedComponentHashes": [
+            "b4d1475bc7eeffd7b809e82ea13a1fba1fb85c4e18365af3813722faa5c0fe4f",
+            "4cc6a1543ad2061806da46f35f90cadb4801dcba246c44782cf42ec0feb6407c",
+            "d8d52ba036475f5fb07c8b435e176d3d97ebfa82f0d1a1c317f9cc1e25bd013b"
+          ],
+          "additionalComponents": [],
+          "additionalBytes": 0
         }
       }
     ]
+  },
+  "variants": [
+    {
+      "id": "z-image-turbo-bf16-img2img-api-v1",
+      "candidateId": "z-image-turbo-bf16-discovery",
+      "family": "z-image",
+      "status": "discovery-only",
+      "verifiedOnThisMachine": false,
+      "capabilities": ["image-to-image"],
+      "requiredNodes": [
+        {
+          "id": "comfyui-core",
+          "version": "40c4fcdf513a4523e39d54a9d391908af8df8171"
+        }
+      ],
+      "requiredClassTypes": [
+        "CLIPLoader",
+        "CLIPTextEncode",
+        "ConditioningZeroOut",
+        "ImageScale",
+        "KSampler",
+        "LoadImage",
+        "ModelSamplingAuraFlow",
+        "RepeatLatentBatch",
+        "SaveImage",
+        "UNETLoader",
+        "VAEDecode",
+        "VAEEncode",
+        "VAELoader"
+      ],
+      "components": [
+        {
+          "role": "diffusion",
+          "name": "z_image_turbo_bf16.safetensors",
+          "directory": "diffusion_models",
+          "revision": "6fc90a3b1b653e935a0d175e260736de25b84df5",
+          "sha256": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6"
+        },
+        {
+          "role": "text-encoder",
+          "name": "qwen_3_4b.safetensors",
+          "directory": "text_encoders",
+          "revision": "6fc90a3b1b653e935a0d175e260736de25b84df5",
+          "sha256": "6c671498573ac2f7a5501502ccce8d2b08ea6ca2f661c458e708f36b36edfc5a"
+        },
+        {
+          "role": "vae",
+          "name": "ae.safetensors",
+          "directory": "vae",
+          "revision": "6fc90a3b1b653e935a0d175e260736de25b84df5",
+          "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"
+        }
+      ],
+      "graph": {
+        "9": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "filename_prefix": "z-image-turbo-red-paper",
+            "images": ["57:8", 0]
+          }
+        },
+        "100": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "smoke-reference.png"
+          }
+        },
+        "101": {
+          "class_type": "ImageScale",
+          "inputs": {
+            "image": ["100", 0],
+            "upscale_method": "lanczos",
+            "width": 512,
+            "height": 512,
+            "crop": "disabled"
+          }
+        },
+        "102": {
+          "class_type": "VAEEncode",
+          "inputs": {
+            "pixels": ["101", 0],
+            "vae": ["57:29", 0]
+          }
+        },
+        "103": {
+          "class_type": "RepeatLatentBatch",
+          "inputs": {
+            "samples": ["102", 0],
+            "amount": 1
+          }
+        },
+        "57:30": {
+          "class_type": "CLIPLoader",
+          "inputs": {
+            "clip_name": "qwen_3_4b.safetensors",
+            "type": "lumina2",
+            "device": "default"
+          }
+        },
+        "57:29": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "ae.safetensors"
+          }
+        },
+        "57:33": {
+          "class_type": "ConditioningZeroOut",
+          "inputs": {
+            "conditioning": ["57:27", 0]
+          }
+        },
+        "57:8": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": ["57:3", 0],
+            "vae": ["57:29", 0]
+          }
+        },
+        "57:28": {
+          "class_type": "UNETLoader",
+          "inputs": {
+            "unet_name": "z_image_turbo_bf16.safetensors",
+            "weight_dtype": "default"
+          }
+        },
+        "57:27": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "Top-down studio photograph of a single plain red paper card lying flat in the exact center of a warm matte beige background. Preserve the reference composition: one upright vertical rectangle, straight edges parallel to the image edges, generous beige margins on every side. The red card is approximately 44 percent of the canvas width and 50 percent of its height. Real uncoated red cardstock with clearly visible fine paper fibers, delicate irregular grain and natural matte surface variation, a subtle thin paper edge and soft contact shadow. Restrained soft diffuse lighting, realistic tactile paper texture, minimal still life, no text, no print, no symbols, no additional objects.",
+            "clip": ["57:30", 0]
+          }
+        },
+        "57:11": {
+          "class_type": "ModelSamplingAuraFlow",
+          "inputs": {
+            "shift": 3,
+            "model": ["57:28", 0]
+          }
+        },
+        "57:3": {
+          "class_type": "KSampler",
+          "inputs": {
+            "seed": 42,
+            "steps": 8,
+            "cfg": 1,
+            "sampler_name": "res_multistep",
+            "scheduler": "simple",
+            "denoise": 0.55,
+            "model": ["57:11", 0],
+            "positive": ["57:27", 0],
+            "negative": ["57:33", 0],
+            "latent_image": ["103", 0]
+          }
+        }
+      },
+      "graphSha256": "629aa347ae2b7994f8fd578120f339691e89e99679dca9eeb9a519dd7d92a88a",
+      "graphSerialization": "UTF-8 JSON.stringify(graph, null, 2) + LF",
+      "bindings": {
+        "prompt": [
+          {
+            "nodeId": "57:27",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "nodeId": "100",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "nodeId": "57:3",
+            "input": "seed"
+          }
+        ],
+        "width": [
+          {
+            "nodeId": "101",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "nodeId": "101",
+            "input": "height"
+          }
+        ],
+        "batchSize": [
+          {
+            "nodeId": "103",
+            "input": "amount"
+          }
+        ],
+        "outputPrefix": [
+          {
+            "nodeId": "9",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "defaults": {
+        "width": 512,
+        "height": 512,
+        "batchSize": 1,
+        "seed": 42,
+        "outputPrefix": "z-image-turbo-img2img"
+      },
+      "smokeInput": {
+        "prompt": "Top-down studio photograph of a single plain red paper card lying flat in the exact center of a warm matte beige background. Preserve the reference composition: one upright vertical rectangle, straight edges parallel to the image edges, generous beige margins on every side. The red card is approximately 44 percent of the canvas width and 50 percent of its height. Real uncoated red cardstock with clearly visible fine paper fibers, delicate irregular grain and natural matte surface variation, a subtle thin paper edge and soft contact shadow. Restrained soft diffuse lighting, realistic tactile paper texture, minimal still life, no text, no print, no symbols, no additional objects.",
+        "width": 512,
+        "height": 512,
+        "batchSize": 1,
+        "seed": 42
+      },
+      "smokeRequirements": [
+        "Supply exactly one edit-source image; verify appearance and composition against the request. This ordinary latent img2img graph does not establish identity fidelity."
+      ],
+      "derivation": {
+        "method": "Exact API graph from beta.25 pc05 successful image-to-image run; no extra model weights.",
+        "originalTemplate": {
+          "repository": "Comfy-Org/workflow_templates",
+          "revision": "020a271ba4cf341096f70dfb6f4fe85bd5df2f5e",
+          "path": "templates/image_z_image_turbo.json",
+          "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/020a271ba4cf341096f70dfb6f4fe85bd5df2f5e/templates/image_z_image_turbo.json",
+          "sizeBytes": 27390,
+          "sha256": "baaf937ff071970cc6b1e2fa0093a4dd664a4cc734d38adc4c7810e535c1f1d3",
+          "format": "ui",
+          "apiConversionRequired": true
+        },
+        "provenance": "workflow-routing-evidence.json#z-image-img2img",
+        "referenceRun": {
+          "checkedAt": "2026-11-09T18:43:04.046Z",
+          "promptId": "c4aa6a9c-ebb1-4cc8-ada5-d213cffce6b6",
+          "workflowHash": "629aa347ae2b7994f8fd578120f339691e89e99679dca9eeb9a519dd7d92a88a",
+          "coreRevision": "40c4fcdf513a4523e39d54a9d391908af8df8171",
+          "gpu": "NVIDIA GeForce RTX 5080",
+          "width": 512,
+          "height": 512,
+          "referenceCount": 1,
+          "denoise": 0.55,
+          "localVerificationRequired": true
+        }
+      },
+      "workflowMetadata": {
+        "id": "z-image-turbo-bf16-img2img-api-v1",
+        "revision": "629aa347ae2b7994f8fd578120f339691e89e99679dca9eeb9a519dd7d92a88a",
+        "tasks": ["image-to-image"],
+        "inputs": [
+          {
+            "role": "edit-source",
+            "type": "image",
+            "minCount": 1,
+            "maxCount": 1,
+            "binding": "image",
+            "bindingIndex": 0
+          }
+        ],
+        "adapter": "native",
+        "preparation": "pending",
+        "source": {
+          "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/020a271ba4cf341096f70dfb6f4fe85bd5df2f5e/templates/image_z_image_turbo.json",
+          "sha256": "baaf937ff071970cc6b1e2fa0093a4dd664a4cc734d38adc4c7810e535c1f1d3"
+        },
+        "evidence": [
+          {
+            "kind": "recipe",
+            "workflowHash": "629aa347ae2b7994f8fd578120f339691e89e99679dca9eeb9a519dd7d92a88a",
+            "checkedAt": "2026-11-10T00:00:00.000Z",
+            "inputRoles": ["edit-source"]
+          }
+        ]
+      },
+      "preparation": {
+        "policy": "with-base",
+        "sharedComponentHashes": [
+          "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+          "6c671498573ac2f7a5501502ccce8d2b08ea6ca2f661c458e708f36b36edfc5a",
+          "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"
+        ],
+        "additionalComponents": [],
+        "additionalBytes": 0
+      }
+    },
+    {
+      "id": "qwen-edit-2511-fp8mixed-lightning-two-image-api-v1",
+      "candidateId": "qwen-edit-2511-fp8mixed-lightning-discovery",
+      "family": "qwen-edit",
+      "status": "discovery-only",
+      "verifiedOnThisMachine": false,
+      "capabilities": ["image-edit", "multi-reference-image"],
+      "requiredNodes": [
+        {
+          "id": "comfyui-core",
+          "version": "e0a32bce84f4603f2b61b16b50f8958e68fd6171"
+        }
+      ],
+      "requiredClassTypes": [
+        "CFGNorm",
+        "CLIPLoader",
+        "FluxKontextImageScale",
+        "FluxKontextMultiReferenceLatentMethod",
+        "KSampler",
+        "LoadImage",
+        "LoraLoaderModelOnly",
+        "ModelSamplingAuraFlow",
+        "SaveImage",
+        "TextEncodeQwenImageEditPlus",
+        "UNETLoader",
+        "VAEDecode",
+        "VAEEncode",
+        "VAELoader"
+      ],
+      "components": [
+        {
+          "role": "text-encoder",
+          "name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "directory": "text_encoders",
+          "revision": "1405a2b738c29b890cf6d03fc038d8d3e92eeed7",
+          "sha256": "cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4"
+        },
+        {
+          "role": "vae",
+          "name": "qwen_image_vae.safetensors",
+          "directory": "vae",
+          "revision": "1f12b17be14c89b026c51a91d67c32f84bb047bc",
+          "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"
+        },
+        {
+          "role": "diffusion",
+          "name": "qwen_image_edit_2511_fp8mixed.safetensors",
+          "directory": "diffusion_models",
+          "revision": "f68ace85e60b4a02a323e394253731947657b7d2",
+          "sha256": "c9fdc158e46d3b61ef75f21ae866ca2fe808bf4a53643120d1c1e87c19280a4e"
+        },
+        {
+          "role": "lora",
+          "name": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+          "directory": "loras",
+          "revision": "d74eba145674fd7e31b949324e148e21e7118abd",
+          "sha256": "22226e8d05d354bb356627d428809f5afd7819399b077238a2b70a82883a904f"
+        }
+      ],
+      "graph": {
+        "9": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "filename_prefix": "Qwen_Edit_2511",
+            "images": ["170:158", 0]
+          }
+        },
+        "41": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "source.png"
+          }
+        },
+        "83": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "texture_fur.png"
+          }
+        },
+        "170:145": {
+          "class_type": "ModelSamplingAuraFlow",
+          "inputs": {
+            "shift": 3.1,
+            "sampling": "flow",
+            "model": ["170:161", 0]
+          }
+        },
+        "170:146": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "qwen_image_vae.safetensors"
+          }
+        },
+        "170:147": {
+          "class_type": "FluxKontextMultiReferenceLatentMethod",
+          "inputs": {
+            "reference_latents_method": "index_timestep_zero",
+            "conditioning": ["170:149", 0]
+          }
+        },
+        "170:148": {
+          "class_type": "FluxKontextMultiReferenceLatentMethod",
+          "inputs": {
+            "reference_latents_method": "index_timestep_zero",
+            "conditioning": ["170:151", 0]
+          }
+        },
+        "170:149": {
+          "class_type": "TextEncodeQwenImageEditPlus",
+          "inputs": {
+            "prompt": "",
+            "clip": ["170:162", 0],
+            "vae": ["170:146", 0],
+            "image1": ["170:160", 0],
+            "image2": ["83", 0]
+          }
+        },
+        "170:151": {
+          "class_type": "TextEncodeQwenImageEditPlus",
+          "inputs": {
+            "prompt": "Change the furniture leather difference in image 1 to the fur material in image 2.",
+            "clip": ["170:162", 0],
+            "vae": ["170:146", 0],
+            "image1": ["170:160", 0],
+            "image2": ["83", 0]
+          }
+        },
+        "170:152": {
+          "class_type": "CFGNorm",
+          "inputs": {
+            "strength": 1,
+            "pre_cfg": false,
+            "model": ["170:145", 0]
+          }
+        },
+        "170:153": {
+          "class_type": "LoraLoaderModelOnly",
+          "inputs": {
+            "lora_name": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+            "strength_model": 1,
+            "model": ["170:152", 0]
+          }
+        },
+        "170:156": {
+          "class_type": "VAEEncode",
+          "inputs": {
+            "pixels": ["170:160", 0],
+            "vae": ["170:146", 0]
+          }
+        },
+        "170:161": {
+          "class_type": "UNETLoader",
+          "inputs": {
+            "unet_name": "qwen_image_edit_2511_fp8mixed.safetensors",
+            "weight_dtype": "default"
+          }
+        },
+        "170:162": {
+          "class_type": "CLIPLoader",
+          "inputs": {
+            "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+            "type": "qwen_image",
+            "device": "default"
+          }
+        },
+        "170:169": {
+          "class_type": "KSampler",
+          "inputs": {
+            "seed": 0,
+            "sampler_name": "euler",
+            "scheduler": "simple",
+            "denoise": 1,
+            "model": ["170:153", 0],
+            "steps": 4,
+            "cfg": 1,
+            "positive": ["170:148", 0],
+            "negative": ["170:147", 0],
+            "latent_image": ["170:156", 0]
+          }
+        },
+        "170:158": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": ["170:169", 0],
+            "vae": ["170:146", 0]
+          }
+        },
+        "170:160": {
+          "class_type": "FluxKontextImageScale",
+          "inputs": {
+            "image": ["41", 0]
+          }
+        }
+      },
+      "graphSha256": "696a928702a52584ef0ec37c77a9d031940ded1312509a8773cb961e9bebccd0",
+      "graphSerialization": "UTF-8 JSON.stringify(graph, null, 2) + LF",
+      "bindings": {
+        "prompt": [
+          {
+            "nodeId": "170:151",
+            "input": "prompt"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "nodeId": "170:149",
+            "input": "prompt"
+          }
+        ],
+        "image": [
+          {
+            "nodeId": "41",
+            "input": "image"
+          },
+          {
+            "nodeId": "83",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "nodeId": "170:169",
+            "input": "seed"
+          }
+        ],
+        "outputPrefix": [
+          {
+            "nodeId": "9",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "defaults": {
+        "seed": 0,
+        "negativePrompt": "",
+        "outputPrefix": "Qwen_Edit_2511"
+      },
+      "smokeInput": {
+        "prompt": "Change the furniture leather difference in image 1 to the fur material in image 2.",
+        "seed": 0
+      },
+      "smokeRequirements": [
+        "Provide two distinct images in order: edit source then reference. Validate both image conditioning paths and inspect the requested edit. No identity fidelity claim."
+      ],
+      "derivation": {
+        "method": "Restore the two-image path from the pinned official converter export, retain the documented Lightning branch.",
+        "originalTemplate": {
+          "repository": "Comfy-Org/workflow_templates",
+          "revision": "020a271ba4cf341096f70dfb6f4fe85bd5df2f5e",
+          "path": "templates/image_qwen_image_edit_2511.json",
+          "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/020a271ba4cf341096f70dfb6f4fe85bd5df2f5e/templates/image_qwen_image_edit_2511.json",
+          "sizeBytes": 59841,
+          "sha256": "b23103935f437e1fe3184247fa5bafb891a28113d0c63de7449b7cdfb0419111",
+          "format": "ui",
+          "apiConversionRequired": true
+        },
+        "convertedApiSha256": "3ea5b8472b321fa19beca4ddcc4353c21ebb57ce74ce6c1eb0b860bf2f05cb57",
+        "sourceDerivedObjectInfoFrom": "qwen-edit-2511-fp8mixed-lightning-single-image-api-discovery"
+      },
+      "workflowMetadata": {
+        "id": "qwen-edit-2511-fp8mixed-lightning-two-image-api-v1",
+        "revision": "696a928702a52584ef0ec37c77a9d031940ded1312509a8773cb961e9bebccd0",
+        "tasks": ["image-edit", "multi-reference-image"],
+        "inputs": [
+          {
+            "role": "edit-source",
+            "type": "image",
+            "minCount": 1,
+            "maxCount": 1,
+            "binding": "image",
+            "bindingIndex": 0
+          },
+          {
+            "role": "reference",
+            "type": "image",
+            "minCount": 1,
+            "maxCount": 1,
+            "binding": "image",
+            "bindingIndex": 1
+          }
+        ],
+        "adapter": "native",
+        "preparation": "pending",
+        "source": {
+          "url": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/020a271ba4cf341096f70dfb6f4fe85bd5df2f5e/templates/image_qwen_image_edit_2511.json",
+          "sha256": "b23103935f437e1fe3184247fa5bafb891a28113d0c63de7449b7cdfb0419111"
+        },
+        "evidence": [
+          {
+            "kind": "recipe",
+            "workflowHash": "696a928702a52584ef0ec37c77a9d031940ded1312509a8773cb961e9bebccd0",
+            "checkedAt": "2026-11-10T00:00:00.000Z",
+            "inputRoles": ["edit-source", "reference"]
+          }
+        ]
+      },
+      "preparation": {
+        "policy": "with-base",
+        "sharedComponentHashes": [
+          "cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4",
+          "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f",
+          "c9fdc158e46d3b61ef75f21ae866ca2fe808bf4a53643120d1c1e87c19280a4e",
+          "22226e8d05d354bb356627d428809f5afd7819399b077238a2b70a82883a904f"
+        ],
+        "additionalComponents": [],
+        "additionalBytes": 0
+      }
+    },
+    {
+      "id": "h3-matlowai-fused-int8-t2v-api-v1",
+      "candidateId": "h3-matlowai-existing-bundle-discovery",
+      "family": "h3",
+      "status": "discovery-only",
+      "verifiedOnThisMachine": false,
+      "capabilities": ["text-to-video", "native-audio"],
+      "requiredNodes": [
+        {
+          "id": "comfyui-core",
+          "version": "v0.35.0"
+        },
+        {
+          "id": "comfyui-mainodes",
+          "version": "f4868b4a08e8a504ce86db54a17961d399ffa2bc"
+        },
+        {
+          "id": "h3-sla-node",
+          "version": "fd26ffb89dee294ca740a59632e5b3423b9a9d2a"
+        },
+        {
+          "id": "comfyui-kjnodes",
+          "version": "d3cfe21625e5170126ce06fbfcfe1d88108688c3"
+        }
+      ],
+      "requiredClassTypes": [
+        "BasicGuider",
+        "BasicScheduler",
+        "CLIPLoader",
+        "ComfyMathExpression",
+        "CreateVideo",
+        "H3SLAAttention",
+        "KSamplerSelect",
+        "MiniMaxChunkFeedForward",
+        "MiniMaxH3ImageToVideo",
+        "MiniMaxH3SigmaShift",
+        "PrimitiveFloat",
+        "PrimitiveStringMultiline",
+        "RandomNoise",
+        "ResolutionSelector",
+        "SamplerCustomAdvanced",
+        "SaveVideo",
+        "UNETLoader",
+        "VAEDecode",
+        "VAEDecodeAudio",
+        "VAELoader"
+      ],
+      "components": [
+        {
+          "role": "diffusion",
+          "path": "models/diffusion_models/minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors",
+          "repository": "MATLOWAI/minimax-h3-fused-turbo-int8-convrot",
+          "revision": "8a8dffaa0cd99c6184833ae0a3b4e9b0089c17b3",
+          "sizeBytes": 20980178976,
+          "sha256": "4262e4e9963c553fa00016bbe83961407a4fc0a888be95fd836c8d4f2304e48b",
+          "url": "https://huggingface.co/MATLOWAI/minimax-h3-fused-turbo-int8-convrot/resolve/8a8dffaa0cd99c6184833ae0a3b4e9b0089c17b3/diffusion_models/minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors",
+          "identityRole": "base",
+          "name": "minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors",
+          "directory": "diffusion_models"
+        },
+        {
+          "role": "video-vae",
+          "path": "models/vae/minimax_h3_video_vae_int8_convrot.safetensors",
+          "repository": "GuangyuanSD/minimax_h3_video_vae_int8_convrot",
+          "revision": "fc2f3c9dcb4449ef08d46fc3dc6b0e353a586321",
+          "sizeBytes": 3171670912,
+          "sha256": "9bb2d96f218c76babd85e0611b85ca8fb330a90546c01a0005e8a58a59593410",
+          "url": "https://huggingface.co/GuangyuanSD/minimax_h3_video_vae_int8_convrot/resolve/fc2f3c9dcb4449ef08d46fc3dc6b0e353a586321/minimax_h3_video_vae_int8_convrot.safetensors",
+          "identityRole": "base",
+          "name": "minimax_h3_video_vae_int8_convrot.safetensors",
+          "directory": "vae"
+        },
+        {
+          "role": "audio-vae",
+          "path": "models/vae/minimax_h3_audio_vae_fp32.safetensors",
+          "repository": "Comfy-Org/MiniMax-H3",
+          "revision": "a98869194787969724c7425d95d0ed73ce9202af",
+          "sizeBytes": 605254808,
+          "sha256": "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48",
+          "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/a98869194787969724c7425d95d0ed73ce9202af/vae/minimax_h3_audio_vae_fp32.safetensors",
+          "identityRole": "base",
+          "name": "minimax_h3_audio_vae_fp32.safetensors",
+          "directory": "vae"
+        },
+        {
+          "role": "text-encoder",
+          "path": "models/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+          "repository": "Comfy-Org/MiniMax-H3",
+          "revision": "a98869194787969724c7425d95d0ed73ce9202af",
+          "sizeBytes": 15687142551,
+          "sha256": "35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6",
+          "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/a98869194787969724c7425d95d0ed73ce9202af/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+          "identityRole": "base",
+          "name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+          "directory": "text_encoders"
+        }
+      ],
+      "graph": {
+        "1": {
+          "class_type": "PrimitiveStringMultiline",
+          "inputs": {
+            "value": "PASTE YOUR PROMPT HERE. Use the MiniMax-H3 prompt contract (integrated_multimodal_description / overall_soundscape / non_diegetic_music). The previews in this repo were made with a ten-shot subway prompt posted by a community member; it is not redistributed here."
+          },
+          "_meta": {
+            "title": "PROMPT (feeds every stage)"
+          }
+        },
+        "92": {
+          "class_type": "SaveVideo",
+          "inputs": {
+            "video": ["130", 0],
+            "format": "auto",
+            "codec": "auto",
+            "filename_prefix": "video/lowvram_01_reference_4step_sla"
+          },
+          "_meta": {
+            "title": "REFERENCE 2026-08-29: fused ref-delta bake + SLA 0.9/64, res_multistep/simple/4, shift 12/3, 1152x640, 243 f, seed 42 -> subway_bake_sla_00001_.mp4"
+          }
+        },
+        "115": {
+          "class_type": "ResolutionSelector",
+          "inputs": {
+            "aspect_ratio": "16:9 (Widescreen)",
+            "megapixels": 0.7,
+            "multiple": 32
+          }
+        },
+        "116": {
+          "class_type": "ComfyMathExpression",
+          "inputs": {
+            "expression": "a",
+            "values.a": 0
+          }
+        },
+        "119": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "minimax_h3_video_vae_int8_convrot.safetensors"
+          }
+        },
+        "120": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+          }
+        },
+        "121": {
+          "class_type": "VAEDecodeAudio",
+          "inputs": {
+            "samples": ["125", 0],
+            "vae": ["120", 0]
+          }
+        },
+        "122": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": ["125", 0],
+            "vae": ["119", 0]
+          }
+        },
+        "124": {
+          "class_type": "BasicScheduler",
+          "inputs": {
+            "model": ["142", 0],
+            "scheduler": "simple",
+            "steps": 4,
+            "denoise": 1
+          }
+        },
+        "125": {
+          "class_type": "SamplerCustomAdvanced",
+          "inputs": {
+            "noise": ["129", 0],
+            "guider": ["126", 0],
+            "sampler": ["135", 0],
+            "sigmas": ["124", 0],
+            "latent_image": ["131", 1]
+          }
+        },
+        "126": {
+          "class_type": "BasicGuider",
+          "inputs": {
+            "model": ["142", 0],
+            "conditioning": ["131", 0]
+          }
+        },
+        "127": {
+          "class_type": "UNETLoader",
+          "inputs": {
+            "unet_name": "minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors",
+            "weight_dtype": "default"
+          }
+        },
+        "128": {
+          "class_type": "CLIPLoader",
+          "inputs": {
+            "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+            "type": "minimax",
+            "device": "default"
+          }
+        },
+        "129": {
+          "class_type": "RandomNoise",
+          "inputs": {
+            "noise_seed": 42
+          }
+        },
+        "130": {
+          "class_type": "CreateVideo",
+          "inputs": {
+            "images": ["122", 0],
+            "audio": ["121", 0],
+            "fps": 24,
+            "bit_depth": 8
+          }
+        },
+        "131": {
+          "class_type": "MiniMaxH3ImageToVideo",
+          "inputs": {
+            "prompt": ["1", 0],
+            "width": ["115", 0],
+            "height": ["115", 1],
+            "length": ["132", 1],
+            "clip": ["128", 0],
+            "vae": ["119", 0]
+          }
+        },
+        "132": {
+          "class_type": "ComfyMathExpression",
+          "inputs": {
+            "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
+            "values.a": ["133", 0]
+          }
+        },
+        "133": {
+          "class_type": "PrimitiveFloat",
+          "inputs": {
+            "value": 10
+          }
+        },
+        "135": {
+          "class_type": "KSamplerSelect",
+          "inputs": {
+            "sampler_name": "res_multistep"
+          }
+        },
+        "142": {
+          "class_type": "MiniMaxH3SigmaShift",
+          "inputs": {
+            "model": ["900", 0],
+            "shift_video": 12,
+            "shift_audio": 3
+          }
+        },
+        "900": {
+          "class_type": "H3SLAAttention",
+          "inputs": {
+            "model": ["901", 0],
+            "sparsity_ratio": 0.9,
+            "block_size": "64",
+            "min_seq_len": 8192,
+            "dense_last_steps": 0,
+            "protect_audio": true,
+            "enabled": true
+          },
+          "_meta": {
+            "title": "H3 SLA Attention 0.9/64 (their graph)"
+          }
+        },
+        "901": {
+          "class_type": "MiniMaxChunkFeedForward",
+          "inputs": {
+            "model": ["127", 0],
+            "chunks": 4,
+            "seq_threshold": 4096
+          },
+          "_meta": {
+            "title": "LOW VRAM: chunk the feed-forward over the sequence (exact; KJNodes)"
+          }
+        }
+      },
+      "graphSha256": "77a71218d9452ee84bbaaf40a84811001082882278ef37936bbf6806afe11519",
+      "graphSerialization": "UTF-8 JSON.stringify(graph, null, 2) + LF",
+      "bindings": {
+        "prompt": [
+          {
+            "nodeId": "1",
+            "input": "value"
+          }
+        ],
+        "durationSeconds": [
+          {
+            "nodeId": "133",
+            "input": "value"
+          }
+        ],
+        "seed": [
+          {
+            "nodeId": "129",
+            "input": "noise_seed"
+          }
+        ],
+        "megapixels": [
+          {
+            "nodeId": "115",
+            "input": "megapixels"
+          }
+        ],
+        "outputPrefix": [
+          {
+            "nodeId": "92",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "defaults": {
+        "durationSeconds": 4,
+        "megapixels": 0.2,
+        "seed": 42
+      },
+      "smokeInput": {
+        "prompt": "A red ceramic cup on a wooden table in soft daylight, one continuous shot; quiet room tone.",
+        "durationSeconds": 4,
+        "seed": 42
+      },
+      "smokeRequirements": [
+        "Validate decoded moving frames, duration and native audio on the actual runtime. Video/audio references are not supported by this native H3 adapter."
+      ],
+      "derivation": {
+        "method": "Exact embedded API export from the pinned legacy bundle; shared fused model, encoder, VAEs and custom nodes.",
+        "originalTemplate": {
+          "path": "workflows/lowvram/01_reference_4step_sla_lowvram.api.json",
+          "format": "api",
+          "sizeBytes": 4139,
+          "sha256": "f622f57e30056f45355079203e7d3fc6ea4db60451686293d1eda47c9f471487",
+          "repository": "OpenH3 bundled h3EmbeddedWorkflows.json",
+          "revision": "sha256:f622f57e30056f45355079203e7d3fc6ea4db60451686293d1eda47c9f471487",
+          "url": "openh3-resource://runtime/h3EmbeddedWorkflows.json#workflows%2Flowvram%2F01_reference_4step_sla_lowvram.api.json"
+        }
+      },
+      "workflowMetadata": {
+        "id": "h3-matlowai-fused-int8-t2v-api-v1",
+        "revision": "77a71218d9452ee84bbaaf40a84811001082882278ef37936bbf6806afe11519",
+        "tasks": ["text-to-video"],
+        "inputs": [],
+        "adapter": "native",
+        "preparation": "pending",
+        "source": {
+          "url": "openh3-resource://runtime/h3EmbeddedWorkflows.json#workflows%2Flowvram%2F01_reference_4step_sla_lowvram.api.json",
+          "sha256": "f622f57e30056f45355079203e7d3fc6ea4db60451686293d1eda47c9f471487"
+        },
+        "evidence": [
+          {
+            "kind": "recipe",
+            "workflowHash": "77a71218d9452ee84bbaaf40a84811001082882278ef37936bbf6806afe11519",
+            "checkedAt": "2026-11-10T00:00:00.000Z",
+            "inputRoles": []
+          }
+        ]
+      },
+      "preparation": {
+        "policy": "with-base",
+        "sharedComponentHashes": [
+          "4262e4e9963c553fa00016bbe83961407a4fc0a888be95fd836c8d4f2304e48b",
+          "9bb2d96f218c76babd85e0611b85ca8fb330a90546c01a0005e8a58a59593410",
+          "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48",
+          "35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6"
+        ],
+        "additionalComponents": [],
+        "additionalBytes": 0
+      }
+    },
+    {
+      "id": "h3-matlowai-fused-int8-i2v-api-v1",
+      "candidateId": "h3-matlowai-existing-bundle-discovery",
+      "family": "h3",
+      "status": "discovery-only",
+      "verifiedOnThisMachine": false,
+      "capabilities": ["image-to-video", "native-audio"],
+      "requiredNodes": [
+        {
+          "id": "comfyui-core",
+          "version": "v0.35.0"
+        },
+        {
+          "id": "comfyui-mainodes",
+          "version": "f4868b4a08e8a504ce86db54a17961d399ffa2bc"
+        },
+        {
+          "id": "h3-sla-node",
+          "version": "fd26ffb89dee294ca740a59632e5b3423b9a9d2a"
+        },
+        {
+          "id": "comfyui-kjnodes",
+          "version": "d3cfe21625e5170126ce06fbfcfe1d88108688c3"
+        }
+      ],
+      "requiredClassTypes": [
+        "BasicGuider",
+        "BasicScheduler",
+        "CLIPLoader",
+        "ComfyMathExpression",
+        "CreateVideo",
+        "H3SLAAttention",
+        "KSamplerSelect",
+        "LoadImage",
+        "MiniMaxChunkFeedForward",
+        "MiniMaxH3ImageToVideo",
+        "MiniMaxH3SigmaShift",
+        "PrimitiveFloat",
+        "PrimitiveStringMultiline",
+        "RandomNoise",
+        "ResolutionSelector",
+        "SamplerCustomAdvanced",
+        "SaveVideo",
+        "UNETLoader",
+        "VAEDecode",
+        "VAEDecodeAudio",
+        "VAELoader"
+      ],
+      "components": [
+        {
+          "role": "diffusion",
+          "path": "models/diffusion_models/minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors",
+          "repository": "MATLOWAI/minimax-h3-fused-turbo-int8-convrot",
+          "revision": "8a8dffaa0cd99c6184833ae0a3b4e9b0089c17b3",
+          "sizeBytes": 20980178976,
+          "sha256": "4262e4e9963c553fa00016bbe83961407a4fc0a888be95fd836c8d4f2304e48b",
+          "url": "https://huggingface.co/MATLOWAI/minimax-h3-fused-turbo-int8-convrot/resolve/8a8dffaa0cd99c6184833ae0a3b4e9b0089c17b3/diffusion_models/minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors",
+          "identityRole": "base",
+          "name": "minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors",
+          "directory": "diffusion_models"
+        },
+        {
+          "role": "video-vae",
+          "path": "models/vae/minimax_h3_video_vae_int8_convrot.safetensors",
+          "repository": "GuangyuanSD/minimax_h3_video_vae_int8_convrot",
+          "revision": "fc2f3c9dcb4449ef08d46fc3dc6b0e353a586321",
+          "sizeBytes": 3171670912,
+          "sha256": "9bb2d96f218c76babd85e0611b85ca8fb330a90546c01a0005e8a58a59593410",
+          "url": "https://huggingface.co/GuangyuanSD/minimax_h3_video_vae_int8_convrot/resolve/fc2f3c9dcb4449ef08d46fc3dc6b0e353a586321/minimax_h3_video_vae_int8_convrot.safetensors",
+          "identityRole": "base",
+          "name": "minimax_h3_video_vae_int8_convrot.safetensors",
+          "directory": "vae"
+        },
+        {
+          "role": "audio-vae",
+          "path": "models/vae/minimax_h3_audio_vae_fp32.safetensors",
+          "repository": "Comfy-Org/MiniMax-H3",
+          "revision": "a98869194787969724c7425d95d0ed73ce9202af",
+          "sizeBytes": 605254808,
+          "sha256": "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48",
+          "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/a98869194787969724c7425d95d0ed73ce9202af/vae/minimax_h3_audio_vae_fp32.safetensors",
+          "identityRole": "base",
+          "name": "minimax_h3_audio_vae_fp32.safetensors",
+          "directory": "vae"
+        },
+        {
+          "role": "text-encoder",
+          "path": "models/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+          "repository": "Comfy-Org/MiniMax-H3",
+          "revision": "a98869194787969724c7425d95d0ed73ce9202af",
+          "sizeBytes": 15687142551,
+          "sha256": "35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6",
+          "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/a98869194787969724c7425d95d0ed73ce9202af/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+          "identityRole": "base",
+          "name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+          "directory": "text_encoders"
+        }
+      ],
+      "graph": {
+        "1": {
+          "class_type": "PrimitiveStringMultiline",
+          "inputs": {
+            "value": "PASTE YOUR PROMPT HERE. For image-to-video describe the motion from the first frame; the frame fixes the look. Use the MiniMax-H3 prompt contract (integrated_multimodal_description / overall_soundscape / non_diegetic_music)."
+          },
+          "_meta": {
+            "title": "PROMPT (feeds every stage)"
+          }
+        },
+        "92": {
+          "class_type": "SaveVideo",
+          "inputs": {
+            "video": ["130", 0],
+            "format": "auto",
+            "codec": "auto",
+            "filename_prefix": "video/lowvram_04_i2v_fl2v_4step_sla"
+          },
+          "_meta": {
+            "title": "REFERENCE 2026-08-29: fused ref-delta bake + SLA 0.9/64, res_multistep/simple/4, shift 12/3, 1152x640, 243 f, seed 42 -> subway_bake_sla_00001_.mp4"
+          }
+        },
+        "115": {
+          "class_type": "ResolutionSelector",
+          "inputs": {
+            "aspect_ratio": "16:9 (Widescreen)",
+            "megapixels": 0.7,
+            "multiple": 32
+          }
+        },
+        "116": {
+          "class_type": "ComfyMathExpression",
+          "inputs": {
+            "expression": "a",
+            "values.a": 0
+          }
+        },
+        "119": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "minimax_h3_video_vae_int8_convrot.safetensors"
+          }
+        },
+        "120": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+          }
+        },
+        "121": {
+          "class_type": "VAEDecodeAudio",
+          "inputs": {
+            "samples": ["125", 0],
+            "vae": ["120", 0]
+          }
+        },
+        "122": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": ["125", 0],
+            "vae": ["119", 0]
+          }
+        },
+        "124": {
+          "class_type": "BasicScheduler",
+          "inputs": {
+            "model": ["142", 0],
+            "scheduler": "simple",
+            "steps": 4,
+            "denoise": 1
+          }
+        },
+        "125": {
+          "class_type": "SamplerCustomAdvanced",
+          "inputs": {
+            "noise": ["129", 0],
+            "guider": ["126", 0],
+            "sampler": ["135", 0],
+            "sigmas": ["124", 0],
+            "latent_image": ["131", 1]
+          }
+        },
+        "126": {
+          "class_type": "BasicGuider",
+          "inputs": {
+            "model": ["142", 0],
+            "conditioning": ["131", 0]
+          }
+        },
+        "127": {
+          "class_type": "UNETLoader",
+          "inputs": {
+            "unet_name": "minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors",
+            "weight_dtype": "default"
+          }
+        },
+        "128": {
+          "class_type": "CLIPLoader",
+          "inputs": {
+            "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+            "type": "minimax",
+            "device": "default"
+          }
+        },
+        "129": {
+          "class_type": "RandomNoise",
+          "inputs": {
+            "noise_seed": 42
+          }
+        },
+        "130": {
+          "class_type": "CreateVideo",
+          "inputs": {
+            "images": ["122", 0],
+            "audio": ["121", 0],
+            "fps": 24,
+            "bit_depth": 8
+          }
+        },
+        "131": {
+          "class_type": "MiniMaxH3ImageToVideo",
+          "inputs": {
+            "prompt": ["1", 0],
+            "width": ["115", 0],
+            "height": ["115", 1],
+            "length": ["132", 1],
+            "clip": ["128", 0],
+            "vae": ["119", 0],
+            "first_frame": ["901", 0]
+          }
+        },
+        "132": {
+          "class_type": "ComfyMathExpression",
+          "inputs": {
+            "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
+            "values.a": ["133", 0]
+          }
+        },
+        "133": {
+          "class_type": "PrimitiveFloat",
+          "inputs": {
+            "value": 10
+          }
+        },
+        "135": {
+          "class_type": "KSamplerSelect",
+          "inputs": {
+            "sampler_name": "res_multistep"
+          }
+        },
+        "142": {
+          "class_type": "MiniMaxH3SigmaShift",
+          "inputs": {
+            "model": ["900", 0],
+            "shift_video": 12,
+            "shift_audio": 3
+          }
+        },
+        "900": {
+          "class_type": "H3SLAAttention",
+          "inputs": {
+            "model": ["902", 0],
+            "sparsity_ratio": 0.9,
+            "block_size": "64",
+            "min_seq_len": 8192,
+            "dense_last_steps": 0,
+            "protect_audio": true,
+            "enabled": true
+          },
+          "_meta": {
+            "title": "H3 SLA Attention 0.9/64 (their graph)"
+          }
+        },
+        "901": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "first_frame.png"
+          },
+          "_meta": {
+            "title": "FIRST FRAME (add a second LoadImage into last_frame for FL2V)"
+          }
+        },
+        "902": {
+          "class_type": "MiniMaxChunkFeedForward",
+          "inputs": {
+            "model": ["127", 0],
+            "chunks": 4,
+            "seq_threshold": 4096
+          },
+          "_meta": {
+            "title": "LOW VRAM: chunk the feed-forward over the sequence (exact; KJNodes)"
+          }
+        }
+      },
+      "graphSha256": "1f2a9b23eb4848098ac568d4960fd3516c5c3a4d649847782a3a8ecd0cdb08af",
+      "graphSerialization": "UTF-8 JSON.stringify(graph, null, 2) + LF",
+      "bindings": {
+        "prompt": [
+          {
+            "nodeId": "1",
+            "input": "value"
+          }
+        ],
+        "durationSeconds": [
+          {
+            "nodeId": "133",
+            "input": "value"
+          }
+        ],
+        "seed": [
+          {
+            "nodeId": "129",
+            "input": "noise_seed"
+          }
+        ],
+        "megapixels": [
+          {
+            "nodeId": "115",
+            "input": "megapixels"
+          }
+        ],
+        "outputPrefix": [
+          {
+            "nodeId": "92",
+            "input": "filename_prefix"
+          }
+        ],
+        "image": [
+          {
+            "nodeId": "901",
+            "input": "image"
+          }
+        ]
+      },
+      "defaults": {
+        "durationSeconds": 4,
+        "megapixels": 0.2,
+        "seed": 42
+      },
+      "smokeInput": {
+        "prompt": "A red ceramic cup on a wooden table in soft daylight, one continuous shot; quiet room tone.",
+        "durationSeconds": 4,
+        "seed": 42
+      },
+      "smokeRequirements": [
+        "Supply exactly one real image in the registered input role.",
+        "Validate decoded moving frames, duration and native audio on the actual runtime. Video/audio references are not supported by this native H3 adapter."
+      ],
+      "derivation": {
+        "method": "Exact embedded API export from the pinned legacy bundle; shared fused model, encoder, VAEs and custom nodes.",
+        "originalTemplate": {
+          "path": "workflows/lowvram/04_i2v_fl2v_4step_sla_lowvram.api.json",
+          "format": "api",
+          "sizeBytes": 4327,
+          "sha256": "5993d7f12f7cb43cb446d8c71c1a6c56d0c35dfc49cf6998db64979de70f6f4d",
+          "repository": "OpenH3 bundled h3EmbeddedWorkflows.json",
+          "revision": "sha256:5993d7f12f7cb43cb446d8c71c1a6c56d0c35dfc49cf6998db64979de70f6f4d",
+          "url": "openh3-resource://runtime/h3EmbeddedWorkflows.json#workflows%2Flowvram%2F04_i2v_fl2v_4step_sla_lowvram.api.json"
+        }
+      },
+      "workflowMetadata": {
+        "id": "h3-matlowai-fused-int8-i2v-api-v1",
+        "revision": "1f2a9b23eb4848098ac568d4960fd3516c5c3a4d649847782a3a8ecd0cdb08af",
+        "tasks": ["image-to-video"],
+        "inputs": [
+          {
+            "role": "first-frame",
+            "type": "image",
+            "minCount": 1,
+            "maxCount": 1,
+            "binding": "image",
+            "bindingIndex": 0
+          }
+        ],
+        "adapter": "native",
+        "preparation": "pending",
+        "source": {
+          "url": "openh3-resource://runtime/h3EmbeddedWorkflows.json#workflows%2Flowvram%2F04_i2v_fl2v_4step_sla_lowvram.api.json",
+          "sha256": "5993d7f12f7cb43cb446d8c71c1a6c56d0c35dfc49cf6998db64979de70f6f4d"
+        },
+        "evidence": [
+          {
+            "kind": "recipe",
+            "workflowHash": "1f2a9b23eb4848098ac568d4960fd3516c5c3a4d649847782a3a8ecd0cdb08af",
+            "checkedAt": "2026-11-10T00:00:00.000Z",
+            "inputRoles": ["first-frame"]
+          }
+        ]
+      },
+      "preparation": {
+        "policy": "with-base",
+        "sharedComponentHashes": [
+          "4262e4e9963c553fa00016bbe83961407a4fc0a888be95fd836c8d4f2304e48b",
+          "9bb2d96f218c76babd85e0611b85ca8fb330a90546c01a0005e8a58a59593410",
+          "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48",
+          "35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6"
+        ],
+        "additionalComponents": [],
+        "additionalBytes": 0
+      }
+    },
+    {
+      "id": "h3-matlowai-fused-int8-r2v-api-v1",
+      "candidateId": "h3-matlowai-existing-bundle-discovery",
+      "family": "h3",
+      "status": "discovery-only",
+      "verifiedOnThisMachine": false,
+      "capabilities": ["reference-to-video", "native-audio"],
+      "requiredNodes": [
+        {
+          "id": "comfyui-core",
+          "version": "v0.35.0"
+        },
+        {
+          "id": "comfyui-mainodes",
+          "version": "f4868b4a08e8a504ce86db54a17961d399ffa2bc"
+        },
+        {
+          "id": "h3-sla-node",
+          "version": "fd26ffb89dee294ca740a59632e5b3423b9a9d2a"
+        },
+        {
+          "id": "comfyui-kjnodes",
+          "version": "d3cfe21625e5170126ce06fbfcfe1d88108688c3"
+        }
+      ],
+      "requiredClassTypes": [
+        "BasicGuider",
+        "BasicScheduler",
+        "CLIPLoader",
+        "ComfyMathExpression",
+        "CreateVideo",
+        "H3SLAAttention",
+        "KSamplerSelect",
+        "LoadImage",
+        "MiniMaxChunkFeedForward",
+        "MiniMaxH3ReferenceToVideo",
+        "MiniMaxH3SigmaShift",
+        "PrimitiveFloat",
+        "PrimitiveStringMultiline",
+        "RandomNoise",
+        "ResolutionSelector",
+        "SamplerCustomAdvanced",
+        "SaveVideo",
+        "UNETLoader",
+        "VAEDecode",
+        "VAEDecodeAudio",
+        "VAELoader"
+      ],
+      "components": [
+        {
+          "role": "diffusion",
+          "path": "models/diffusion_models/minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors",
+          "repository": "MATLOWAI/minimax-h3-fused-turbo-int8-convrot",
+          "revision": "8a8dffaa0cd99c6184833ae0a3b4e9b0089c17b3",
+          "sizeBytes": 20980178976,
+          "sha256": "4262e4e9963c553fa00016bbe83961407a4fc0a888be95fd836c8d4f2304e48b",
+          "url": "https://huggingface.co/MATLOWAI/minimax-h3-fused-turbo-int8-convrot/resolve/8a8dffaa0cd99c6184833ae0a3b4e9b0089c17b3/diffusion_models/minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors",
+          "identityRole": "base",
+          "name": "minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors",
+          "directory": "diffusion_models"
+        },
+        {
+          "role": "video-vae",
+          "path": "models/vae/minimax_h3_video_vae_int8_convrot.safetensors",
+          "repository": "GuangyuanSD/minimax_h3_video_vae_int8_convrot",
+          "revision": "fc2f3c9dcb4449ef08d46fc3dc6b0e353a586321",
+          "sizeBytes": 3171670912,
+          "sha256": "9bb2d96f218c76babd85e0611b85ca8fb330a90546c01a0005e8a58a59593410",
+          "url": "https://huggingface.co/GuangyuanSD/minimax_h3_video_vae_int8_convrot/resolve/fc2f3c9dcb4449ef08d46fc3dc6b0e353a586321/minimax_h3_video_vae_int8_convrot.safetensors",
+          "identityRole": "base",
+          "name": "minimax_h3_video_vae_int8_convrot.safetensors",
+          "directory": "vae"
+        },
+        {
+          "role": "audio-vae",
+          "path": "models/vae/minimax_h3_audio_vae_fp32.safetensors",
+          "repository": "Comfy-Org/MiniMax-H3",
+          "revision": "a98869194787969724c7425d95d0ed73ce9202af",
+          "sizeBytes": 605254808,
+          "sha256": "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48",
+          "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/a98869194787969724c7425d95d0ed73ce9202af/vae/minimax_h3_audio_vae_fp32.safetensors",
+          "identityRole": "base",
+          "name": "minimax_h3_audio_vae_fp32.safetensors",
+          "directory": "vae"
+        },
+        {
+          "role": "text-encoder",
+          "path": "models/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+          "repository": "Comfy-Org/MiniMax-H3",
+          "revision": "a98869194787969724c7425d95d0ed73ce9202af",
+          "sizeBytes": 15687142551,
+          "sha256": "35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6",
+          "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/a98869194787969724c7425d95d0ed73ce9202af/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+          "identityRole": "base",
+          "name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+          "directory": "text_encoders"
+        }
+      ],
+      "graph": {
+        "1": {
+          "class_type": "PrimitiveStringMultiline",
+          "inputs": {
+            "value": "PASTE YOUR PROMPT HERE, in the reference contract:\nsubject_definitions:\n<Subject 1> is the person in <Picture 1>; their face, hair and clothing follow <Picture 1>.\n\nsummary:\n[reference generation] one continuous shot of <Subject 1> doing X, appearance taken from <Picture 1>.\n\nretention_analysis:\n<Subject 1> is fully preserved from <Picture 1>.\n\ndetailed_description:\n[Shot 1] ... camera, action, timing ...\n\noverall_soundscape: ...\n\nnon_diegetic_music: N/A"
+          },
+          "_meta": {
+            "title": "PROMPT (feeds every stage)"
+          }
+        },
+        "92": {
+          "class_type": "SaveVideo",
+          "inputs": {
+            "video": ["130", 0],
+            "format": "auto",
+            "codec": "auto",
+            "filename_prefix": "video/lowvram_05_ref2va_4step_sla"
+          },
+          "_meta": {
+            "title": "REFERENCE 2026-08-29: fused ref-delta bake + SLA 0.9/64, res_multistep/simple/4, shift 12/3, 1152x640, 243 f, seed 42 -> subway_bake_sla_00001_.mp4"
+          }
+        },
+        "115": {
+          "class_type": "ResolutionSelector",
+          "inputs": {
+            "aspect_ratio": "16:9 (Widescreen)",
+            "megapixels": 0.7,
+            "multiple": 32
+          }
+        },
+        "116": {
+          "class_type": "ComfyMathExpression",
+          "inputs": {
+            "expression": "a",
+            "values.a": 0
+          }
+        },
+        "119": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "minimax_h3_video_vae_int8_convrot.safetensors"
+          }
+        },
+        "120": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+          }
+        },
+        "121": {
+          "class_type": "VAEDecodeAudio",
+          "inputs": {
+            "samples": ["125", 0],
+            "vae": ["120", 0]
+          }
+        },
+        "122": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": ["125", 0],
+            "vae": ["119", 0]
+          }
+        },
+        "124": {
+          "class_type": "BasicScheduler",
+          "inputs": {
+            "model": ["142", 0],
+            "scheduler": "simple",
+            "steps": 4,
+            "denoise": 1
+          }
+        },
+        "125": {
+          "class_type": "SamplerCustomAdvanced",
+          "inputs": {
+            "noise": ["129", 0],
+            "guider": ["126", 0],
+            "sampler": ["135", 0],
+            "sigmas": ["124", 0],
+            "latent_image": ["131", 1]
+          }
+        },
+        "126": {
+          "class_type": "BasicGuider",
+          "inputs": {
+            "model": ["142", 0],
+            "conditioning": ["131", 0]
+          }
+        },
+        "127": {
+          "class_type": "UNETLoader",
+          "inputs": {
+            "unet_name": "minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors",
+            "weight_dtype": "default"
+          }
+        },
+        "128": {
+          "class_type": "CLIPLoader",
+          "inputs": {
+            "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+            "type": "minimax",
+            "device": "default"
+          }
+        },
+        "129": {
+          "class_type": "RandomNoise",
+          "inputs": {
+            "noise_seed": 42
+          }
+        },
+        "130": {
+          "class_type": "CreateVideo",
+          "inputs": {
+            "images": ["122", 0],
+            "audio": ["121", 0],
+            "fps": 24,
+            "bit_depth": 8
+          }
+        },
+        "131": {
+          "class_type": "MiniMaxH3ReferenceToVideo",
+          "inputs": {
+            "clip": ["128", 0],
+            "vae": ["119", 0],
+            "audio_vae": ["120", 0],
+            "prompt": ["1", 0],
+            "width": ["115", 0],
+            "height": ["115", 1],
+            "length": ["132", 1],
+            "ref_image_size": "match",
+            "ref_images.ref_image_0": ["901", 0]
+          },
+          "_meta": {
+            "title": "MiniMaxH3ReferenceToVideo"
+          }
+        },
+        "132": {
+          "class_type": "ComfyMathExpression",
+          "inputs": {
+            "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
+            "values.a": ["133", 0]
+          }
+        },
+        "133": {
+          "class_type": "PrimitiveFloat",
+          "inputs": {
+            "value": 10
+          }
+        },
+        "135": {
+          "class_type": "KSamplerSelect",
+          "inputs": {
+            "sampler_name": "res_multistep"
+          }
+        },
+        "142": {
+          "class_type": "MiniMaxH3SigmaShift",
+          "inputs": {
+            "model": ["900", 0],
+            "shift_video": 12,
+            "shift_audio": 3
+          }
+        },
+        "900": {
+          "class_type": "H3SLAAttention",
+          "inputs": {
+            "model": ["902", 0],
+            "sparsity_ratio": 0.9,
+            "block_size": "64",
+            "min_seq_len": 8192,
+            "dense_last_steps": 0,
+            "protect_audio": true,
+            "enabled": true
+          },
+          "_meta": {
+            "title": "H3 SLA Attention 0.9/64 (their graph)"
+          }
+        },
+        "901": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "reference_1.png"
+          },
+          "_meta": {
+            "title": "REFERENCE IMAGE 1 (<Picture 1>); the node grows more image / video / audio slots"
+          }
+        },
+        "902": {
+          "class_type": "MiniMaxChunkFeedForward",
+          "inputs": {
+            "model": ["127", 0],
+            "chunks": 4,
+            "seq_threshold": 4096
+          },
+          "_meta": {
+            "title": "LOW VRAM: chunk the feed-forward over the sequence (exact; KJNodes)"
+          }
+        }
+      },
+      "graphSha256": "b8889f2919f64ddd75f6c9fda35cfcaea4b44d54d600fb16e0b8a49f3cef5d6e",
+      "graphSerialization": "UTF-8 JSON.stringify(graph, null, 2) + LF",
+      "bindings": {
+        "prompt": [
+          {
+            "nodeId": "1",
+            "input": "value"
+          }
+        ],
+        "durationSeconds": [
+          {
+            "nodeId": "133",
+            "input": "value"
+          }
+        ],
+        "seed": [
+          {
+            "nodeId": "129",
+            "input": "noise_seed"
+          }
+        ],
+        "megapixels": [
+          {
+            "nodeId": "115",
+            "input": "megapixels"
+          }
+        ],
+        "outputPrefix": [
+          {
+            "nodeId": "92",
+            "input": "filename_prefix"
+          }
+        ],
+        "image": [
+          {
+            "nodeId": "901",
+            "input": "image"
+          }
+        ]
+      },
+      "defaults": {
+        "durationSeconds": 4,
+        "megapixels": 0.2,
+        "seed": 42
+      },
+      "smokeInput": {
+        "prompt": "A red ceramic cup on a wooden table in soft daylight, one continuous shot; quiet room tone.",
+        "durationSeconds": 4,
+        "seed": 42
+      },
+      "smokeRequirements": [
+        "Supply exactly one real image in the registered input role.",
+        "Validate decoded moving frames, duration and native audio on the actual runtime. Video/audio references are not supported by this native H3 adapter."
+      ],
+      "derivation": {
+        "method": "Exact embedded API export from the pinned legacy bundle; shared fused model, encoder, VAEs and custom nodes.",
+        "originalTemplate": {
+          "path": "workflows/lowvram/05_ref2va_4step_sla_lowvram.api.json",
+          "format": "api",
+          "sizeBytes": 4737,
+          "sha256": "c3bf8dc9bb5d8265648f5a49d31c4323a1f132206ddc3a4230c4e5e07bd979c4",
+          "repository": "OpenH3 bundled h3EmbeddedWorkflows.json",
+          "revision": "sha256:c3bf8dc9bb5d8265648f5a49d31c4323a1f132206ddc3a4230c4e5e07bd979c4",
+          "url": "openh3-resource://runtime/h3EmbeddedWorkflows.json#workflows%2Flowvram%2F05_ref2va_4step_sla_lowvram.api.json"
+        }
+      },
+      "workflowMetadata": {
+        "id": "h3-matlowai-fused-int8-r2v-api-v1",
+        "revision": "b8889f2919f64ddd75f6c9fda35cfcaea4b44d54d600fb16e0b8a49f3cef5d6e",
+        "tasks": ["reference-to-video"],
+        "inputs": [
+          {
+            "role": "reference",
+            "type": "image",
+            "minCount": 1,
+            "maxCount": 1,
+            "binding": "image",
+            "bindingIndex": 0
+          }
+        ],
+        "adapter": "native",
+        "preparation": "pending",
+        "source": {
+          "url": "openh3-resource://runtime/h3EmbeddedWorkflows.json#workflows%2Flowvram%2F05_ref2va_4step_sla_lowvram.api.json",
+          "sha256": "c3bf8dc9bb5d8265648f5a49d31c4323a1f132206ddc3a4230c4e5e07bd979c4"
+        },
+        "evidence": [
+          {
+            "kind": "recipe",
+            "workflowHash": "b8889f2919f64ddd75f6c9fda35cfcaea4b44d54d600fb16e0b8a49f3cef5d6e",
+            "checkedAt": "2026-11-10T00:00:00.000Z",
+            "inputRoles": ["reference"]
+          }
+        ]
+      },
+      "preparation": {
+        "policy": "with-base",
+        "sharedComponentHashes": [
+          "4262e4e9963c553fa00016bbe83961407a4fc0a888be95fd836c8d4f2304e48b",
+          "9bb2d96f218c76babd85e0611b85ca8fb330a90546c01a0005e8a58a59593410",
+          "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48",
+          "35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6"
+        ],
+        "additionalComponents": [],
+        "additionalBytes": 0
+      }
+    }
+  ],
+  "capabilityInventory": [
+    {
+      "family": "h3",
+      "tasks": ["text-to-video", "image-to-video", "reference-to-video"],
+      "scope": "Pinned MATLOWAI fused INT8 legacy set has three executable API graphs. Official unfused H3 candidate remains a UI source requiring conversion.",
+      "unprepared": ["last-frame pairing", "video references", "audio references"],
+      "adapter": "native"
+    },
+    {
+      "family": "qwen-edit",
+      "tasks": ["image-edit", "multi-reference-image"],
+      "scope": "2511 FP8-mixed Lightning: one edit source, or one edit source plus one ordered reference, restored from official conversion. Recipe checks only; local editing fidelity remains unverified.",
+      "unprepared": ["identity fidelity", "three-image editing", "masked editing"],
+      "adapter": "native"
+    },
+    {
+      "family": "z-image",
+      "tasks": ["text-to-image", "image-to-image"],
+      "scope": "Turbo BF16 text generation and ordinary single-source latent img2img; reference run: Windows RTX 5080, 512x512, denoise 0.55.",
+      "unprepared": ["structural control patch", "inpaint patch", "identity fidelity"],
+      "adapter": "native"
+    },
+    {
+      "family": "fasth3-omni",
+      "tasks": ["reference-to-video"],
+      "scope": "Pinned four precisions share the native Omni adapter. It constructs ordered image/video/audio references; at least one image/video required. Local runs validate each tested input mode separately.",
+      "unprepared": ["first/last frame guarantees", "identity fidelity"],
+      "adapter": "fasth3-omni"
+    },
+    {
+      "family": "flux-3-image-klein",
+      "tasks": ["text-to-image"],
+      "scope": "Only pinned text-to-image API recipes are vetted in this bundle. Prompt layout/style is text conditioning, not an image adapter.",
+      "unprepared": ["image editing", "multiple image references", "structural control", "identity fidelity"],
+      "adapter": "native"
+    },
+    {
+      "family": "moss-image-base",
+      "tasks": ["text-to-image"],
+      "scope": "Only pinned text-to-image API recipes are vetted in this bundle. Prompt layout/style is text conditioning, not an image adapter.",
+      "unprepared": ["image editing", "multiple image references", "structural control", "identity fidelity"],
+      "adapter": "native"
+    },
+    {
+      "family": "moss-image-sft",
+      "tasks": ["text-to-image"],
+      "scope": "Only pinned text-to-image API recipes are vetted in this bundle. Prompt layout/style is text conditioning, not an image adapter.",
+      "unprepared": ["image editing", "multiple image references", "structural control", "identity fidelity"],
+      "adapter": "native"
+    },
+    {
+      "family": "krea2",
+      "tasks": ["text-to-image"],
+      "scope": "Only pinned text-to-image API recipes are vetted in this bundle. Prompt layout/style is text conditioning, not an image adapter.",
+      "unprepared": ["image editing", "multiple image references", "structural control", "identity fidelity"],
+      "adapter": "native"
+    }
+  ],
+  "preparationPolicy": {
+    "execution": "agent",
+    "default": "Prepare all vetted with-base variants for the selected exact model set, sharing weights, runtime and compatible nodes. Validate the default and compatible ready variants on this machine.",
+    "onDemand": "Research, pin, prepare and validate missing supported control/LoRA/adapter capabilities in the same request; download only missing exact artifacts. Research leads are not executable entries.",
+    "dependencyAccounting": "additionalBytes counts listed variant weights relative to this candidate; existing-file reuse requires matching identity. Runtime/node downloads and measured environment readiness are assessed separately."
   }
 }

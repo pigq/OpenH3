@@ -25,7 +25,11 @@ import {
   type IMcpServer,
   type IProvider,
 } from '@/common/config/storage';
-import { getBuiltinMcpScriptPath, type ProcessConfig as ProcessConfigType } from './initStorage';
+import {
+  getBuiltinMcpNodeRuntime,
+  getBuiltinMcpScriptPath,
+  type ProcessConfig as ProcessConfigType,
+} from './initStorage';
 import { migrateAssistantsToBackend } from './migrateAssistants';
 import { provisionVideoProvider, DEFAULT_VIDEO_GATEWAY_URL } from './videoProviderPreset';
 import { provisionComfySkill } from '../services/skills/provisionComfySkill';
@@ -216,9 +220,11 @@ function isSameStdioTransport(left: IMcpServer['transport'], right: IMcpServer['
 
 function buildBuiltinBrowserServer(): McpImportServer {
   const scriptPath = getBuiltinMcpScriptPath(BUILTIN_BROWSER_SCRIPT);
+  const nodeRuntime = getBuiltinMcpNodeRuntime();
   const serverConfig = {
-    command: 'node',
+    command: nodeRuntime?.executable ?? 'node',
     args: [scriptPath],
+    ...(nodeRuntime ? { env: { OPENH3_NPX_CLI: nodeRuntime.npxCli } } : {}),
   };
 
   return {
@@ -234,6 +240,7 @@ function buildBuiltinBrowserServer(): McpImportServer {
       type: 'stdio',
       command: serverConfig.command,
       args: serverConfig.args,
+      ...(serverConfig.env ? { env: serverConfig.env } : {}),
     },
     original_json: JSON.stringify({ mcpServers: { [BUILTIN_BROWSER_MCP_NAME]: serverConfig } }, null, 2),
   };
@@ -551,7 +558,7 @@ async function ensureBootstrapMcpServersInDb(configFile: ConfigFile): Promise<vo
       ) {
         desiredBrowserServer.transport = {
           ...desiredBrowserServer.transport,
-          env: existingBrowserServer.transport.env,
+          env: { ...existingBrowserServer.transport.env, ...desiredBrowserServer.transport.env },
         };
         desiredBrowserServer.original_json = buildOriginalJsonFromTransport({
           name: BUILTIN_BROWSER_MCP_NAME,

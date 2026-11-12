@@ -202,5 +202,9 @@
   },
   "selectedCount": "選択済み {{count}}",
   "selectedSkills": "選択済みスキル",
-  "aiAssistant": "AI アシスタント"
+  "aiAssistant": "AI アシスタント",
+  "rendererRecovery": {
+    "title": "ページエラー",
+    "description": "このページを表示できませんでした。再読み込みして続行してください。"
+  }
 }

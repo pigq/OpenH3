@@ -174,6 +174,23 @@ it('reports unavailable status instead of silently disappearing', async () => {
   await waitFor(() => expect(view.getByRole('status').textContent).toContain('disconnected'));
 });
 
+it('explains an unavailable historical video and retries playback without generating a new job', async () => {
+  mocks.get.mockResolvedValue({
+    id,
+    status: 'succeeded',
+    artifacts: [{ filename: 'prior.mp4', mimeType: 'video/mp4', resourcePath: `/api/h3/jobs/${id}/artifacts/0` }],
+  });
+  const load = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+  const view = render(<H3ToolResults messages={[message]} />);
+  await waitFor(() => expect(view.container.querySelector('video')).not.toBeNull());
+  fireEvent.error(view.container.querySelector('video')!);
+  expect(view.getByRole('alert')).toHaveTextContent('conversation.h3Activity.artifactUnavailable');
+  fireEvent.click(view.getByRole('button', { name: 'common.retry' }));
+  expect(load).toHaveBeenCalledOnce();
+  expect(mocks.get).toHaveBeenCalledOnce();
+  load.mockRestore();
+});
+
 it('shares the live job connection between result cards and keeps it until the final observer leaves', async () => {
   mocks.get.mockResolvedValue({ id, status: 'running', artifacts: [] });
   const first = render(<H3ToolResults messages={[message]} />);

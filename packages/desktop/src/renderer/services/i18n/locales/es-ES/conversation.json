@@ -814,7 +814,8 @@
     "executingNode": "Executing node {{node}}, including initialization and computation",
     "finalizing": "Checking output files",
     "noRecentProgress": "No new progress for over 1 minute; execution may still be active.",
-    "cancelHint": "Cancel ends this generation; sampling cannot resume. Stopping chat does not cancel the video task."
+    "cancelHint": "Cancel ends this generation; sampling cannot resume. Stopping chat does not cancel the video task.",
+    "artifactUnavailable": "El vídeo local no está disponible. La aplicación busca en las carpetas de salida conocidas. Comprueba que el archivo original siga allí y vuelve a reproducirlo."
   },
   "workProgress": {
     "title": "Progreso del trabajo",

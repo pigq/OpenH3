@@ -43,6 +43,7 @@ which.workspace = true
 aion-agent.workspace = true
 aion-providers.workspace = true
 aion-types.workspace = true
+aion-tools.workspace = true
 aion-protocol.workspace = true
 aion-config.workspace = true
 aion-mcp.workspace = true

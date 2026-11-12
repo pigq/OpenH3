@@ -40,6 +40,14 @@ describe('fileUtils', () => {
   });
 
   describe('getContentTypeByExtension', () => {
+    it('routes ZIP to its directory viewer and other archives away from text decoding', () => {
+      expect(getContentTypeByExtension('交付.zip')).toBe('archive');
+      expect(isTextFile('交付.zip')).toBe(false);
+      for (const extension of ['7z', 'rar', 'tar', 'gz']) {
+        expect(getContentTypeByExtension(`交付.${extension}`)).toBe('unsupported');
+        expect(isTextFile(`交付.${extension}`)).toBe(false);
+      }
+    });
     it('returns markdown for .md', () => {
       expect(getContentTypeByExtension('README.md')).toBe('markdown');
     });

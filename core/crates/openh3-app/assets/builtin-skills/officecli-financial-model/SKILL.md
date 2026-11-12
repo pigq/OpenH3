@@ -105,16 +105,16 @@ Delete any `Print_Area` set on Calc sheets — conflicting scopes emit multi-pag
 
 ## Build-order & cache-drift rule (critical for 3-statement)
 
-Three facts cause silent wrong numbers: (1) new formulas ship without cached values — Excel recomputes on open, HTML preview / older viewers do not; (2) downstream written in the same sequence as upstream caches `0` from upstream's pre-cache state; (3) cross-sheet `batch` while resident is open deadlocks at 3–5 ops.
+Cache availability and resident behavior vary by installed version. Inspect actual readback and installed help before relying on evaluator support. A formula can be preserved correctly while its cached result is missing or stale; neither state proves the displayed financial output is correct.
 
 **Discipline (every recipe):**
 - Build order follows the data chain: `P&L → BS → CF` (3-statement); `FCF → WACC → NPV → Sensitivity` (DCF); `S&U → Debt → P&L → CF → Returns` (LBO).
-- After the cross-sheet chain, **cache-refresh pass:** re-issue `set` on every summary / valuation / balance-check cell, non-resident.
-- Spot-check: `officecli get "$FILE" /Summary/B2 --json | jq '.data.results[0].format.cachedValue'` returns a plausible non-null value. `null` means Excel will compute on open (OK for delivery). If a cell shows the `#OCLI_NOTEVAL!` sentinel: close residents, re-set; still unevaluated → cache-fallback (§Financial function patterns).
+- After the cross-sheet chain, verify downstream caches. If the installed version requires a non-resident retry, follow the explicit opt-out procedure in `officecli-xlsx` §Common Workflow; closing a file alone may not disable auto-resident mode.
+- Spot-check each valuation and balance-check cell against expected results. A missing cache or `#OCLI_NOTEVAL!` is unresolved verification, not a successful financial delivery. Preserve the formula, inspect dependencies, and recalculate through an available verified engine; if that remains unavailable, identify affected cells and state the output is uncalculated, without claiming the financial gates passed.
 
 ## Recipes — three model types
 
-Each recipe below is **runnable skeleton, not finance theory**. Substitute numbers; don't restructure. All recipes assume `FILE="model.xlsx"` is set and you have run `officecli create "$FILE"` + `officecli open "$FILE"`. Close with `officecli close "$FILE"` at the end.
+Each recipe below is a **starting skeleton**. Adapt structure and assumptions to the user's model while preserving formula dependencies and accounting identities. All recipes assume `FILE="model.xlsx"` is set and you have run `officecli create "$FILE"` + `officecli open "$FILE"`. Close with `officecli close "$FILE"` at the end.
 
 ### Recipe A — 3-statement model (P&L + BS + CF)
 
@@ -428,7 +428,7 @@ Terse reference — not a finance textbook. Resolve unfamiliar standard function
 | `MIRR(values, financeRate, reinvestRate)` | `IRR` with sign flips | When cash-flow pattern has 2+ sign changes |
 | `SUMIFS(sumRange, criteriaRange1, criterion1, ...)` | `SUMPRODUCT((...))` array | Clearer intent for conditional sums; either evaluates correctly |
 
-**Evaluator coverage — verify, don't preemptively hardcode.** The CLI evaluator computes the finance functions this skill uses — `NPV` / `XNPV` / `IRR` / `XIRR`, array-literal formulas (`IRR({...})`), and `SUMPRODUCT(1/COUNTIF(range,range))` distinct-count — and caches the correct value with `evaluated:true`. There is no `NPV→0` rewrite obligation and no distinct-count `1/N` trap. The honest rule: build the formula you mean, then verify the cached value with a readback (`get ... --json | jq '.data.results[0].format.cachedValue'`). Only if a specific cell genuinely comes back with the `#OCLI_NOTEVAL!` sentinel (formula written before its inputs, or an unsupported function) should you fall back — first re-set non-resident after `close`; if it still won't evaluate, hardcode the computed value with a blue font and a classic comment via `officecli add "$FILE" /Sheet --type comment --prop ref=<cell> --prop text='cached valuation; refreshes on open in Excel — do not edit'`, and disclose in delivery notes.
+**Evaluator coverage — preserve formulas.** Build the intended formula and compare readback/cache against representative expected results. Use installed help and observed output to establish evaluator support. If a cell remains unevaluated after a documented retry, keep the original formula and recalculate in an available compatible spreadsheet engine, or report the exact cells as uncalculated. A separately labelled estimate may aid review but must not replace the model formula or be described as a cache that will refresh. Do not hardcode an output to make a gate pass.
 
 ## Circular references & iterative calc
 
@@ -442,14 +442,14 @@ officecli set "$FILE" / --prop calc.iterate=true --prop calc.iterateCount=100 --
 
 ### Write-order surgery (de-ring → write downstream → re-ring)
 
-`calc.iterate` controls recalc, not write-phase. Appending the closing leg of an already-wired cross-sheet ring (Debt.Interest ↔ CF.Cash ↔ Debt.CashSweep) deadlocks at 100% CPU; `view html` / `get` also hang on a non-converged ring.
+Use iterative calculation only when the chosen engine supports the intended circular model. If the installed tool hangs while writing or evaluating a ring, preserve a recoverable copy and the original cell→formula mapping before changing the write order. Do not assume every version shares a documented deadlock.
 
 **3-step playbook:**
-1. **De-ring** — write Debt with the 10–20 ring cells set to literal `0` (e.g. `C7=0`, not `=-MIN(...)`). Removes the ring.
-2. **Write downstream** — build all non-circular chains (P&L, CF, Exit, Returns, Summary, grid) non-resident, one heredoc per sheet. Everything caches against the zeroed cells.
-3. **Re-ring** — close all residents, re-set each circular cell with its real formula, one `set` per cell, non-resident.
+1. **Stage safely** — in a separate working copy, record every circular cell and its original formula before temporarily breaking the ring. Temporary zeros are construction scaffolding only, never final financial outputs.
+2. **Write downstream** — build the non-circular chains with a supported bounded execution method. Intermediate caches calculated against temporary values are invalid for delivery.
+3. **Restore and verify** — restore every recorded formula, compare the final mapping to the saved originals, and recompute downstream values through a compatible engine before validating balances.
 
-**Acceptance.** `get /Debt/C7 --json | jq '.data.results[0].format.cachedValue'` returns non-zero non-null. If a cell still deadlocks, leave `=0` + classic comment `"circular; recalculates in Excel on F9"`, flag at delivery. Never paper over with `iterateCount=1000`.
+**Acceptance.** Verify the original formulas remain intact and that a compatible engine produces finite, plausible results satisfying balances and convergence checks. Zero can be valid; judge it against the business model. Never replace a circular formula with `=0` and claim F9 can restore it. If evaluation remains blocked, retain the formulas and report the affected cells as uncalculated; do not claim a complete verified financial model.
 
 **Do NOT use `iterate` as a band-aid for `#REF!` / divergent values.** Raising `iterateCount` to 1000 hides the bug and ships a plausibly-wrong value; `validate` does not catch it. Break the loop algebraically (e.g. interest on opening balance only, not average).
 

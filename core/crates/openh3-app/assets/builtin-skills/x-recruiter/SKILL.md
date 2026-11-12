@@ -3,7 +3,7 @@ name: x-recruiter
 description: 用于在 X (x.com) 发布招聘帖子。包含文案规范、图片生成提示和自动化发布脚本。发布 AI 相关岗位或设计类岗位时优先使用。
 ---
 
-> **⚠️ Platform note — read before running any command.** The command examples here are written for **macOS / Linux**. On **Windows**: run `python` (or `py`) instead of `python3`, use `$env:USERPROFILE\…` and backslashes instead of `~/…`, and translate any shell pipes/redirects (`|`, `>`, `&&`) to their PowerShell equivalents before running. The scripts themselves are cross-platform; only the way you invoke them differs.
+> 定位当前加载的本 Skill 目录，记为 `<skill-dir>`，用脚本绝对路径运行；不要假定会话工作目录含有 `scripts/`。Windows 使用 `python` 或 `py`，macOS/Linux 使用可用的 `python3`。在新的任务输出目录执行提示文件生成命令，避免覆盖已有 `image_instructions.txt`；发布命令传入实际文件绝对路径。
 
 # X Recruiter (X 招聘助手)
 
@@ -19,13 +19,15 @@ description: 用于在 X (x.com) 发布招聘帖子。包含文案规范、图�
 - **核心职责 & 要求**
 - **投递邮箱/链接**
 
+不要编造公司、薪资、地点、经验年限或岗位条件；用户已授权的私信投递方式也可使用，不强制邮箱。
+
 ### 2. 生成视觉素材
 
 `scripts/generate_images.js` 只生成 `image_instructions.txt` 提示，不生成图片。按这些提示使用当前已授权的生图、绘图或文档渲染工具制作素材；缺少某个专用工具时检查等价可用工具，不重复调用未知接口。
 
 - **操作**：
   ```bash
-  node scripts/generate_images.js
+  node "<skill-dir>/scripts/generate_images.js"
   ```
 - **脚本产出**：`image_instructions.txt`。完整素材步骤需另行产出 `cover.png`、`jd_details.png`，检查文件存在、可解码且内容正确后再使用。没有可用制作工具时，保留已完成文案并说明具体缺项，不宣称图片已生成。
 
@@ -48,15 +50,15 @@ description: 用于在 X (x.com) 发布招聘帖子。包含文案规范、图�
 **执行命令**：
 
 ```bash
-python3 scripts/publish_x.py "post_content.txt" "cover.png" "jd_details.png"
+python "<skill-dir>/scripts/publish_x.py" "<post_content.txt绝对路径>" "<cover.png绝对路径>" "<jd_details.png绝对路径>"
 ```
 
 **交互流程（更清晰的步骤说明）**：
 
 1. 观察浏览器窗口：脚本已打开 X 首页或发帖页。
 2. 若出现登录页，请完成登录。
-3. 登录完成后，脚本会自动填充文案与图片。
-4. 脚本自动点击 Post；核对真实发布结果并提供帖子链接。进程退出或点击成功不代表发布成功，状态不明时先检查已有帖子，不重复提交。已明确授权发布时不另加聊天确认，登录交互仍由用户完成。
+3. 使用用户授权的账号完成登录；脚本自动填充文案与图片，检查文案回读和附件数量后才点击 Post。
+4. 脚本只提交一次，只有创建结果中的帖子 ID、文案和媒体数量与本次请求匹配才输出 `status: published` 和 `url`。平台布局或响应变化会返回未验证状态，不能凭点击、HTTP 200 或进程退出宣称成功。Agent 核对真实帖子链接；状态不明先检查已有帖子，不重复提交。脚本结束时关闭其浏览器，可用已有获准的浏览器工具继续核对。已明确授权发布时不另加聊天确认，登录交互仍由用户完成。
 
 ## 资源文件
 

@@ -1,6 +1,24 @@
-const { createCanvas, loadImage, registerFont } = require('canvas');
 const fs = require('fs');
 const path = require('path');
+
+// Read supplied facts before drawing or touching any output file.
+const [jobFile, outputDirectory] = process.argv.slice(2);
+if (!jobFile || !outputDirectory) throw new Error('Usage: generate_images.js <job JSON path> <new output directory>');
+const job = JSON.parse(fs.readFileSync(path.resolve(jobFile), 'utf8').replace(/^\uFEFF/, ''));
+for (const field of ['roleTitle', 'roleDesc', 'contact']) {
+  if (typeof job?.[field] !== 'string' || !job[field].trim()) throw new Error(`Missing job JSON field: ${field}`);
+}
+for (const field of ['responsibilities', 'requirements']) {
+  if (job[field] !== undefined && (!Array.isArray(job[field]) || job[field].some((item) => typeof item !== 'string')))
+    throw new Error(`Job JSON field ${field} must be an array of strings.`);
+}
+const outputDir = path.resolve(outputDirectory);
+const coverPath = path.join(outputDir, 'cover.png');
+const detailsPath = path.join(outputDir, 'jd_details.png');
+for (const output of [coverPath, detailsPath]) {
+  if (fs.existsSync(output)) throw new Error(`Output already exists: ${output}. Choose a new output directory.`);
+}
+const { createCanvas, registerFont } = require('canvas');
 
 // --- Configuration ---
 const WIDTH = 1080;
@@ -151,8 +169,8 @@ function generateCover(title1, title2, slogan1, slogan2) {
 
   ctx.fillStyle = COLORS.textPrimary;
   ctx.font = 'bold 100px Mono';
-  ctx.fillText(title1 || 'AGENT', PADDING, 420);
-  ctx.fillText(title2 || 'DESIGNER', PADDING, 520);
+  ctx.fillText(title1, PADDING, 420, WIDTH - PADDING * 2);
+  ctx.fillText(title2 || '', PADDING, 520, WIDTH - PADDING * 2);
 
   const cx = WIDTH / 2;
   const cy = HEIGHT / 2 + 150;
@@ -193,12 +211,12 @@ function generateCover(title1, title2, slogan1, slogan2) {
   ctx.fillText(slogan2 || 'Redefine the Human-AI Interaction', PADDING, HEIGHT - 150);
 
   const buffer = canvas.toBuffer('image/png');
-  fs.writeFileSync('cover.png', buffer);
-  console.log('Created cover.png');
+  fs.writeFileSync(coverPath, buffer, { flag: 'wx' });
+  console.log(`Created ${coverPath}`);
 }
 
 // --- Image 2: JD ---
-function generateJD(roleTitle, roleDesc, responsibilities, requirements, email) {
+function generateJD(roleTitle, roleDesc, responsibilities, requirements, contact) {
   const canvas = createCanvas(WIDTH, HEIGHT);
   const ctx = canvas.getContext('2d');
 
@@ -218,7 +236,7 @@ function generateJD(roleTitle, roleDesc, responsibilities, requirements, email) 
 
   ctx.fillStyle = COLORS.textPrimary;
   ctx.font = 'bold 60px Mono';
-  ctx.fillText(roleTitle || 'AGENT DESIGNER', PADDING, 140);
+  ctx.fillText(roleTitle, PADDING, 140, WIDTH - PADDING * 2);
 
   let cursorY = 260;
   const contentWidth = WIDTH - PADDING * 2;
@@ -278,19 +296,14 @@ function generateJD(roleTitle, roleDesc, responsibilities, requirements, email) 
 
   ctx.fillStyle = COLORS.textPrimary;
   ctx.font = 'bold 40px Sans';
-  ctx.fillText(email || 'contact@example.com', PADDING + 30, boxY + 110);
+  ctx.fillText(contact, PADDING + 30, boxY + 110, contentWidth - 60);
 
   const buffer = canvas.toBuffer('image/png');
-  fs.writeFileSync('jd_details.png', buffer);
-  console.log('Created jd_details.png');
+  fs.writeFileSync(detailsPath, buffer, { flag: 'wx' });
+  console.log(`Created ${detailsPath}`);
 }
 
 // --- Main execution ---
-// Defaults
-const defaults = {};
-
-// You could parse process.argv here to override defaults if needed
-// For now, we'll use the hardcoded structure or let the user edit this file.
-
-generateCover(defaults.title1, defaults.title2, defaults.slogan1, defaults.slogan2);
-generateJD(defaults.roleTitle, defaults.roleDesc, defaults.responsibilities, defaults.requirements, defaults.email);
+fs.mkdirSync(outputDir, { recursive: true });
+generateCover(job.title1 || job.roleTitle, job.title2, job.slogan1, job.slogan2);
+generateJD(job.roleTitle, job.roleDesc, job.responsibilities, job.requirements, job.contact);

@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ComfyGenerationInput, ComfyProfile } from '@/common/chat/document/creation/comfy';
 import { resolveMediaBinary } from '../mediaBinary';
+import { graphAlignedVideoDuration } from './routing/videoTiming';
 
 export type ComfySmokeContext = {
   profile: ComfyProfile;
@@ -17,15 +18,21 @@ function expected(
   key: 'width' | 'height' | 'durationSeconds'
 ): number | undefined {
   if (!context) return undefined;
-  // Omni baselines bind frame count rather than seconds. The submitted
-  // duration is still part of the user contract and must be checked against
-  // the generated media even when no durationSeconds node binding exists.
+  // Any workflow may bind frames instead of seconds. Validate the same
+  // duration/frame-alignment contract used to construct its submitted graph.
   if (
     !context.profile.bindings[key]?.length &&
-    !(key === 'durationSeconds' && context.profile.family === 'fasth3-omni')
+    !(
+      key === 'durationSeconds' &&
+      (context.profile.bindings.frames?.length || context.profile.family === 'fasth3-omni')
+    )
   )
     return undefined;
   const value = Number(context.input[key] ?? context.profile.defaults[key]);
+  if (key === 'durationSeconds' && value > 0 && context.profile.bindings.durationSeconds?.length) {
+    const aligned = graphAlignedVideoDuration(context.profile, value);
+    if (aligned !== undefined) return aligned;
+  }
   if (key === 'durationSeconds' && context.profile.bindings.frames?.length && value > 0) {
     const fps = Number(context.profile.defaults.fps);
     const multiple = Number(context.profile.defaults.frameMultiple ?? 1);
@@ -53,7 +60,8 @@ export async function verifyComfySmokeArtifact(
   artifact: { path: string; mimeType: string },
   kind: ComfyProfile['kind'],
   signal: AbortSignal,
-  context?: ComfySmokeContext
+  context?: ComfySmokeContext,
+  mode?: 'smoke' | 'generation'
 ): Promise<void> {
   checkAbort(signal);
   try {
@@ -81,7 +89,7 @@ export async function verifyComfySmokeArtifact(
       throw new Error('invalid visual dimensions');
     for (const key of ['width', 'height'] as const) {
       const planned = expected(context, key);
-      if (planned && stream[key] !== planned) throw new Error(`unexpected ${key}`);
+      if (planned && stream[key] !== planned) throw mismatch(`unexpected ${key}`, planned, stream[key]);
     }
     const duration = Number(data.format?.duration ?? stream.duration);
     if (kind === 'video') {
@@ -89,13 +97,19 @@ export async function verifyComfySmokeArtifact(
       const planned = expected(context, 'durationSeconds');
       const fps = frameRate(stream.avg_frame_rate);
       const tolerance = Math.max(0.15, fps > 0 ? 2 / fps : 0.25);
-      if (planned && Math.abs(duration - planned) > tolerance) throw new Error('unexpected duration');
+      if (planned && Math.abs(duration - planned) > tolerance) throw mismatch('unexpected duration', planned, duration);
       if (context?.profile.family === 'fasth3-omni') {
         if (Math.abs(fps - 24) > 0.01) throw new Error('unexpected Omni frame rate');
       }
     }
     const samples: Buffer[] = [];
-    const positions = kind === 'video' ? [duration * 0.1, duration * 0.5, duration * 0.9] : [0];
+    const fps = frameRate(stream.avg_frame_rate);
+    const videoDuration = Number(stream.duration) > 0 ? Number(stream.duration) : duration;
+    // Container duration includes the final frame's display interval. Seeking
+    // inside that interval can produce no frame on short/low-frame-rate clips.
+    const lastFrame = fps > 0 ? Math.max(0, videoDuration - 1 / fps) : videoDuration * 0.5;
+    const positions =
+      kind === 'video' ? [0.1, 0.5, 0.9].map((ratio) => Math.min(videoDuration * ratio, lastFrame)) : [0];
     for (const position of positions) {
       checkAbort(signal);
       const decoded = await exec(
@@ -126,7 +140,7 @@ export async function verifyComfySmokeArtifact(
     }
     // User requests may intentionally produce a solid image, a static scene, or
     // silent audio. Only the controlled smoke prompt promises nontrivial content.
-    const smoke = context?.mode !== 'generation';
+    const smoke = (mode ?? context?.mode) !== 'generation';
     if (smoke) {
       if (!samples.some((sample) => sample.some((pixel) => pixel > 1) && sample.some((pixel) => pixel < 254)))
         throw new Error('blank pixels');
@@ -183,6 +197,24 @@ export async function verifyComfySmokeArtifact(
     const code = (cause as NodeJS.ErrnoException | undefined)?.code;
     if (code && ['ENOENT', 'EACCES', 'EPERM', 'ENOEXEC'].includes(code))
       throw new Error('COMFY_MEDIA_VALIDATOR_UNAVAILABLE', { cause });
-    throw new Error(kind === 'image' ? 'COMFY_SMOKE_IMAGE_INVALID' : 'COMFY_SMOKE_VIDEO_INVALID', { cause });
+    throw Object.assign(
+      new Error(kind === 'image' ? 'COMFY_SMOKE_IMAGE_INVALID' : 'COMFY_SMOKE_VIDEO_INVALID', { cause }),
+      {
+        diagnosis: {
+          category: 'output-validation',
+          retryable: false,
+          action:
+            cause instanceof Error && 'detail' in cause
+              ? String(cause.detail)
+              : cause instanceof Error
+                ? cause.message
+                : String(cause),
+        },
+      }
+    );
   }
+}
+
+function mismatch(message: string, expected: number, actual: number | undefined): Error {
+  return Object.assign(new Error(message), { detail: `${message}: expected=${expected}, actual=${actual}` });
 }

@@ -202,5 +202,9 @@
   },
   "selectedCount": "已選 {{count}}",
   "selectedSkills": "已選技能",
-  "aiAssistant": "AI 助手"
+  "aiAssistant": "AI 助手",
+  "rendererRecovery": {
+    "title": "頁面發生錯誤",
+    "description": "頁面目前無法顯示，請重新載入。"
+  }
 }

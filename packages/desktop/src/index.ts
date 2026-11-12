@@ -29,7 +29,7 @@ import { startBackendOrExit } from './process/startup/backendStartup';
 import { assertStartupArchitectureCompatible } from './process/startup/architectureCompatibility';
 import { classifyBackendStartupFailure } from './process/startup/backendStartupFailure';
 import { installQuitCleanup } from './process/startup/quitCleanup';
-import { shouldRegisterBackendStartup } from './process/startup/singleInstanceGating';
+import { createShutdownRelaunchGate, shouldRegisterBackendStartup } from './process/startup/singleInstanceGating';
 import { ProcessConfig } from './process/utils/initStorage';
 import type { BackendStartupFailureInfo } from './common/types/platform/electron';
 import { registerWindowMaximizeListeners } from '@process/bridge';
@@ -95,6 +95,17 @@ const skipSingleInstanceLock =
   isE2ETestMode || (process.env.OPENH3_MULTI_INSTANCE ?? process.env.AIONUI_MULTI_INSTANCE) === '1';
 const deepLinkFromArgv = process.argv.find(isDeepLinkUrl);
 const gotTheLock = skipSingleInstanceLock ? true : app.requestSingleInstanceLock({ deepLinkUrl: deepLinkFromArgv });
+const deferLaunchDuringShutdown = createShutdownRelaunchGate({
+  isQuitting: getIsQuitting,
+  relaunch: (deepLinkUrl) => {
+    console.info('[OpenH3] Launch requested during shutdown; relaunching after cleanup');
+    app.relaunch(
+      deepLinkUrl
+        ? { args: [...process.argv.slice(1).filter((argument) => !isDeepLinkUrl(argument)), deepLinkUrl] }
+        : undefined
+    );
+  },
+});
 if (!gotTheLock) {
   console.warn('[OpenH3] Another instance is already running; current process will exit.');
   app.quit();
@@ -102,6 +113,7 @@ if (!gotTheLock) {
   app.on('second-instance', (_event, argv, _workingDirectory, additionalData) => {
     // Prefer additionalData (reliable on all platforms), fallback to argv scan
     const deepLinkUrl = (additionalData as { deepLinkUrl?: string })?.deepLinkUrl || argv.find(isDeepLinkUrl);
+    if (deferLaunchDuringShutdown(deepLinkUrl)) return;
     if (deepLinkUrl) {
       handleDeepLinkUrl(deepLinkUrl);
     }
@@ -1224,6 +1236,7 @@ for (const scheme of [PROTOCOL_SCHEME, LEGACY_PROTOCOL_SCHEME]) {
 // macOS: handle OpenH3 URLs via the open-url event
 app.on('open-url', (event, url) => {
   event.preventDefault();
+  if (deferLaunchDuringShutdown(url)) return;
   handleDeepLinkUrl(url);
   if (isWebUIMode || isResetPasswordMode || !app.isReady()) {
     return;
@@ -1267,6 +1280,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('activate', () => {
+  if (deferLaunchDuringShutdown()) return;
   // On OS X it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.
   // Skip if handleAppReady hasn't finished — it will create the window itself.

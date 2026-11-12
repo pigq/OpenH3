@@ -5,6 +5,7 @@
  */
 
 import type { IConversationMcpStatus } from '@/common/config/storage';
+import type { CreationRequest } from '@/common/chat/document/creation/creation';
 import React, { createContext, useContext } from 'react';
 
 /**
@@ -12,6 +13,7 @@ import React, { createContext, useContext } from 'react';
  * 会话上下文接口
  */
 export interface ConversationContextValue {
+  creationRequest?: CreationRequest;
   /**
    * Conversation ID
    * 会话 ID

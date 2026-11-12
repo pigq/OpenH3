@@ -77,7 +77,7 @@ Deliverable standards every document MUST meet — know these before reaching fo
 
 **Typographic quality.** New content uses curly quotes (`'` `'` `"` `"`), not ASCII — Unicode directly or XML entities (`&#x2018;`/`&#x2019;`/`&#x201C;`/`&#x201D;`) inside `raw-set`. En-dash `–` for ranges (`2024–2026`), em-dash `—` for parenthetical breaks.
 
-**Headers, footers, page numbers on any document > 1 page.** Page numbers go through a live `PAGE` field (`--prop field=page`), never the literal text "Page 1" — the CLI injects `<w:fldChar>` for you (see Headers & Footers).
+**Page numbering follows the document purpose and template.** Default to page numbers for multi-page reports; one-page letters and templates that intentionally omit numbering do not require them. When numbering is required, use a live `PAGE` field (`--prop field=page`), never literal "Page 1" (see Headers & Footers). Determine page count from the rendered document, not stale metadata.
 
 **Preserve existing templates.** When editing a file that already has a look, match it — existing conventions override these guidelines.
 
@@ -87,11 +87,11 @@ Before declaring done, run `officecli view "$FILE" html` and Read the returned H
 
 - **No placeholder tokens rendered as data.** `$xxx$`, `{var}`, `{{name}}`, `<TODO>`, `lorem`, `xxxx` must never appear in a heading, body, cover, TOC, caption, header, or footer. A literal `{name}` meant for a human to fill belongs inside a visible instruction paragraph ("Replace `{name}` before sending"), never as finished content.
 - **No truncated titles or overflowing cells.** Widen the column or set `wrapText` rather than trimming content.
-- **TOC present when the document has 3+ headings** (`--type toc`).
-- **Cover page ≥ 60% filled, last page ≥ 40% filled.** Pad a thin cover with subtitle / author / date / scope / key highlights; pad a "Thank you" last page with conclusion / next steps / contact / legal.
+- **Use a TOC when navigation benefits from it**, such as a long report or a requested template; a short document with three headings does not automatically need one.
+- **Balance cover and closing pages for their purpose.** Preserve intentional whitespace and include only relevant subtitle, author, date, conclusion, or next steps. Do not invent content or add filler to meet a page-fill percentage.
 - **No `\$`, `\t`, `\n` literals in document text.** If `view text` shows these, a shell-escape layer leaked — delete the paragraph and re-enter it.
 
-If any fails, STOP and fix before declaring done.
+Fix substantive errors before declaring done. Apply layout defaults to the requested document type and scope; user-supplied structure and templates take precedence. Continue authorized repairs and report any verification that available tools cannot perform.
 
 ## Common Workflow
 
@@ -270,7 +270,7 @@ When both exist, the default footer is `/footer[2]`; alone it is `/footer[1]`. *
 
 ### Table of Contents
 
-For any document with 3+ headings:
+When a TOC is useful for navigation or required by the user's template:
 
 ```bash
 officecli add "$FILE" /body --type toc --prop levels="1-3" --prop title="Table of Contents" --prop hyperlinks=true --index 0
@@ -346,7 +346,7 @@ officecli set "$FILE" "/body/p[<N+1>]" --prop pageBreakBefore=true # 2. on the h
 
 Patterns that come up on every long-form report. Each has been executed and `validate`-passed.
 
-**(a) Rich cover page — hit the ≥ 60% filled floor.** Stack a confidentiality banner, title, subtitle, client/project/date block, and a key-themes strip, then force the next section onto a new page:
+**(a) Rich cover page — optional report layout.** Include the relevant title, subtitle, client/project/date block, and key themes, then place the next section on a new page when appropriate. Preserve intentional whitespace and omit irrelevant elements:
 
 ```bash
 officecli add "$FILE" /body --type paragraph --prop text="CONFIDENTIAL — CLIENT USE ONLY" --prop align=center --prop size=9pt --prop color=C00000 --prop spaceAfter=24pt
@@ -466,23 +466,31 @@ Borders use the format `style;size;color;space`: `single;4;FF0000;1`. Hex colors
 
 ### Delivery Gate (run before handing off — any failure = REJECT, do NOT deliver)
 
-Copy-paste, set `FILE`, and refuse to declare done until every gate prints OK.
+Set `FILE` and resolve `DOCX_CHECKS` to the absolute path of this skill's `scripts/document_checks.py`. Use an available Python 3 runtime (on Windows, `python`, `py`, or its absolute path). Required checks must succeed; explicitly record checks that are not required or cannot be verified. The examples are bash; in PowerShell inspect `$LASTEXITCODE` after each native command before judging its output.
 
 ```bash
 FILE="your-file.docx"
 
 # Gate 1 — schema.
 officecli close "$FILE" 2>/dev/null
-officecli validate "$FILE" | grep -q "no errors found" || { echo "REJECT Gate 1: validate failed"; exit 1; }
+if ! VAL_OUT=$(officecli validate "$FILE" 2>&1); then echo "REJECT Gate 1: validate command failed"; echo "$VAL_OUT"; exit 1; fi
+echo "$VAL_OUT" | grep -qi "no errors found" || { echo "REJECT Gate 1: clean validation not confirmed"; echo "$VAL_OUT"; exit 1; }
 echo "Gate 1 OK"
 
-# Gate 2 — token leak (shell-escape / template tokens / TOC placeholder / literal \$ \t \n). grep -c never false-PASSes.
-LEAK=$(officecli view "$FILE" text | grep -cE '(\$[A-Za-z_]+\$|\{\{[^}]+\}\}|<TODO>|xxxx|lorem|Update field to see|\\[\$tn])')
+# Gate 2 — inspect successfully extracted text before counting possible leaks.
+if ! DOC_TEXT=$(officecli view "$FILE" text); then echo "REJECT Gate 2: text extraction failed"; exit 1; fi
+LEAK=$(printf '%s\n' "$DOC_TEXT" | grep -cE '(\$[A-Za-z_]+\$|\{\{[^}]+\}\}|<TODO>|xxxx|lorem|Update field to see|\\[\$tn])')
 [ "$LEAK" -eq 0 ] && echo "Gate 2 OK" || { echo "REJECT Gate 2: $LEAK leak line(s)"; officecli view "$FILE" text | grep -nE '(\$[A-Za-z_]+\$|\{\{[^}]+\}\}|<TODO>|xxxx|lorem|Update field to see|\\[\$tn])'; exit 1; }
 
-# Gate 3 — live PAGE field exists when a footer is expected.
-FLD=$(officecli query "$FILE" 'field[fieldType=page]' --json | jq '.data.results | length')
-[ "$FLD" -ge 1 ] && echo "Gate 3 OK" || { echo "REJECT Gate 3: no live PAGE field"; exit 1; }
+# Gate 3 — set PAGE_REQUIRED=yes or no from the task/template and rendered pagination.
+# For no, set PAGE_REASON to the actual basis (e.g. "Verified single-page letter").
+# Determine this from available evidence; it is not an extra user approval step.
+case "${PAGE_REQUIRED:-unset}" in
+  yes) python "$DOCX_CHECKS" page "$FILE" --required || exit 1 ;;
+  no) python "$DOCX_CHECKS" page "$FILE" --not-required-reason "${PAGE_REASON:-}" || exit 1 ;;
+  *) echo "REJECT Gate 3: determine the page-number requirement before checking"; exit 1 ;;
+esac
+
 echo "Delivery Gate PASS"
 ```
 

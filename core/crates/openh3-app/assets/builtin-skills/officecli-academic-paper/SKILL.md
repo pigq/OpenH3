@@ -44,11 +44,11 @@ officecli help docx <element>                # Full schema (e.g. section, equati
 officecli help docx <element> --json         # Machine-readable
 ```
 
-Help is pinned to the installed CLI version. **When this skill and help disagree, help wins.** Every `--prop X=` in this file has been grep-verified against `officecli help docx <element>` — if help adds / renames a prop in a later version, trust help.
+Help is pinned to the installed CLI version. **When this skill and help disagree, help wins.** Examples are usage guidance, not a compatibility capture for the current machine. Verify uncertain props, enums, and readback fields through installed help and actual command output before relying on them.
 
 ## Mental Model & Inheritance
 
-**Inherits docx v2.** You should have read `skills/officecli-docx/SKILL.md` first. This skill assumes you know how to add paragraphs, set styles, build tables, insert images, manage TOC/footer/headers, force page breaks, and run the Delivery Gate. If any of those are unfamiliar, open a second session on docx v2 before continuing.
+**Inherits docx v2.** Read the required `officecli-docx` skill in this session for paragraphs, styles, tables, images, TOC/footer/headers, page breaks, and the Delivery Gate. Resolve tool knowledge gaps through installed help and available references, then continue the authorized task.
 
 ## Shell & Execution Discipline
 
@@ -439,16 +439,15 @@ officecli add "$FILE" / --type header --prop type=default --prop align=right --p
 
 ### Gate 4 — citation round-trip
 
-Every in-text citation key should resolve to a bibliography entry. Count mismatches = REJECT.
+Every in-text citation key must resolve to a bibliography entry. Compare actual keys, not the number of citations against the number of indented paragraphs. Resolve `DOCX_CHECKS` to the absolute `scripts/document_checks.py` path in the required `officecli-docx` skill.
 
 ```bash
-# IEEE example (bracketed numerics). Adjust regex for APA (Author, Year) or MLA (Author Page).
-CITATIONS=$(officecli view "$FILE" text | grep -oE '\[[0-9]+\]' | sort -u | wc -l)
-ENTRIES=$(officecli query "$FILE" 'paragraph[hangingIndent]' --json | jq '.data.results | length')
-echo "In-text citation markers: $CITATIONS | Bibliography entries: $ENTRIES"
-# REJECT when citations exceed entries (cites without references). Entries > citations is allowed by some venues.
-[ "$CITATIONS" -le "$ENTRIES" ] && echo "Gate 4 OK" || { echo "REJECT Gate 4: $CITATIONS in-text markers but only $ENTRIES bibliography entries"; exit 1; }
+# IEEE with explicit [N] reference labels in a final bibliography section.
+# Supply the exact bibliography heading paragraph from this document.
+python "$DOCX_CHECKS" citations "$FILE" --bibliography-heading "References" || exit 1
 ```
+
+The helper reads main-document text, including split runs, grouped keys and numeric ranges. It rejects missing/duplicate reference keys and missing/ambiguous bibliography boundaries. It does not validate source authenticity, Word-generated list labels, note-part citations, or APA/MLA/author-date styles. For those, build and inspect a style-specific citation-key → reference mapping from the actual body/notes and bibliography, or use a verified parser. Report unresolved keys; an empty numeric scan is never a PASS. A short abstract that requires no citations can be marked not applicable with its task-specific reason.
 
 ### Gate 5a — SEQ presence + cached numbers distinct
 

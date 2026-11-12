@@ -76,7 +76,7 @@ Five non-negotiable principles. If any one is violated the output is not a dashb
 
 3. **Dashboard-first architecture.** KPI label cells, KPI value cells, charts, sparklines all live on the **Dashboard** sheet — the single sheet a user lands on. Raw imports and `SUMIFS` rollups live on Data / Summary sheets, upstream of the Dashboard. The user should never need to switch tabs to find the answer.
 
-4. **Visible cells only for chart sources.** LibreOffice does not evaluate formulas in hidden columns or hidden sheets at render time. A chart whose `series1.values` points at a hidden-column `SUMIFS` renders blank. Pattern: aggregate into a **visible** Summary sheet, point charts at Summary cells, hide only helper columns that are not chart sources.
+4. **Keep chart-source cells available while rendering.** Use a visible Summary sheet for aggregations and chart references unless the actual target renderer has verified support for hidden sources. Printing only Dashboard is a separate export selection, not a reason to hide its chart dependencies.
 
 5. **Data-size-aware complexity.** A 10-row dataset does not get 5 KPIs and 4 charts. A 200-row dataset does not get 1 KPI and 1 chart. Scale up the composition with the input (table in §Design Ideas). Overbuilding is as wrong as underbuilding.
 
@@ -93,7 +93,7 @@ All `officecli-xlsx` requirements apply (→ see officecli-xlsx §Requirements f
 - **10+ rows on Data sheet → ≥ 1 CF rule on a numeric column.** A 20-row table with zero visual scanning aid is a quality miss.
 - **Dashboard value columns sized to the widest expected cachedValue — not a fixed 22.** Rule of thumb at 24pt bold + currency numFmt: `width ≈ ceil((visible_chars + 2) × 1.3)`. A KPI holding `¥1,958,414,250` (14 visible chars with currency + commas) needs `width ≥ 28`; a 4-digit KPI still needs `width ≥ 22` as the floor. Hardcoding `22` for a 10+ digit KPI is how `###` ships to the user.
 - **Sparkline row height ≥ 20.** A sparkline in a default 15pt row is a flat squiggle — set `/Dashboard/row[N] height=22` (or 24 when paired with a 24pt KPI value cell in the same row).
-- **Print deliverables set `_xlnm.Print_Area` scoped to Dashboard** + hide non-Dashboard sheets + add `<pageSetup fitToPage/>`. Without all three, the print pipeline emits every sheet and Dashboard lands on page 2+. See §Print-ready delivery for the exact commands.
+- **Print deliverables define the Dashboard print area and page setup**, then select Dashboard in the actual export/print tool. Preserve visible chart-source sheets in the editable workbook. Verify the resulting page count and chart contents rather than assuming a print area alone selects sheets.
 
 ## Quick Start
 
@@ -234,7 +234,7 @@ At the `dashboard` preset's default title font, the chart plot-box width (in col
 
 ### Print-ready delivery (board-pack / investor-send / one-pager)
 
-Triggers: ask contains "print" / "一页" / "董事会" / "投资人". Four artefacts on the Dashboard sheet; non-Dashboard sheets hidden so the print pipeline emits one page only.
+Apply when a print/PDF/one-page output is requested. A board or investor audience alone does not require a print artefact. Configure Dashboard layout, keep source sheets visible, and use the target tool's documented sheet-selection/export capability.
 
 ```bash
 # 1. Print_Area scoped to Dashboard (xlnm convention).
@@ -243,13 +243,12 @@ officecli add "$FILE" / --type namedrange --prop name=_xlnm.Print_Area --prop sc
 officecli raw-set "$FILE" /Dashboard --xpath "//x:worksheet" --action prepend --xml '<sheetPr xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><pageSetUpPr fitToPage="1"/></sheetPr>'
 # 3. Landscape page setup.
 officecli raw-set "$FILE" /Dashboard --xpath "//x:sheetData" --action insertafter --xml '<pageSetup orientation="landscape" paperSize="9" fitToWidth="1" fitToHeight="1"/>'
-# 4. Hide non-Dashboard sheets — Print_Area scope alone does NOT stop the print pipeline from emitting every visible sheet.
-for S in Sheet1 Summary; do
-  officecli raw-set "$FILE" /workbook --xpath "//x:sheet[@name='$S']" --action setattr --xml "state=hidden" || true
-done
+# 4. Keep chart sources visible. Select Dashboard in the export/print tool;
+# verify its supported sheet selection via installed help or UI before export.
+
 ```
 
-Delete any `Print_Area` set on Data / Summary sheets — conflicting scopes emit multi-page output.
+Do not remove other sheets' print settings from a user workbook merely to force single-page export. If the renderer cannot select a sheet, use an available supported renderer or a separate print copy whose charts and values are rechecked. Preserve the editable source workbook.
 
 ## QA (REQUIRED — Delivery Gate)
 
@@ -351,45 +350,39 @@ done
 
 Gate 7 must **NEVER** be skipped — skipping ships `###` to the user.
 
-If scene keywords include print / 一页 / board / 投资人 / 董事会, extend Gate 7 with a structural print-scope check:
+For requested print output, extend Gate 7 with an export check:
+
+1. Verify the Dashboard print area and page setup against the intended range.
+2. Select Dashboard using the actual renderer's supported controls; keep chart-source sheets visible in the editable workbook.
+3. Inspect the resulting PDF/print preview: only the intended content/pages are present, KPI text is readable, and all chart series render with the expected values.
+4. If an available renderer cannot produce or preview the requested output, report that exact limitation and continue with a supported alternative where possible. Never substitute a "all other sheets hidden" check for print verification.
+
+Perform these checks with available tools within the authorized task. Do not defer the final print preview to the user when the agent can perform it.
+
+**Gate 8 — Formula sanity (cachedValue real, not stale/error).** A recalculation-on-open setting does not prove current caches are correct. After upstream edits, inspect every planned KPI formula and compare its cached result against the source data. Zero is valid when the inputs support it; never change a genuine zero just to pass validation.
 
 ```bash
-if echo "$USER_REQ" | grep -qiE 'print|一页|投资人|董事会|board'; then
-  # Every non-Dashboard sheet must be hidden or veryHidden.
-  # query sheet --json carries the name in .preview (no .name/.state); visibility lives in
-  # each sheet's own get .format.hidden (absent => visible), so iterate + probe per sheet.
-  LEAKING=""
-  while IFS=$'\t' read -r SPATH SNAME; do
-    [ "$SNAME" = "Dashboard" ] && continue
-    HIDDEN=$(officecli get "$FILE" "$SPATH" --json | jq -r '.data.results[0].format.hidden // false')
-    [ "$HIDDEN" != "true" ] && LEAKING="$LEAKING $SNAME"
-  done < <(officecli query "$FILE" 'sheet' --json | jq -r '.data.results[] | [.path, .preview] | @tsv')
-  [ -n "$LEAKING" ] && { echo "REJECT Gate 7 print-scope: visible non-Dashboard sheet(s):$LEAKING — hide before delivery"; exit 1; }
-  # Dashboard must carry an explicit Print_Area named range.
-  PA=$(officecli query "$FILE" 'namedrange[name="_xlnm.Print_Area"]' --json | jq '.data.results | length')
-  [ "$PA" -ge 1 ] || { echo "REJECT Gate 7 print-scope: no _xlnm.Print_Area set"; exit 1; }
-fi
-```
-
-The user opens the file in their target viewer (Office / WPS / Numbers) for the final print preview — the skill does not render export artefacts.
-
-**Gate 8 — Formula sanity (cachedValue real, not stale/error).** `fullCalcOnLoad=true` refreshes at runtime, NOT build-time cache — so every formula cell must carry a non-empty, non-zero, non-error `cachedValue` now.
-
-```bash
+# Adapt this list to the actual planned KPI cells.
 for CELL in A2 C2 E2 G2; do
-  JSON=$(officecli get "$FILE" "/Dashboard/$CELL" --json)
-  [ -z "$(echo "$JSON" | jq -r '.data.results[0].format.formula // ""')" ] && continue
-  CV=$(echo "$JSON" | jq -r '.data.results[0].format.cachedValue // ""')
+  if ! JSON=$(officecli get "$FILE" "/Dashboard/$CELL" --json); then
+    echo "REJECT Gate 8: readback failed for $CELL"; exit 1
+  fi
+  # Reject missing/malformed data rather than treating it as an empty cell.
+  echo "$JSON" | jq -e '.data.results | type == "array" and length == 1' >/dev/null || exit 1
+  FORMULA=$(echo "$JSON" | jq -er '.data.results[0].format.formula | select(type == "string" and length > 0)') || {
+    echo "REJECT Gate 8: planned KPI $CELL has no formula"; exit 1;
+  }
+  CV=$(echo "$JSON" | jq -er '.data.results[0].format.cachedValue | select(. != null) | tostring') || {
+    echo "REJECT Gate 8: $CELL has no cached result"; exit 1;
+  }
   case "$CV" in
-    "" | "0" | "#DIV/0!" | "#REF!" | "#N/A" | "#VALUE!" | "#NAME?" | "null")
-      echo "REJECT Gate 8: $CELL cachedValue='$CV' — re-issue formula or close+reopen"; exit 1 ;;
+    "" | \#*) echo "REJECT Gate 8: $CELL cachedValue='$CV'"; exit 1 ;;
   esac
+  echo "Gate 8 $CELL: cached=$CV — compare with source/expected value before PASS"
 done
 ```
 
-If a KPI is genuinely zero (e.g. "terminations this quarter" = 0), whitelist it in the loop and document — default assumption is "zero is broken".
-
-If anything fails, fix at source, re-run the full cycle.
+Use the installed CLI's actual readback contract; if it differs, adapt after reading help/output. A present numeric cache can still be stale: compare independently computed expected values and refresh through a compatible engine as needed. If anything fails, fix at source and re-run affected checks.
 
 ### Honest limits
 

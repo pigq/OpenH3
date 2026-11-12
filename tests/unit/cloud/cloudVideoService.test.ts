@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CloudVideoService } from '@/process/services/media/cloud/CloudVideoService';
+import type { RemoteVideoJob } from '@/common/chat/document/creation/cloudVideo';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -12,8 +13,8 @@ function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-video-'));
   roots.push(root);
   const adapter = {
-    submit: vi.fn(async () => ({ id: 'remote-1', status: 'queued' as const, progress: 0 })),
-    retrieve: vi.fn(async () => ({ id: 'remote-1', status: 'completed' as const, progress: 100 })),
+    submit: vi.fn(async (): Promise<RemoteVideoJob> => ({ id: 'remote-1', status: 'queued', progress: 0 })),
+    retrieve: vi.fn(async (): Promise<RemoteVideoJob> => ({ id: 'remote-1', status: 'completed', progress: 100 })),
     download: vi.fn(async () => new Response(Buffer.from([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109]))),
   };
   const options = { root, adapter: () => adapter };
@@ -29,6 +30,56 @@ function fixture() {
   return { root, adapter, service, connection, options };
 }
 describe('persistent cloud video jobs', () => {
+  it('preserves submitted state and marks omitted percentages as unknown on every poll', async () => {
+    const { service, adapter } = fixture();
+    adapter.submit.mockResolvedValueOnce({ id: 'remote-1', status: 'in_progress', progress: 23 });
+    const job = await service.submit('request', { prompt: 'fox', aspectRatio: '9:16' });
+    expect(job).toMatchObject({ status: 'running', progress: 23, progressKnown: true, aspectRatio: '9:16' });
+    adapter.retrieve.mockResolvedValueOnce({ id: 'remote-1', status: 'in_progress' });
+    await service.poll();
+    expect(service.job(job.id, 'conversation')).toMatchObject({
+      status: 'running',
+      stage: 'generating',
+      progressKnown: false,
+      lastCheckedAt: expect.any(String),
+    });
+  });
+  it('exposes downloading while the transfer is pending and finishes only after saving the MP4', async () => {
+    const { service, adapter } = fixture();
+    const job = await service.submit('request', { prompt: 'fox' });
+    let release!: () => void;
+    adapter.download.mockReturnValueOnce(
+      new Promise((resolve) => {
+        const header = Buffer.from([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109]);
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(header);
+            release = () => {
+              controller.enqueue(Buffer.alloc(12));
+              controller.close();
+            };
+          },
+        });
+        resolve(new Response(stream, { headers: { 'content-length': '24' } }));
+      })
+    );
+    const polling = service.poll();
+    await vi.waitFor(() =>
+      expect(service.job(job.id, 'conversation')).toMatchObject({
+        stage: 'downloading',
+        status: 'running',
+        downloadBytes: 12,
+        downloadTotalBytes: 24,
+      })
+    );
+    release();
+    await polling;
+    expect(service.job(job.id, 'conversation')).toMatchObject({
+      stage: 'completed',
+      status: 'succeeded',
+      progress: 100,
+    });
+  });
   it('stops polling rejected credentials instead of waiting indefinitely', async () => {
     const { service, adapter } = fixture();
     const job = await service.submit('request', { prompt: 'fox' });
@@ -41,7 +92,7 @@ describe('persistent cloud video jobs', () => {
     const job = await service.submit('request', { prompt: 'fox' });
     adapter.download.mockRejectedValueOnce(new Error('offline'));
     await service.poll();
-    expect(service.job(job.id, 'conversation').status).toBe('queued');
+    expect(service.job(job.id, 'conversation').status).toBe('running');
     await service.poll();
     expect(service.job(job.id, 'conversation').status).toBe('succeeded');
     expect(adapter.submit).toHaveBeenCalledTimes(1);

@@ -222,5 +222,9 @@
   "zoomIn": "放大",
   "zoomOut": "缩小",
   "zoomReset": "重置视图",
-  "diagramZoomHint": "滚轮缩放 • 拖拽平移 • ESC 关闭"
+  "diagramZoomHint": "滚轮缩放 • 拖拽平移 • ESC 关闭",
+  "archive": {
+    "entries": "{{count}} 个文件与文件夹",
+    "loadFailed": "无法查看此压缩包"
+  }
 }

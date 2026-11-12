@@ -10,11 +10,35 @@
  * - Packaging only: use --pack-only to skip electron-builder distributable creation
  */
 
-const { execSync, spawnSync } = require('child_process');
+const { execSync, execFileSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const yaml = require('js-yaml');
+
+// Local distribution configuration stays outside the checkout; CI supplies the same JSON as a secret.
+function loadDistributionDefaults() {
+  const file =
+    process.env.OPENH3_DISTRIBUTION_DEFAULTS_FILE ||
+    (!process.env.CI && process.env.APPDATA
+      ? path.join(process.env.APPDATA, 'OpenH3', 'distribution-defaults.json')
+      : undefined);
+  const source =
+    process.env.OPENH3_DISTRIBUTION_DEFAULTS_JSON ||
+    (file && fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : undefined);
+  if (!source) return;
+  const defaults = JSON.parse(source);
+  for (const key of [
+    'OPENH3_GATEWAY_URL',
+    'OPENH3_DEFAULT_MODEL',
+    'OPENH3_DEFAULT_API_KEY',
+    'OPENH3_DEFAULT_THOUGHT_LEVEL',
+    'OPENH3_EMBED_DEFAULT_API_KEY',
+  ]) {
+    if (process.env[key] === undefined && typeof defaults[key] === 'string') process.env[key] = defaults[key];
+  }
+}
+loadDistributionDefaults();
 
 // DMG retry logic for macOS: detects DMG creation failures by checking artifacts
 // (.app exists but .dmg missing) and retries only the DMG step using
@@ -914,6 +938,10 @@ try {
     arch: targetArch,
     version: resolveOpenH3CoreVersion(projectRoot),
   });
+
+  execFileSync(process.execPath, [path.join(__dirname, 'prepareBundledGit.js'), targetArch], { stdio: 'inherit' });
+
+  execFileSync(process.execPath, [path.join(__dirname, 'prepareBundledPython.js'), targetArch], { stdio: 'inherit' });
 
   // 6. Prepare hub resources (index.json + extension zips for offline fallback)
   execSync('node scripts/prepareHubResources.js', { stdio: 'inherit', env: process.env });

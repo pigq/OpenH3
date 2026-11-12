@@ -4,6 +4,7 @@ import { LoadingTwo } from '@icon-park/react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useConversationContextSafe } from '@renderer/hooks/context/ConversationContext';
 import { iconColors } from '@/renderer/styles/colors';
+import ConversationImage from './ConversationImage';
 
 const LocalImageView: React.FC<{
   src: string;
@@ -65,7 +66,7 @@ const LocalImageView: React.FC<{
         <span>{alt}</span>
       </span>
     );
-  return <img src={url} alt={alt} className={className} />;
+  return <ConversationImage src={url} alt={alt} className={className} />;
 };
 
 export default LocalImageView;

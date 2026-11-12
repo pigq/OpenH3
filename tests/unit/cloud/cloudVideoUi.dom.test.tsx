@@ -21,6 +21,68 @@ beforeEach(() => {
   );
 });
 describe('cloud video client', () => {
+  it('does not display completion while an upstream job is still running', async () => {
+    vi.mocked(cloudVideoApi.job).mockResolvedValue({
+      id: 'pending-full',
+      status: 'running',
+      stage: 'generating',
+      progress: 100,
+      progressKnown: true,
+      createdAt: new Date().toISOString(),
+    } as Awaited<ReturnType<typeof cloudVideoApi.job>>);
+    render(<CloudVideoResult id='pending-full' conversationId='pending-full' />);
+    expect(await screen.findByRole('progressbar')).toHaveAttribute('aria-valuenow', '99');
+    expect(screen.queryByText('100%')).not.toBeInTheDocument();
+    expect(screen.getByTestId('cloud-video-result')).toHaveAttribute('aria-busy', 'true');
+  });
+  it('shows the real download percentage while the saved artifact is transferring', async () => {
+    vi.mocked(cloudVideoApi.job).mockResolvedValue({
+      id: 'downloading',
+      status: 'running',
+      stage: 'downloading',
+      progress: 100,
+      progressKnown: true,
+      downloadBytes: 50,
+      downloadTotalBytes: 100,
+      createdAt: new Date().toISOString(),
+    } as Awaited<ReturnType<typeof cloudVideoApi.job>>);
+    render(<CloudVideoResult id='downloading' conversationId='downloading' />);
+    expect(await screen.findByRole('progressbar')).toHaveAttribute('aria-valuenow', '50');
+    expect(screen.getByTestId('cloud-video-result')).toHaveAttribute('aria-busy', 'true');
+  });
+  it('shows background generation with unknown progress instead of a misleading zero percent', async () => {
+    vi.mocked(cloudVideoApi.job).mockResolvedValue({
+      id: 'unknown',
+      status: 'running',
+      stage: 'generating',
+      progress: 0,
+      progressKnown: false,
+      createdAt: new Date().toISOString(),
+    } as Awaited<ReturnType<typeof cloudVideoApi.job>>);
+    render(<CloudVideoResult id='unknown' conversationId='unknown-conversation' />);
+    expect(await screen.findByText('guid.creation.cloudVideoSetup.progressUnknown')).toBeInTheDocument();
+    expect(screen.queryByText('0%')).not.toBeInTheDocument();
+    expect(screen.getByText('guid.creation.cloudVideoSetup.background')).toBeInTheDocument();
+  });
+  it.each([
+    [768, 1344],
+    [768, 768],
+    [768, 1024],
+    [1344, 768],
+  ])('fits the card to actual metadata %s x %s', async (width, height) => {
+    const id = 'ratio-' + width + '-' + height;
+    vi.mocked(cloudVideoApi.job).mockResolvedValue({ id, status: 'succeeded', model: 'H3' } as Awaited<
+      ReturnType<typeof cloudVideoApi.job>
+    >);
+    render(<CloudVideoResult id={id} conversationId={id} />);
+    const video = await screen.findByLabelText('guid.creation.cloudVideo');
+    Object.defineProperties(video, { videoWidth: { value: width }, videoHeight: { value: height } });
+    fireEvent.loadedMetadata(video);
+    expect(screen.getByTestId('cloud-video-result').style.width).toBe(
+      Math.min(width, (500 * width) / height) + 26 + 'px'
+    );
+    expect(video).toHaveStyle({ width: '100%' });
+  });
   it('disables save while loading an existing connection to avoid creating a replacement', () => {
     vi.mocked(cloudVideoApi.connections).mockReturnValue(new Promise(() => {}));
     render(

@@ -4,6 +4,8 @@ import type {
   ComfyOperation,
 } from '@/common/chat/document/creation/comfy';
 import { comfyApi } from '@/common/chat/document/creation/comfyApi';
+import { cloudVideoApi } from '@/common/chat/document/creation/cloudVideoApi';
+import type { CloudVideoJob } from '@/common/chat/document/creation/cloudVideo';
 import { creationOperationIds, h3ToolJobIds } from '@/common/chat/document/creation/toolResults';
 import { h3JobApi } from '@/common/chat/document/h3JobApi';
 import type { CreationOperation } from '@/common/chat/document/creation/operation';
@@ -12,15 +14,42 @@ import { useConversationRuntimeView } from '@/renderer/pages/conversation/runtim
 import { useCurrentConversation } from '@/renderer/pages/conversation/explorer/currentConversationStore';
 import { useH3Jobs } from '@/renderer/pages/conversation/runtime/Creation/useH3Jobs';
 import { useEffect, useMemo } from 'react';
-import useSWR from 'swr';
-import { projectWorkProgress, publishWorkProgress, workComfyIds } from './workProgress';
+import useSWR, { unstable_serialize, useSWRConfig } from 'swr';
+import { projectWorkProgress, publishWorkProgress, workComfyIds, workCloudVideoIds } from './workProgress';
 
 /** Mounted inside each chat's message provider; publishes to both right-panel hosts above that provider. */
 export default function WorkProgressBridge({ conversationId }: { conversationId: string }): null {
+  const { cache, mutate } = useSWRConfig();
   const messages = useMessageList();
   const runtime = useConversationRuntimeView(conversationId);
   const activeConversation = useCurrentConversation();
   const ids = useMemo(() => workComfyIds(messages), [messages]);
+  const cloudIds = useMemo(() => workCloudVideoIds(messages), [messages]);
+  const { data: cloudData } = useSWR(
+    activeConversation === conversationId && cloudIds.length ? ['work.cloud-video', conversationId, cloudIds] : null,
+    async () => {
+      const jobs: CloudVideoJob[] = [],
+        unavailable: string[] = [];
+      await Promise.all(
+        cloudIds.map(async (id) => {
+          try {
+            const job = await cloudVideoApi.job(id, conversationId);
+            if (job.id === id && job.conversationId === conversationId) jobs.push(job);
+            else unavailable.push(id);
+          } catch {
+            unavailable.push(id);
+          }
+        })
+      );
+      return { jobs, unavailable };
+    },
+    {
+      refreshInterval: (data) =>
+        !data || data.unavailable.length || data.jobs.some((job) => ['queued', 'running'].includes(job.status))
+          ? 2500
+          : 0,
+    }
+  );
   const creationIds = useMemo(() => creationOperationIds(messages), [messages]);
   const { data: creationData } = useSWR(
     activeConversation === conversationId && creationIds.length ? ['work.creation', conversationId, creationIds] : null,
@@ -112,6 +141,35 @@ export default function WorkProgressBridge({ conversationId }: { conversationId:
     }
   );
   useEffect(() => {
+    if (activeConversation !== conversationId) return;
+    for (const job of data?.jobs ?? []) {
+      if (job.status !== 'failed' || job.submissionUncertain || job.observationOnly || !job.recoveredBy) continue;
+      const success = data?.jobs.find((candidate) => candidate.id === job.recoveredBy);
+      if (
+        success?.status !== 'succeeded' ||
+        success.submissionUncertain ||
+        success.observationOnly ||
+        !success.artifacts.length
+      )
+        continue;
+      const key = ['comfy.job', conversationId, job.id];
+      const previous = cache.get(unstable_serialize(key))?.data as ComfyGenerationJob | undefined;
+      if (
+        previous?.id !== job.id ||
+        previous.status !== 'failed' ||
+        previous.submissionUncertain ||
+        previous.observationOnly ||
+        previous.updatedAt !== job.updatedAt ||
+        previous.recoveredBy === job.recoveredBy
+      )
+        continue;
+      // Adoption may follow the successful output. Apply only its authoritative association to the exact cached failure.
+      void mutate(key, { ...previous, recoveredBy: job.recoveredBy }, { revalidate: false }).catch(
+        (): undefined => undefined
+      );
+    }
+  }, [activeConversation, conversationId, data?.jobs, cache, mutate]);
+  useEffect(() => {
     publishWorkProgress(
       conversationId,
       projectWorkProgress(
@@ -131,7 +189,8 @@ export default function WorkProgressBridge({ conversationId }: { conversationId:
           unavailable: h3Ids.filter((_id, index) => h3Snapshots[index]?.unavailable),
           operations: creationData?.operations,
           unavailableOperations: creationData?.unavailable,
-        }
+        },
+        cloudData
       )
     );
   }, [
@@ -145,6 +204,7 @@ export default function WorkProgressBridge({ conversationId }: { conversationId:
     h3Snapshots,
     h3Ids,
     creationData,
+    cloudData,
   ]);
   return null;
 }

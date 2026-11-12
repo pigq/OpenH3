@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ComfyProfile } from '@/common/chat/document/creation/comfy';
+import { getComfyModelSetId } from '@/common/chat/document/creation/workflows/identity';
 import ComfyModelCards from '@/renderer/pages/guid/components/ComfyModelCards';
 import { galleryFixture } from '../contentCatalog/galleryFixture';
 
@@ -23,6 +24,75 @@ const omniProfile = (id = 'fasth3-omni-v1') =>
 beforeEach(() => vi.stubGlobal('__APP_VERSION__', '3.0.0'));
 
 describe('ComfyUI family cards', () => {
+  it('keeps workflow states and repair diagnostics behind one details action', () => {
+    const base = {
+      ...profile('qwen-verified', 'verified'),
+      components: [
+        {
+          role: 'diffusion',
+          name: 'qwen',
+          path: 'C:/models/qwen',
+          version: '2509',
+          precision: 'FP8',
+          sha256: 'a'.repeat(64),
+        },
+      ],
+      capabilities: ['image-edit'],
+      environment: { root: 'C:/ComfyUI', python: 'C:/python.exe', baseUrl: 'http://127.0.0.1:8188' },
+    };
+    render(
+      <ComfyModelCards
+        profiles={[
+          base,
+          {
+            ...base,
+            id: 'qwen-broken-route',
+            state: 'invalid',
+            validation: { checkedAt: 'today', fingerprint: 'broken', error: 'Missing node' },
+          },
+        ]}
+        workflowPreparations={[
+          {
+            modelSetId: getComfyModelSetId(base),
+            profileId: base.id,
+            workflowId: 'qwen-inpaint',
+            tasks: ['inpaint'],
+            reason: 'Mask dependency missing',
+            additionalBytes: 2_000_000,
+          },
+        ]}
+        onAction={vi.fn()}
+        onUseProfile={vi.fn()}
+      />
+    );
+    const card = within(screen.getByRole('region', { name: 'Qwen-Edit' }));
+    expect(card.queryByLabelText('guid.comfy.version: Qwen-Edit')).not.toBeInTheDocument();
+    expect(card.getByRole('button', { name: 'guid.comfy.use' })).toBeEnabled();
+    expect(card.queryByText(/guid.comfy.workflows.states.needs-repair/)).not.toBeInTheDocument();
+    expect(card.queryByText(/guid.comfy.workflows.states.needs-preparation/)).not.toBeInTheDocument();
+    expect(card.getAllByRole('status')).toHaveLength(1);
+    expect(card.queryByRole('button', { name: 'guid.comfy.actions.repair' })).not.toBeInTheDocument();
+    fireEvent.click(card.getByRole('button', { name: 'guid.comfy.workflows.details' }));
+    fireEvent.click(screen.getByText(/guid.comfy.workflows.tasks.inpaint/));
+    expect(screen.getByText('Mask dependency missing')).toBeInTheDocument();
+    fireEvent.click(screen.getByText(/guid.comfy.workflows.states.needs-repair/));
+    expect(screen.getByText('Missing node')).toBeInTheDocument();
+    expect(screen.getByText('guid.comfy.workflows.environment: C:/ComfyUI')).toBeInTheDocument();
+  });
+
+  it('retains verified cards and keeps missing cards unknown during a partial scan', () => {
+    render(
+      <ComfyModelCards
+        profiles={[profile('qwen-verified', 'verified')]}
+        incomplete
+        onAction={vi.fn()}
+        onUseProfile={vi.fn()}
+      />
+    );
+    expect(screen.getByRole('button', { name: 'guid.comfy.use' })).toBeEnabled();
+    expect(screen.queryAllByText('guid.creation.states.not-installed')).toHaveLength(0);
+    expect(screen.getAllByText('guid.creation.states.unavailable').length).toBeGreaterThan(0);
+  });
   it.each(['empty', 'partial'] as const)(
     'retains supported families and local actions for a %s remote catalog',
     (mode) => {
@@ -43,7 +113,8 @@ describe('ComfyUI family cards', () => {
       expect(h3.getByLabelText('guid.comfy.preview.video: H3')).toBeInTheDocument();
       fireEvent.click(h3.getByRole('button', { name: 'guid.comfy.use' }));
       expect(onUseProfile).toHaveBeenCalledWith(installed);
-      fireEvent.click(h3.getByRole('button', { name: 'guid.comfy.actions.repair' }));
+      fireEvent.click(h3.getByRole('button', { name: 'guid.comfy.workflows.details' }));
+      fireEvent.click(screen.getByRole('button', { name: 'guid.comfy.actions.repair' }));
       expect(onAction).toHaveBeenCalledWith({ family: 'h3', intent: 'repair', profileId: installed.id });
       fireEvent.click(
         within(screen.getByRole('region', { name: 'Krea 2' })).getByRole('button', {
@@ -81,7 +152,10 @@ describe('ComfyUI family cards', () => {
         expect(region.getByText(sample)).toBeInTheDocument();
         if (family === 'fasth3-omni') {
           expect(region.getByRole('link')).toHaveAttribute('href', 'https://nuvalab.ai/fasth3/');
-          expect(region.getByText('guid.comfy.preview.sampleVersion: FastH3-Omni-8-Step-V1')).toBeInTheDocument();
+          expect(region.getByRole('link')).toHaveAttribute(
+            'title',
+            'guid.comfy.preview.sampleVersion: FastH3-Omni-8-Step-V1'
+          );
         }
         view.rerender(<ComfyModelCards {...props} catalog={{ ...galleryFixture, releaseSequence: 2 }} />);
         expect(region.getByLabelText(`guid.comfy.preview.video: ${card.name}`)).toHaveAttribute('src', source);
@@ -269,10 +343,8 @@ describe('ComfyUI family cards', () => {
   it('labels the FastH3-Omni preview as an official Nuva sample and identifies its model version', () => {
     render(<ComfyModelCards profiles={[omniProfile()]} onAction={vi.fn()} onUseProfile={vi.fn()} />);
     expect(screen.getByText('guid.comfy.preview.officialSample')).toBeInTheDocument();
-    expect(
-      screen.getByText('guid.comfy.preview.sampleVersion: FastH3-Omni-8-Step-V1', { exact: false })
-    ).toBeInTheDocument();
-    expect(screen.getByText('guid.comfy.preview.runtimeVersion: 2509')).toBeInTheDocument();
+    expect(screen.getByTitle('guid.comfy.preview.sampleVersion: FastH3-Omni-8-Step-V1')).toBeInTheDocument();
+    expect(screen.queryByText('guid.comfy.preview.runtimeVersion: 2509')).not.toBeInTheDocument();
   });
 
   it('pauses a preview when the document becomes hidden', () => {
@@ -315,13 +387,13 @@ describe('ComfyUI family cards', () => {
       'href',
       expect.stringContaining('Qwen-Image-Edit-2509.md')
     );
-    expect(card.getByText('guid.comfy.preview.sampleVersion: Qwen-Image-Edit-2509')).toBeInTheDocument();
+    expect(card.getByTitle('guid.comfy.preview.sampleVersion: Qwen-Image-Edit-2509')).toBeInTheDocument();
     const z = within(screen.getByRole('region', { name: 'Z-Image' }));
     expect(z.getByRole('link', { name: 'guid.comfy.preview.officialImageSample: Tongyi-MAI' })).toHaveAttribute(
       'href',
       expect.stringContaining('Tongyi-MAI/Z-Image')
     );
-    expect(z.getByText('guid.comfy.preview.sampleVersion: Z-Image-Turbo')).toBeInTheDocument();
+    expect(z.getByTitle('guid.comfy.preview.sampleVersion: Z-Image-Turbo')).toBeInTheDocument();
   });
 
   it('uses the installation action when no model profile is installed', () => {
@@ -330,7 +402,7 @@ describe('ComfyUI family cards', () => {
     const card = within(screen.getByRole('region', { name: 'FastH3-Omni' }));
     fireEvent.click(card.getByRole('button', { name: 'guid.comfy.actions.install' }));
     expect(onAction).toHaveBeenCalledWith({ family: 'fasth3-omni', intent: 'install', profileId: undefined });
-    expect(card.getByText('guid.comfy.preview.runtimeVersion: guid.comfy.preview.notInstalled')).toBeInTheDocument();
+    expect(card.getByRole('status')).toHaveTextContent('guid.creation.states.not-installed');
   });
 
   it('lets keyboard users play and pause a sample with the native button', async () => {
@@ -361,10 +433,11 @@ describe('ComfyUI family cards', () => {
     );
     expect(container.querySelector('select')).toBeNull();
     const qwen = within(screen.getByRole('region', { name: 'Qwen-Edit' }));
-    fireEvent.click(qwen.getByRole('combobox'));
-    fireEvent.click(await screen.findByText(/qwen-downloaded ·/));
-    await waitFor(() => expect(qwen.queryByRole('button', { name: 'guid.comfy.use' })).not.toBeInTheDocument());
-    fireEvent.click(qwen.getByRole('button', { name: 'guid.comfy.actions.repair' }));
+    fireEvent.click(qwen.getByRole('button', { name: 'guid.comfy.workflows.details' }));
+    fireEvent.click(screen.getByRole('combobox'));
+    fireEvent.click(await screen.findByText(/qwen-downloaded · 2509 · FP8/));
+    expect(qwen.getByRole('button', { name: 'guid.comfy.use' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'guid.comfy.actions.repair' }));
     expect(onAction).toHaveBeenCalledWith({ family: 'qwen-edit', intent: 'repair', profileId: 'qwen-downloaded' });
     expect(onUse).not.toHaveBeenCalled();
   });
@@ -380,4 +453,23 @@ describe('ComfyUI family cards', () => {
     );
     expect(screen.getByRole('button', { name: 'guid.comfy.use' })).toBeDisabled();
   });
+
+  it.each(['image', 'video'] as const)(
+    'shows an Agent-registered custom %s model and selects it before validation',
+    (kind) => {
+      const custom = {
+        ...profile(`custom-${kind}`, 'downloaded'),
+        family: `custom-${kind}`,
+        name: `Custom ${kind}`,
+        kind,
+      };
+      const use = vi.fn();
+      render(<ComfyModelCards profiles={[custom]} onAction={vi.fn()} onUseProfile={use} />);
+      const card = within(screen.getByRole('region', { name: custom.name }));
+      expect(card.getByRole('status')).toHaveTextContent('guid.creation.states.installed');
+      expect(card.queryByRole('img')).not.toBeInTheDocument();
+      fireEvent.click(card.getByRole('button', { name: 'guid.comfy.use' }));
+      expect(use).toHaveBeenCalledWith(custom);
+    }
+  );
 });

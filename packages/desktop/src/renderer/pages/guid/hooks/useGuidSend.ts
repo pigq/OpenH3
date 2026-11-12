@@ -5,7 +5,7 @@
  */
 
 import { ipcBridge } from '@/common';
-import { getGuidDraftScope, getGuidTemplateSnapshot } from './useGuidDraft';
+import { clearGuidDraftIfMatches, getGuidDraftScope, getGuidTemplateSnapshot } from './useGuidDraft';
 import { isBackendHttpError } from '@/common/adapter/httpBridge';
 import { type ChatFileRef, chatFileRefPath } from '@/common/types/chatFile';
 import {
@@ -30,6 +30,7 @@ import type { NavigateFunction } from 'react-router-dom';
 import { mutate as swrMutate } from 'swr';
 import { getConversationCreateErrorMessage } from '@/renderer/pages/conversation/utils/conversationCreateError';
 import { comfyFamilyDetails, writeComfyDraftIntent, type ComfyDraftIntent } from '../Creation/comfyDraft';
+import type { ModelConstraint } from '@/common/chat/document/creation/workflows/contracts';
 
 /**
  * Built-in ComfyUI MCP servers from older OpenH3/AionUi releases expose the
@@ -45,6 +46,7 @@ const hasCompatibleComfyTool = (tools: Set<string>, name: string): boolean =>
 
 export type GuidSendDeps = {
   creationModel?: CreationModel;
+  creationConstraint?: ModelConstraint;
   creationIntent?: ComfyDraftIntent;
   // Input state
   input: string;
@@ -97,6 +99,7 @@ export type GuidSendResult = {
 export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
   const {
     creationModel,
+    creationConstraint,
     creationIntent,
     input,
     files,
@@ -172,16 +175,28 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
             .filter((server) => (defaultSelectedMcpServerIds ?? []).includes(server.id))
             .map((server) => toSessionMcpServer(server));
 
+    const modelConstraint: ModelConstraint | undefined =
+      creationModel?.source === 'local' && creationModel.modelSetId
+        ? creationConstraint?.modelSetId === creationModel.modelSetId
+          ? creationConstraint
+          : {
+              modelSetId: creationModel.modelSetId,
+              selectionRevision: 0,
+              workflowMode: creationModel.workflowMode ?? 'auto',
+              fixedWorkflowId: creationModel.fixedWorkflowId,
+            }
+        : undefined;
     const creationRequest: CreationRequest | undefined = creationIntent
       ? {
           id: creationIntent.profileId ?? creationIntent.family,
-          name: comfyFamilyDetails(creationIntent.family).name,
-          kind: comfyFamilyDetails(creationIntent.family).kind,
+          name: comfyFamilyDetails(creationIntent.family, creationIntent).name,
+          kind: comfyFamilyDetails(creationIntent.family, creationIntent).kind,
           source: 'local',
           state: creationIntent.profileId ? 'invalid' : 'not-installed',
           family: creationIntent.family,
           intent: creationIntent.intent,
           profileId: creationIntent.profileId,
+          installContext: creationIntent.installContext,
         }
       : creationModel
         ? {
@@ -193,6 +208,10 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
             family: creationModel.family,
             profileId: creationModel.profileId,
             intent: creationModel.intent ?? 'generate',
+            modelSetId: modelConstraint?.modelSetId ?? creationModel.modelSetId,
+            workflowMode: modelConstraint?.workflowMode ?? creationModel.workflowMode,
+            fixedWorkflowId: modelConstraint?.fixedWorkflowId ?? creationModel.fixedWorkflowId,
+            modelConstraint,
           }
         : undefined;
     if (creationRequest?.source === 'cloud') {
@@ -227,10 +246,16 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     const creationRequestId = creationRequest ? (installationRequestId ?? crypto.randomUUID()) : undefined;
     const cloudVideo = creationRequest?.source === 'cloud' && creationRequest.kind === 'video';
     const requiresCreationBinding = creationRequest?.source === 'local' || cloudVideo;
-    const deterministicInstallation =
+    const agentInstallation =
       requiresCreationBinding && creationRequest.family && creationRequest.intent !== 'generate';
     const creationSnapshot = creationRequest
-      ? { ...creationRequest, requestId: creationRequestId!, templateSnapshot: getGuidTemplateSnapshot() }
+      ? {
+          ...creationRequest,
+          requestId: creationRequestId!,
+          ...(agentInstallation
+            ? { installationInput: initialInput, installationMode: 'agent' as const }
+            : { templateSnapshot: getGuidTemplateSnapshot() }),
+        }
       : undefined;
     if (creationRequest) {
       const wantsVideoMedia = requiresCreationBinding || creationRequest.kind === 'video';
@@ -273,7 +298,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
           creationRequest.source === 'cloud' ? creationModel?.provider : undefined,
           creationRequestId
         );
-        if (!requiresCreationBinding || deterministicInstallation) {
+        if (!requiresCreationBinding || agentInstallation) {
           selectedSessionMcpServersToSend = prepared;
           toolsReady = true;
           continue;
@@ -311,9 +336,9 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
           reason = isBackendHttpError(cause) && cause.code ? cause.code : 'COMFY_MCP_CONNECTION_FAILED';
         }
       }
-      // Installation is submitted through the application service, so an absent
-      // Agent transport must not prevent creating its bound request.
-      if (!toolsReady && !deterministicInstallation) {
+      // Preserve the installation request when managed tools are unavailable;
+      // the Agent can diagnose availability and use the Skill's permitted fallback.
+      if (!toolsReady && !agentInstallation) {
         Message.error(t('guid.creation.toolsCheckFailed', { reason }));
         return false;
       }
@@ -426,6 +451,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
 
         writeComfyDraftIntent(undefined);
         await navigate(`/conversation/${conversation.id}`);
+        clearGuidDraftIfMatches(input, guidDraftScope);
         return true;
       } catch (error: unknown) {
         console.error('Failed to create OpenH3 Core conversation:', error);
@@ -491,6 +517,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
 
       writeComfyDraftIntent(undefined);
       await navigate(`/conversation/${conversation.id}`);
+      clearGuidDraftIfMatches(input, guidDraftScope);
       return true;
     } catch (error: unknown) {
       console.error('Failed to create ACP conversation:', error);
@@ -498,6 +525,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     }
   }, [
     creationModel,
+    creationConstraint,
     creationIntent,
     installationRequestId,
     input,

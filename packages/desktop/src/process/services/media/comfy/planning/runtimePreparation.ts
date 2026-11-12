@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import type { ComfyInstallPlan, ComfyProfile } from '@/common/chat/document/creation/comfy';
 import {
   readPythonRuntime,
@@ -25,10 +26,57 @@ const TRUSTED_PACKAGE_HOSTS = [
 // Fail closed if an index cannot provide PEP 658 metadata or byte ranges.
 // pip --dry-run alone may otherwise download a multi-GB wheel while planning,
 // before the installation operation has received its permission decision.
-const METADATA_ONLY_PIP = `import sys,re
+export const METADATA_ONLY_PIP = `import sys,re
+# Reports contain arbitrary Unicode package metadata, including on GBK Windows.
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
 from urllib.parse import urlsplit
 from pip._internal.network.session import PipSession
 from pip._internal.cli.main import main
+from pip._internal.operations.prepare import RequirementPreparer
+from pip._internal.utils.direct_url_helpers import direct_url_from_link
+from pip._internal.index.package_finder import PackageFinder
+from pip._internal.models.search_scope import SearchScope
+if '--dry-run' not in sys.argv or '--only-binary=:all:' not in sys.argv:
+ raise RuntimeError('COMFY_METADATA_ONLY_RESOLVER_MODE_REQUIRED')
+# Extra indexes can advertise hashless copies of ordinary PyPI packages.
+# Resolve only candidates whose wheel identity can be locked before download.
+find_candidates=PackageFinder.find_all_candidates
+def hashed_candidates(self,project_name):
+ scope=self.search_scope
+ # Do not query the CUDA wheel index for every ordinary PyPI dependency.
+ # This also avoids hashless republished copies on that extra index.
+ if project_name.replace('_','-').lower() not in ('torch','torchvision','torchaudio','pytorch-triton','pytorch-triton-rocm'):
+  self.search_scope=SearchScope.create(find_links=scope.find_links,index_urls=[url for url in scope.index_urls if urlsplit(url).hostname!='download.pytorch.org'],no_index=scope.no_index)
+ try:
+  candidates=find_candidates(self,project_name)
+ finally:
+  self.search_scope=scope
+ locked=[candidate for candidate in candidates if candidate.link.hash_name=='sha256' and re.fullmatch(r'[a-fA-F0-9]{64}',candidate.link.hash or '')]
+ if candidates and not locked:
+  raise RuntimeError('COMFY_METADATA_ONLY_DIGEST_MISSING:'+project_name)
+ return locked
+PackageFinder.find_all_candidates=hashed_candidates
+# Older pip completes partial wheels even during a dry run. Retain the
+# already validated metadata and index digest instead of fetching the body.
+prepare_metadata=RequirementPreparer._fetch_metadata_only
+def retained_metadata(self,req):
+ dist=prepare_metadata(self,req)
+ if dist is not None:
+  req._openh3_metadata=dist
+  req.get_dist=lambda: dist
+  req.download_info=direct_url_from_link(req.link,req.source_dir)
+ return dist
+def metadata_report_only(self,reqs,parallel_builds=False):
+ for req in reqs:
+  if not req.link or not req.link.is_wheel or getattr(req,'_openh3_metadata',None) is None:
+   raise RuntimeError('COMFY_METADATA_ONLY_INCOMPLETE')
+  info=req.download_info.to_dict() if req.download_info else {}
+  digest=info.get('archive_info',{}).get('hashes',{}).get('sha256','')
+  if not re.fullmatch(r'[a-fA-F0-9]{64}',digest):
+   raise RuntimeError('COMFY_METADATA_ONLY_DIGEST_MISSING')
+RequirementPreparer._fetch_metadata_only=retained_metadata
+RequirementPreparer.prepare_linked_requirements_more=metadata_report_only
 original=PipSession.send
 def metadata_only(self,request,**kwargs):
  wheel=urlsplit(request.url).path.lower().endswith('.whl')
@@ -71,25 +119,79 @@ export type RuntimePreparation = {
   evidence: string[];
 };
 
-/** The binary's own sys.executable/version output is required before it can create a venv. */
+/** A usable model interpreter is not necessarily capable of building an isolated Python environment. */
 export async function findBootstrapPython(options: RuntimePreparationOptions, preferred?: string): Promise<string> {
   const suffix = process.platform === 'win32' ? ['python.exe', 'python3.exe'] : ['python3', 'python'];
   const paths = (process.env.PATH ?? '').split(path.delimiter);
+  const resources = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+  const bundled = [process.env.OPENH3_RESOURCES_ROOT, resources]
+    .filter((root): root is string => Boolean(root))
+    .flatMap((root) => [
+      path.join(root, 'bundled-python', 'python.exe'),
+      path.join(root, 'bundled-python', `win32-${process.arch}`, 'python', 'python.exe'),
+    ]);
   const possible = [
     ...(options.bootstrapPythons ?? []),
+    ...bundled,
     preferred,
     process.env.OPENH3_PYTHON_PATH,
     process.env.PYTHON_PATH,
     ...paths.flatMap((directory) => suffix.map((name) => path.join(directory, name))),
+    ...['312', '311', '313', '310'].flatMap((version) => [
+      path.join(
+        process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local'),
+        'Programs',
+        'Python',
+        `Python${version}`,
+        'python.exe'
+      ),
+      path.join(process.env.ProgramFiles ?? 'C:\\Program Files', `Python${version}`, 'python.exe'),
+    ]),
   ];
+  const run = options.runCommand ?? runComfyCommand;
+  if (process.platform === 'win32') {
+    try {
+      const listing = await run('py', ['--list-paths'], { timeout: 5000, windowsHide: true, maxBuffer: 1024 * 1024 });
+      for (const line of listing.split(/\r?\n/)) {
+        const executable = /([a-z]:\\.*python(?:3)?\.exe)\s*$/i.exec(line)?.[1];
+        if (executable) possible.push(executable);
+      }
+    } catch {
+      /* The Python launcher is optional. */
+    }
+  }
+  const rejected: string[] = [];
   for (const value of new Set(possible)) {
     if (!value || !path.isAbsolute(value) || !fs.existsSync(value) || !fs.statSync(value).isFile()) continue;
-    const runtime = await readPythonRuntime(value, { runCommand: options.runCommand });
-    if (runtime.status !== 'available' || !runtime.version || !runtime.executable) continue;
-    const [major, minor] = runtime.version.split('.').map(Number);
-    if (major === 3 && minor >= 10 && minor <= 13) return runtime.executable;
+    try {
+      const output = await run(
+        value,
+        [
+          '-c',
+          'import venv, ensurepip, pip, sys, json; print(json.dumps({"executable":sys.executable,"version":sys.version.split()[0],"venv":True,"pip":True}))',
+        ],
+        { timeout: 15000, windowsHide: true, maxBuffer: 1024 * 1024 }
+      );
+      const runtime = record(JSON.parse(output.trim().split(/\r?\n/).at(-1) ?? ''));
+      const executable = stringValue(runtime.executable);
+      const [major, minor] = stringValue(runtime.version).split('.').map(Number);
+      if (
+        major === 3 &&
+        minor >= 10 &&
+        minor <= 13 &&
+        runtime.venv === true &&
+        runtime.pip === true &&
+        executable &&
+        path.isAbsolute(executable) &&
+        fs.existsSync(executable)
+      )
+        return executable;
+    } catch {
+      /* Embedded distributions commonly omit venv/ensurepip; try a full installation. */
+    }
+    rejected.push(value);
   }
-  throw new Error('COMFY_DETECTION_INCOMPLETE:BOOTSTRAP_PYTHON_3_10_TO_3_13_NOT_FOUND');
+  throw new Error(`COMFY_DETECTION_INCOMPLETE:BOOTSTRAP_PYTHON_WITH_VENV_AND_PIP_REQUIRED:${JSON.stringify(rejected)}`);
 }
 
 /**
@@ -206,7 +308,9 @@ export async function prepareComfyRuntime(
       break;
     } catch (error) {
       const failure = record(error);
-      const detail = `${stringValue(failure.stderr)} ${error instanceof Error ? error.message : ''}`;
+      // execFile's message embeds the entire -c program, including every error
+      // constant. Only stderr is evidence of which Python guard actually fired.
+      const detail = stringValue(failure.stderr) || (failure.cmd ? '' : error instanceof Error ? error.message : '');
       failures.push(
         /COMFY_METADATA_ONLY_[A-Z_]+/.exec(detail)?.[0] ??
           (/No module named pip/i.test(detail)
@@ -215,7 +319,7 @@ export async function prepareComfyRuntime(
               ? 'COMPATIBLE_BINARY_WHEEL_UNAVAILABLE'
               : /certificate|SSL/i.test(detail)
                 ? 'PACKAGE_SOURCE_TLS_FAILED'
-                : /timed out|ETIMEDOUT/i.test(detail)
+                : failure.killed === true || /timed out|ETIMEDOUT/i.test(detail)
                   ? 'PACKAGE_SOURCE_TIMEOUT'
                   : 'BINARY_METADATA_RESOLVER_FAILED')
       );

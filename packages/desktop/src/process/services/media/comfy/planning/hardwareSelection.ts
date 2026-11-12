@@ -4,6 +4,48 @@ import { records, record, stringValue, type CatalogRecord } from './catalog';
 
 export type ComfyKernelEvidence = { bf16: boolean; attention: boolean; fp8: boolean; error?: string };
 
+/** Whole-component planning estimate, not a promise of successful generation. */
+export function comfyMemoryBudget(
+  componentSizes: Array<number | undefined>,
+  machine: { totalMemoryBytes: number; freeMemoryBytes: number },
+  gpu: { totalMemoryBytes?: number; freeMemoryBytes?: number; sharedMemory?: boolean }
+):
+  | {
+      bytes: number;
+      requiredBytes: number;
+      fitsTotal?: boolean;
+      fitsAvailable?: boolean;
+      fitsGpu?: boolean;
+    }
+  | undefined {
+  if (
+    !componentSizes.length ||
+    componentSizes.some((size) => size === undefined || !Number.isFinite(size) || size <= 0)
+  )
+    return undefined;
+  const sizes = componentSizes as number[];
+  const bytes = sizes.reduce((sum, size) => sum + size, 0);
+  const requiredBytes = bytes + Math.max(2 * 2 ** 30, Math.ceil(Math.max(...sizes) * 0.15));
+  // Unified memory is the host pool; dedicated devices are evaluated individually, never summed.
+  const total = gpu.sharedMemory
+    ? machine.totalMemoryBytes
+    : gpu.totalMemoryBytes === undefined
+      ? undefined
+      : machine.totalMemoryBytes + gpu.totalMemoryBytes;
+  const available = gpu.sharedMemory
+    ? machine.freeMemoryBytes
+    : gpu.freeMemoryBytes === undefined
+      ? undefined
+      : machine.freeMemoryBytes + gpu.freeMemoryBytes;
+  return {
+    bytes,
+    requiredBytes,
+    fitsTotal: total === undefined || !(machine.totalMemoryBytes > 0) ? undefined : requiredBytes <= total,
+    fitsAvailable: available === undefined ? undefined : requiredBytes <= available,
+    fitsGpu: gpu.freeMemoryBytes === undefined ? undefined : requiredBytes <= gpu.freeMemoryBytes,
+  };
+}
+
 /** Execute small tensors on the actual CUDA device, rather than inferring execution from package names. */
 export async function probePlanningKernels(
   python: string,
@@ -101,20 +143,23 @@ export function selectComfyCandidate(
       failures.push(`incomplete:${candidate.id}:EXECUTING_BF16_ATTENTION_OR_FP8_KERNEL`);
       continue;
     }
-    const bytes = components.reduce((sum, entry) => sum + Number(entry.sizeBytes), 0);
-    const largest = Math.max(...components.map((entry) => Number(entry.sizeBytes)));
-    const reserve = Math.max(2 * 2 ** 30, Math.ceil(largest * 0.15));
+    const budget = comfyMemoryBudget(
+      components.map((entry) => Number(entry.sizeBytes)),
+      report.machine,
+      gpu
+    )!;
+    const { bytes } = budget;
     // CPU offload keeps complete weights across host/device; temporary memory
     // is reserved explicitly, without assigning a family to a VRAM threshold.
-    if (bytes + reserve > report.machine.freeMemoryBytes + (gpu.freeMemoryBytes ?? 0)) {
-      failures.push(`insufficient:${candidate.id}:AVAILABLE_RAM_AND_VRAM:${bytes + reserve}`);
+    if (!budget.fitsAvailable) {
+      failures.push(`insufficient:${candidate.id}:AVAILABLE_RAM_AND_VRAM:${budget.requiredBytes}`);
       continue;
     }
     if (bytes + Math.max(4 * 2 ** 30, Math.ceil(bytes * 0.1)) > report.machine.disk!.freeBytes) {
       failures.push(`insufficient:${candidate.id}:FREE_DISK:${bytes}`);
       continue;
     }
-    eligible.push({ candidate, bytes, fitsGpu: bytes + reserve <= (gpu.freeMemoryBytes ?? 0) });
+    eligible.push({ candidate, bytes, fitsGpu: budget.fitsGpu === true });
   }
   eligible.sort((a, b) => Number(b.fitsGpu) - Number(a.fitsGpu) || a.bytes - b.bytes);
   if (eligible.length) return eligible[0].candidate;

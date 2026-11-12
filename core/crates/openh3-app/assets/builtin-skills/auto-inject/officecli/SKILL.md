@@ -390,7 +390,7 @@ officecli add-part <file> <parent>                   # create new document part 
 
 **Loading rule**:
 - Pick the most specific match in "When to use"; if none fits, load the format default (`word` / `pptx` / `excel`).
-- Scenes already contain the format default's rules — load **one** skill per artifact, never stack.
+- Choose **one primary scene** per artifact, then read its required format/dependency skills in the same session. Scene layers may inherit rules without repeating them; follow explicit dependencies until the needed rules are available. Avoid loading unrelated scenes.
 - Loaded rules persist across turns; don't re-load each reply.
 - Two distinct artifacts → two separate loads.
 

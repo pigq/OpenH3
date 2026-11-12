@@ -813,7 +813,8 @@
     "executingNode": "Executing node {{node}}, including initialization and computation",
     "finalizing": "Checking output files",
     "noRecentProgress": "No new progress for over 1 minute; execution may still be active.",
-    "cancelHint": "Cancel ends this generation; sampling cannot resume. Stopping chat does not cancel the video task."
+    "cancelHint": "Cancel ends this generation; sampling cannot resume. Stopping chat does not cancel the video task.",
+    "artifactUnavailable": "로컬 동영상 파일을 읽을 수 없습니다. 앱이 알려진 출력 폴더에서 복구를 시도합니다. 원본 파일이 있는지 확인한 후 재생을 다시 시도하세요."
   },
   "workProgress": {
     "title": "작업 진행 상황",

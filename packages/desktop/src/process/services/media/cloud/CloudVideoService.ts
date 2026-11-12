@@ -100,6 +100,11 @@ export class CloudVideoService {
       model: connection.model || connection.name,
       status: 'queued',
       progress: 0,
+      progressKnown: false,
+      stage: 'submitting',
+      aspectRatio: input.aspectRatio,
+      width: input.width,
+      height: input.height,
       createdAt: new Date().toISOString(),
     };
     const record = { job, connection: { ...connection } };
@@ -109,12 +114,19 @@ export class CloudVideoService {
     try {
       const remote = await this.adapter(record).submit(input);
       job.remoteId = remote.id;
+      job.status = remote.status === 'failed' ? 'failed' : remote.status === 'queued' ? 'queued' : 'running';
+      job.stage = remote.status === 'failed' ? 'failed' : remote.status === 'queued' ? 'queued' : 'generating';
+      job.progressKnown = remote.progress !== undefined;
+      job.progress = remote.progress ?? 0;
+      job.lastCheckedAt = job.updatedAt = new Date().toISOString();
+      if (remote.status === 'failed') job.error = 'CLOUD_VIDEO_GENERATION_FAILED';
       this.persist();
     } catch (error) {
       // An HTTP rejection proves no accepted job; a lost response does not.
       const status = (error as { status?: number }).status;
       Object.assign(job, {
         status: 'failed',
+        stage: 'failed',
         submissionUncertain: !status || status >= 500,
         error: status ? `CLOUD_VIDEO_HTTP_${status}` : 'CLOUD_VIDEO_SUBMISSION_UNCERTAIN',
       });
@@ -139,8 +151,16 @@ export class CloudVideoService {
     return path.join(this.options.root, `${id}.mp4`);
   }
   private async download(record: RecordJob): Promise<void> {
+    record.job.status = 'running';
+    record.job.stage = 'downloading';
+    record.job.downloadBytes = 0;
+    record.job.downloadTotalBytes = undefined;
+    record.job.updatedAt = new Date().toISOString();
+    this.persist();
     const response = await this.adapter(record).download(record.job.remoteId!);
     if (!response.ok || !response.body) throw new Error('CLOUD_VIDEO_DOWNLOAD_FAILED');
+    const total = Number(response.headers.get('content-length'));
+    if (Number.isSafeInteger(total) && total > 0) record.job.downloadTotalBytes = total;
     const temp = path.join(this.options.root, `${record.job.id}.part`);
     const target = path.join(this.options.root, `${record.job.id}.mp4`);
     const fd = fs.openSync(temp, 'w');
@@ -152,6 +172,8 @@ export class CloudVideoService {
         const { value, done } = await reader.read();
         if (done) break;
         size += value.byteLength;
+        record.job.downloadBytes = size;
+        record.job.updatedAt = new Date().toISOString();
         if (size > 1024 * 1024 * 1024) throw new Error('CLOUD_VIDEO_OUTPUT_TOO_LARGE');
         if (header.length < 12) header = Buffer.concat([header, Buffer.from(value)]).subarray(0, 12);
         fs.writeSync(fd, value);
@@ -177,19 +199,30 @@ export class CloudVideoService {
           const remote = await this.adapter(record).retrieve(job.remoteId);
           if (remote.id !== job.remoteId) throw new Error('CLOUD_VIDEO_REMOTE_ID_MISMATCH');
           job.error = undefined;
+          job.progressKnown = remote.progress !== undefined;
           job.progress = remote.progress ?? 0;
+          job.lastCheckedAt = job.updatedAt = new Date().toISOString();
           if (remote.status === 'failed') {
             job.status = 'failed';
+            job.stage = 'failed';
             job.error = 'CLOUD_VIDEO_GENERATION_FAILED';
           } else if (remote.status === 'completed') {
             await this.download(record);
             job.status = 'succeeded';
+            job.stage = 'completed';
+            job.progressKnown = true;
             job.progress = 100;
-          } else job.status = remote.status === 'queued' ? 'queued' : 'running';
+          } else {
+            job.status = remote.status === 'queued' ? 'queued' : 'running';
+            job.stage = remote.status === 'queued' ? 'queued' : 'generating';
+          }
         } catch (error) {
           const status = (error as { status?: number }).status;
           const permanent = status !== undefined && [400, 401, 403, 404, 422].includes(status);
-          if (permanent) job.status = 'failed';
+          if (permanent) {
+            job.status = 'failed';
+            job.stage = 'failed';
+          }
           job.error =
             status === 404
               ? 'CLOUD_VIDEO_REMOTE_LOST'

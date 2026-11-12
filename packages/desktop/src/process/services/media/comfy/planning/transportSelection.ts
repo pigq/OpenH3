@@ -1,4 +1,6 @@
 import { records, record, stringValue, type CatalogRecord } from './catalog';
+import { discoverComfySources } from '../discovery/sourceDiscovery';
+import { fetchH3Download } from '@/process/services/runtime/h3Downloader';
 
 // Fixed-revision mirror HEAD metadata (x-linked-etag/x-linked-size and repo
 // commit) was compared with the catalog on 2026-10-27. Downloads are still
@@ -56,52 +58,61 @@ function trustedSource(urlText: string): boolean {
   }
 }
 
+export function isTrustedComfySource(url: string): boolean {
+  return trustedSource(url);
+}
+
 /** Only byte-identical, documented transports participate in domestic fallback. */
-export function approvedComfyTransports(component: CatalogRecord): string[] {
+export function approvedComfyTransports(component: CatalogRecord, discovered: string[] = []): string[] {
   const matches = (item: CatalogRecord) => item.sha256 === component.sha256 && item.sizeBytes === component.sizeBytes;
   const transports = records(component.transports).filter(
     (item) =>
-      matches(item) && Boolean(stringValue(record(item.identityEvidence).kind)) && trustedSource(stringValue(item.url))
+      matches(item) &&
+      Boolean(stringValue(record(item.identityEvidence).kind) || stringValue(item.integrityEvidence)) &&
+      trustedSource(stringValue(item.url))
   );
   const score = (provider: unknown) => (provider === 'modelscope' ? 0 : provider === 'domestic-mirror' ? 1 : 2);
   transports.sort((a, b) => score(a.provider) - score(b.provider));
   const mirrors = VERIFIED_MIRRORS.filter(matches).map((item) => item.url);
-  const urls = [...transports.map((item) => stringValue(item.url)), ...mirrors, stringValue(component.url)];
-  return [...new Set(urls.filter(trustedSource))]
-    .sort(
-      (a, b) =>
-        score(
-          a.includes('modelscope.cn') ? 'modelscope' : a.includes('hf-mirror.com') ? 'domestic-mirror' : 'upstream'
-        ) -
-        score(b.includes('modelscope.cn') ? 'modelscope' : b.includes('hf-mirror.com') ? 'domestic-mirror' : 'upstream')
-    )
-    .slice(0, 4);
+  const urls = [
+    ...discovered,
+    ...transports.map((item) => stringValue(item.url)),
+    ...mirrors,
+    stringValue(component.url),
+  ];
+  const preferred = [...new Set(urls.filter(trustedSource).filter((url) => !discovered.includes(url)))].sort(
+    (a, b) =>
+      score(a.includes('modelscope.cn') ? 'modelscope' : a.includes('hf-mirror.com') ? 'domestic-mirror' : 'upstream') -
+      score(b.includes('modelscope.cn') ? 'modelscope' : b.includes('hf-mirror.com') ? 'domestic-mirror' : 'upstream')
+  );
+  return [...new Set([...discovered.filter(trustedSource), ...preferred])];
 }
 
 /** Probe the fixed file itself; a reachable home page is not download evidence. */
 export async function selectComfyTransports(
   component: CatalogRecord,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetchH3Download,
+  discovered: string[] = []
 ): Promise<string[]> {
-  const urls = approvedComfyTransports(component);
+  const urls = approvedComfyTransports(component, discovered);
   const reachable: string[] = [];
   let authorization = false;
   for (const url of urls) {
     try {
       const response = await fetcher(url, { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(8_000) });
-      authorization ||= [401, 403].includes(response.status);
-      const sizeHeader = response.headers.get('x-linked-size') ?? response.headers.get('content-length');
-      const digest = response.headers.get('x-linked-etag')?.replace(/^"|"$/g, '').toLowerCase();
-      const size = Number(sizeHeader);
-      const redirect = [301, 302, 303, 307, 308].includes(response.status);
-      // LFS metadata on a redirect is sufficient for source reachability; the
-      // downloader validates redirected bytes, size and digest independently.
-      if (
-        (response.ok || redirect) &&
-        (!size || size === component.sizeBytes || (redirect && !response.headers.has('x-linked-size'))) &&
-        (!digest || digest === stringValue(component.sha256).toLowerCase())
-      )
-        reachable.push(url);
+      if (isUsableProbe(response, component)) reachable.push(url);
+      else if ([401, 403, 405, 501].includes(response.status)) {
+        await response.body?.cancel();
+        const ranged = await fetcher(url, {
+          method: 'GET',
+          headers: { range: 'bytes=0-0' },
+          redirect: 'manual',
+          signal: AbortSignal.timeout(8_000),
+        });
+        if (isUsableProbe(ranged, component, true)) reachable.push(url);
+        else authorization ||= [401, 403].includes(ranged.status);
+        await ranged.body?.cancel();
+      }
       await response.body?.cancel();
     } catch {
       /* Fall through to the next documented transport. */
@@ -109,9 +120,58 @@ export async function selectComfyTransports(
   }
   if (!reachable.length)
     throw new Error(
-      `COMFY_${authorization ? 'SOURCE_AUTHORIZATION_REQUIRED' : 'TOOL_NOT_READY:MODEL_SOURCES_UNREACHABLE'}:${stringValue(component.name)}`
+      `COMFY_${authorization ? 'SOURCE_AUTHORIZATION_REQUIRED' : 'SOURCE_UNREACHABLE'}:${stringValue(component.name)}`
     );
-  // Preserve eligible but currently offline transports for resumable fallback,
-  // after transports actually probed as reachable, in the same domestic order.
-  return [...reachable, ...urls.filter((url) => !reachable.includes(url))].slice(0, 4);
+  // Probe each pinned source, then try every byte-identical eligible transport.
+  return [...new Set([...reachable, ...urls.filter((url) => !reachable.includes(url))])];
+}
+
+function isUsableProbe(response: Response, component: CatalogRecord, ranged = false): boolean {
+  const total =
+    ranged && response.status === 206
+      ? response.headers.get('content-range')?.match(/^bytes \d+-\d+\/(\d+)$/)?.[1]
+      : response.headers.get('content-length');
+  const sizeHeader = response.headers.get('x-linked-size') ?? total;
+  const digest = response.headers.get('x-linked-etag')?.replace(/^"|"$/g, '').toLowerCase();
+  const size = Number(sizeHeader);
+  const redirect = [301, 302, 303, 307, 308].includes(response.status);
+  return (
+    (response.ok || redirect) &&
+    (!size || size === component.sizeBytes || (redirect && !response.headers.has('x-linked-size'))) &&
+    (!digest || digest === stringValue(component.sha256).toLowerCase())
+  );
+}
+
+/** Exhaust catalog transports, then search equivalent provider artifacts once. */
+export async function resolveComfyTransports(
+  component: CatalogRecord,
+  fetcher: typeof fetch = fetchH3Download,
+  discovered: string[] = []
+): Promise<string[]> {
+  try {
+    return await selectComfyTransports(component, fetcher, discovered);
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.startsWith('COMFY_SOURCE_UNREACHABLE:')) throw error;
+    const discovery = await discoverComfySources(component, { fetcher });
+    try {
+      if (!discovery.sources.length) throw error;
+      return await selectComfyTransports(component, fetcher, [
+        ...discovery.sources.map((source) => source.url),
+        ...discovered,
+      ]);
+    } catch (cause) {
+      throw Object.assign(cause instanceof Error ? cause : error, {
+        diagnosis: {
+          stage: 'source-discovery',
+          component: component.name,
+          sha256: component.sha256,
+          sizeBytes: component.sizeBytes,
+          attempts: discovery.attempts,
+          candidates: discovery.sources,
+          nextAction:
+            'Use openh3_web_search and openh3_web_fetch to locate equivalent repositories, then openh3_comfy_sources to verify metadata. Preserve identity and permissions.',
+        },
+      });
+    }
+  }
 }

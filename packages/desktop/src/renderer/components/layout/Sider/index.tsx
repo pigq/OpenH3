@@ -13,6 +13,7 @@ import {
   SiderScheduledEntry,
   SiderAssistantEntry,
   SiderCreationEntry,
+  SiderLocalModelsEntry,
 } from './SiderNav';
 import SiderFooter from './SiderFooter';
 import TeamSiderSection from './TeamSiderSection';
@@ -230,6 +231,20 @@ const Sider: React.FC<SiderProps> = ({ onSessionClick, collapsed = false }) => {
               siderTooltipProps={siderTooltipProps}
               onClick={handleCreationClick}
             />
+            <SiderLocalModelsEntry
+              isMobile={isMobile}
+              isActive={pathname === '/local-models'}
+              collapsed={collapsed}
+              siderTooltipProps={siderTooltipProps}
+              onClick={() => {
+                cleanupSiderTooltips();
+                blurActiveElement();
+                closePreview();
+                setIsBatchMode(false);
+                void navigate('/local-models');
+                onSessionClick?.();
+              }}
+            />
             {/* Scheduled tasks nav entry - fixed above scroll */}
             <SiderScheduledEntry
               isMobile={isMobile}
@@ -250,6 +265,7 @@ const Sider: React.FC<SiderProps> = ({ onSessionClick, collapsed = false }) => {
               <Suspense fallback={<div className='min-h-200px' />}>
                 <WorkspaceGroupedHistory
                   {...workspaceHistoryProps}
+                  onNewChat={handleNewChat}
                   afterPinnedContent={
                     <>
                       <TeamSiderSection

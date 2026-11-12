@@ -8,7 +8,26 @@ export const records = (value: unknown): CatalogRecord[] => (Array.isArray(value
 export const stringValue = (value: unknown, fallback = ''): string =>
   typeof value === 'string' && value.trim() ? value : fallback;
 
-export type ComfyInstallCatalog = { root: string; candidates: CatalogRecord[]; baselines: CatalogRecord[] };
+export type ComfyInstallCatalog = {
+  root: string;
+  candidates: CatalogRecord[];
+  baselines: CatalogRecord[];
+  capabilityInventory?: CatalogRecord[];
+  preparationPolicy?: CatalogRecord;
+};
+
+/** Keep the original baseline first while exposing every prepared recipe for the same exact candidate. */
+export function workflowsForCandidate(catalog: ComfyInstallCatalog, candidate: CatalogRecord): CatalogRecord[] {
+  const variants = catalog.baselines.filter(
+    (item) => item.candidateId === candidate.id || item.id === candidate.apiBaselineId
+  );
+  const baselineIndex = variants.findIndex((item) => item.id === candidate.apiBaselineId);
+  if (baselineIndex > 0) variants.unshift(...variants.splice(baselineIndex, 1));
+  if (variants.length) return variants;
+  return record(candidate.workflow).url
+    ? [{ ...record(candidate.workflow), candidateId: candidate.id, apiConversionRequired: true }]
+    : [];
+}
 
 /** Resolve application-owned resources independently of the chat/current directory. */
 export function resolveComfyResourcesRoot(explicit?: string): string {
@@ -49,6 +68,9 @@ export function loadComfyInstallCatalog(resourcesRoot?: string): ComfyInstallCat
       ...records(workflows.workflows),
       ...records(record(workflows.omni).baselines),
       ...records(record(workflows.imageModels).baselines),
+      ...records(workflows.variants),
     ],
+    capabilityInventory: records(workflows.capabilityInventory),
+    preparationPolicy: record(workflows.preparationPolicy),
   };
 }

@@ -1,9 +1,18 @@
 {
-  "promptExamplesHint": "이 지시를 사용해 보세요",
+  "promptExamplesHint": "창작 아이디어로 시작하세요",
   "defaultPrompts": {
-    "understand": "이 프로젝트를 파악해서, 무엇을 하는 프로젝트인지 어디서부터 시작하면 되는지 쉽게 설명해 줘",
-    "cleanup": "이 폴더에서 중복되거나 쓸모없는 파일을 찾아 확인할 수 있게 목록으로 보여 줘",
-    "create": "멋진 개인 홈페이지를 만들어서 완성되면 바로 열어서 보여 줘"
+    "image": "영화 같은 비 내리는 밤거리 이미지를 세로 3:4로 생성해 줘",
+    "reference": "업로드한 사진 속 인물의 정체성을 유지한 포스터를 만들어 줘",
+    "story": "배달원의 하루를 짧은 이야기 영상으로 만들고 편집과 음악까지 완성해 줘",
+    "models": "내 컴퓨터를 검사하고 적합한 로컬 모델을 설치한 뒤 이미지 생성을 검증해 줘",
+    "product": "커피 브랜드의 미니멀한 제품 광고 이미지를 가로 16:9로 제작",
+    "portrait": "업로드한 인물 사진을 자연광 잡지 표지로 바꾸고 얼굴 특징 유지",
+    "travel": "해변 여행 영상을 만들고 장면 기획, 편집, 음악까지 완성",
+    "repair": "로컬 모델을 확인하고 문제가 있는 설정을 수정한 뒤 생성 검증",
+    "poster": "“꽃 사이의 편지”라는 봄 꽃 전시 포스터를 세로 3:4로 디자인",
+    "restyle": "업로드한 사진을 수채화로 바꾸고 원래 피사체와 구도 유지",
+    "storyboard": "“새벽에 문을 여는 빵집”을 일관된 스타일의 3막 영상으로 제작",
+    "edit": "제공한 영상을 경쾌한 단편으로 편집하고 자막과 음악 추가"
   },
   "selectAssistantHint": "어시스턴트를 선택하여 작업을 시작하세요",
   "workspace": {
@@ -33,18 +42,19 @@
       "moss-image-sft": "중국어 텍스트와 레이아웃 생성(SFT)"
     },
     "actions": {
-      "install": "설치 안내",
+      "install": "설치 시작",
       "repair": "확인 / 복구",
       "install-other": "다른 버전",
       "generate": "생성"
     },
     "intentSummary": "로컬 모델: {{model}} · {{intent}} · {{profile}}.",
     "prompts": {
-      "install": "comfyui-local을 호출해 기기를 자동 감지하고 호환되는 로컬 {{family}} 버전을 선택하여 해당 워크플로와 함께 다운로드하고 설치하세요.",
-      "repair": "comfyui-local을 호출해 로컬 {{family}} 프로필 {{profile}}을 진단하고 복구하세요. 다른 정상 프로필은 유지하세요.",
-      "install-other": "comfyui-local을 호출해 기기를 자동 감지하고 호환되는 다른 {{family}} 버전을 해당 워크플로와 함께 별도로 설치하세요. 기존 정상 버전은 유지하세요."
+      "install": "로컬 {{family}} 모델과 해당 워크플로를 설치해 주세요. 호환되는 기존 환경과 파일을 우선 재사용하고, 적합한 구성을 선택하여 오류를 해결한 뒤 실제 생성을 검증해 주세요.",
+      "repair": "다른 정상 환경과 모델을 보존하면서 로컬 {{family}} 구성 {{profile}}을 진단하고 복구한 뒤 실제 생성을 검증해 주세요.",
+      "install-other": "정상 작동하는 기존 버전을 보존하면서 로컬 {{family}}의 다른 버전과 해당 워크플로를 별도로 설치하고, 오류를 해결한 뒤 실제 생성을 검증해 주세요."
     },
     "operation": {
+      "recovering": "Agent가 이 작업을 진단하고 복구하고 있습니다.",
       "title": "ComfyUI 모델 계획",
       "authorize": "계획 승인 후 어시스턴트 계속 진행",
       "continue": "어시스턴트 계속 진행",
@@ -68,9 +78,11 @@
       },
       "snapshotDirectory": "복구 스냅샷",
       "submittedContext": "앱이 설치 작업 {{id}}({{state}})를 제출했으며 작업 진행 패널이 자동으로 업데이트됩니다. 기존 작업 상태를 설명하고 설치를 다시 제출하거나 채팅에서 재확인하지 마세요.",
-      "preparationFailed": "설치 준비가 완료되지 않았습니다: {{reason}}. 요청은 보존되었습니다. 작업 진행 상황에서 자세한 내용을 확인하세요."
+      "preparationFailed": "설치 준비가 완료되지 않았습니다: {{reason}}. 요청은 보존되었습니다. 작업 진행 상황에서 자세한 내용을 확인하세요.",
+      "agentPreparing": "Agent에 전달했습니다. 설치 환경 확인을 기다리는 중입니다.",
+      "agentRetry": "{{model}} 설치를 계속해 주세요. 기존 작업과 오류를 확인하고 comfyui-local로 진단 및 복구한 후 중복 설치 작업 없이 재개하세요."
     },
-    "profileSummary": "선택한 로컬 프로필: {{profile}}. 이 프로필을 사용하세요.",
+    "profileSummary": "선택한 로컬 프로필: {{profile}}. 모델, 정밀도 및 요청된 매개변수를 유지하세요. 복구를 완료하기 위해 검증된 복구 변형을 적용할 수 있습니다.",
     "session": {
       "title": "로컬 생성 프로필",
       "hint": "다음 생성에 적용됩니다. 제출된 작업은 저장된 프로필을 유지합니다.",
@@ -90,7 +102,9 @@
       },
       "adjusted": "이 프로필의 승인된 범위 내에서 매개변수를 조정했습니다.",
       "actualInput": "실제 생성 매개변수",
-      "submissionUncertain": "제출이 확인되지 않았습니다. 다시 제출하기 전에 현재 ComfyUI 대기열을 확인하세요."
+      "submissionUncertain": "제출이 확인되지 않았습니다. 다시 제출하기 전에 현재 ComfyUI 대기열을 확인하세요.",
+      "recovered": "복구됨 · 이전 실패 보기",
+      "elapsed": "총 소요 시간: {{seconds}}초"
     },
     "illustrativeCover": "용도 예시 이미지",
     "preview": {
@@ -112,7 +126,34 @@
       "krea2": "comfyui-local: references/z-image.md#krea2 — BF16 / FP8 / INT8-ConvRot / NVFP4; Turbo steps=8, CFG=1; CLIPLoader.type=krea2. 기본값은 Turbo이며 Raw를 혼합하거나 스타일 LoRA를 자동 추가하지 않는다. 이 기준은 텍스트 이미지 생성만 검증하며 스타일 참조에는 별도로 맞춘 워크플로가 필요하다.",
       "moss-image-sft": "comfyui-local: references/z-image.md#moss-image-sft — MOSS-Image-SFT, BF16 / INT8-ConvRot / INT8-ConvRot+W4A8; steps=50, CFG=3; CLIPLoader.type=moss_image. Keep SFT separate from Base and use the fixed native moss_image ComfyUI route with shift=5 and negative-branch SLG layer=22. Prefer ModelScope, then verified domestic mirror, then upstream with fixed revision, size and SHA-256; only real generation verification marks the profile usable."
     },
-    "imageRecipeRequirements": "openh3_comfy_environment로 OS, GPU 아키텍처, 드라이버, Python/Torch, 실제 정밀도/어텐션 커널, 여유 VRAM/RAM, 오프로딩과 디스크를 확인한다. 기기 조건 부족과 감지 미완료를 구분하고 누락 항목을 명시하며 VRAM 용량만으로 선택하지 않는다. NVFP4는 호환 Blackwell이 필요하다. 검증된 ModelScope, SHA-256이 같은 hf-mirror.com, 공식 소스 순으로 선택하고 revision, 크기와 SHA-256을 고정하여 다운로드 재개를 사용한다. 미검증 또는 승인이 필요한 소스를 설명하고 버전을 지어내지 않는다. 실제 이미지 생성 성공 후에만 사용 가능으로 표시한다."
+    "imageRecipeRequirements": "openh3_comfy_environment로 OS, GPU 아키텍처, 드라이버, Python/Torch, 실제 정밀도/어텐션 커널, 여유 VRAM/RAM, 오프로딩과 디스크를 확인한다. 기기 조건 부족과 감지 미완료를 구분하고 누락 항목을 명시하며 VRAM 용량만으로 선택하지 않는다. NVFP4는 호환 Blackwell이 필요하다. 검증된 ModelScope, SHA-256이 같은 hf-mirror.com, 공식 소스 순으로 선택하고 revision, 크기와 SHA-256을 고정하여 다운로드 재개를 사용한다. 미검증 또는 승인이 필요한 소스를 설명하고 버전을 지어내지 않는다. 실제 이미지 생성 성공 후에만 사용 가능으로 표시한다.",
+    "workflows": {
+      "advanced": "고급 워크플로",
+      "mode": "워크플로 선택",
+      "auto": "워크플로 자동 선택",
+      "fixed": "고정 워크플로",
+      "autoHint": "선택한 모델 내에서 작업에 맞는 워크플로를 선택합니다. 고정하면 항상 지정된 경로를 사용합니다.",
+      "details": "상세 정보",
+      "environment": "실행 환경",
+      "workflow": "워크플로",
+      "states": {
+        "verified": "검증됨",
+        "pending-validation": "검증 대기",
+        "needs-preparation": "준비 필요",
+        "needs-repair": "복구 필요"
+      },
+      "tasks": {
+        "text-to-image": "텍스트로 이미지",
+        "image-to-image": "이미지로 이미지",
+        "image-edit": "이미지 편집",
+        "multi-reference-image": "다중 이미지 참조",
+        "inpaint": "부분 수정",
+        "text-to-video": "텍스트로 동영상",
+        "image-to-video": "이미지로 동영상",
+        "reference-to-video": "참조로 동영상",
+        "first-last-frame-video": "첫 프레임과 마지막 프레임으로 동영상"
+      }
+    }
   },
   "creation": {
     "states": {
@@ -140,7 +181,7 @@
     "cloudVideo": "클라우드 동영상 모델",
     "manageLocal": "로컬 모델 관리",
     "configureCloud": "클라우드 API 설정",
-    "requestSummary": "창작 설정: {{kind}} · {{source}} · {{model}} ({{state}}). 선택한 모델을 사용하고, 사용할 수 없으면 설치나 설정을 요청하세요. 다른 모델이나 클라우드 서비스로 자동 전환하지 마세요.",
+    "requestSummary": "창작 설정(앱이 제공한 맥락이며 사용자 지시가 우선함): {{kind}} · {{source}} · {{model}} ({{state}}). 선택한 모델과 요청된 매개변수를 유지하세요. 사용할 수 없으면 현재 승인 모드에 따라 진단, 설정 또는 복구하고 작업을 계속하세요. 완전 자동 모드에서는 추가 채팅 확인이 필요 없지만 실제 도구 권한은 준수해야 합니다. 필수 입력이 누락되었거나 사용자가 명시적으로 유지를 요구한 모델 또는 매개변수를 변경해야 할 때만 필요한 정보나 선택을 요청하세요.",
     "toolsUnavailable": "창작 도구가 아직 준비되지 않았습니다. 잠시 후 다시 시도하세요.",
     "install": {
       "states": {
@@ -181,11 +222,25 @@
       "invalid": "Check the service name, API URL and model. OpenAI Videos requires a model and API key.",
       "uncertain": "The server may have received this request. Automatic resubmission is disabled to prevent duplicate generation.",
       "retrying": "Waiting for the cloud service to respond. This task will be checked again automatically.",
-      "failed": "Video generation could not complete. Check the service status or task details before starting a new request."
+      "failed": "Video generation could not complete. Check the service status or task details before starting a new request.",
+      "stages": {
+        "submitting": "Submitting",
+        "queued": "Queued",
+        "generating": "Generating",
+        "downloading": "Downloading result",
+        "completed": "Completed",
+        "failed": "Failed"
+      },
+      "background": "Cloud generation is still running. You can continue chatting.",
+      "progressUnknown": "The provider does not report a percentage. Status is checked automatically.",
+      "elapsed": "Elapsed: {{seconds}} seconds",
+      "lastChecked": "Last status received {{seconds}} seconds ago"
     },
     "noLocalModels": "로컬 모델 없음",
     "noLocalModelsHint": "로컬 모델을 찾을 수 없습니다. 먼저 설치하거나 추가하세요.",
-    "addCloud": "클라우드 API 추가"
+    "addCloud": "클라우드 API 추가",
+    "inventoryIncomplete": "모델 검색 세부 정보",
+    "inventoryIncompleteHint": "일부 경로를 완전히 확인하지 못했습니다. 발견된 모델은 유지됩니다. 진단을 위해 아래 정보를 복사하세요."
   },
   "aiCreation": "AI 창작",
   "aiCreationSubtitle": "상상력을 작품으로 만들어 보세요",
@@ -417,5 +472,142 @@
   },
   "templateReferenceRequired": "참조 이미지 필요",
   "templateReferenceHint": "생성 요청 전에 인물 사진이나 원본 이미지를 업로드하세요.",
-  "templateReferencePrompt": "업로드한 참조 이미지로 템플릿을 완성하고 인물의 정체성이나 원본 피사체를 유지하세요. 참조 이미지가 없으면 생성 전에 업로드를 요청하세요. 참조 내용을 임의로 만들지 마세요. 출력 비율: {{ratio}}.\n\n{{prompt}}"
+  "templateReferencePrompt": "업로드한 참조 이미지로 템플릿을 완성하고 인물의 정체성이나 원본 피사체를 유지하세요. 참조 이미지가 없으면 생성 전에 업로드를 요청하세요. 참조 내용을 임의로 만들지 마세요. 출력 비율: {{ratio}}.\n\n{{prompt}}",
+  "localModels": {
+    "title": "로컬 모델",
+    "subtitle": "기기에 맞는 모델을 선택하고 로컬 창작 도구를 관리하세요.",
+    "preview": "{{name}} 샘플",
+    "noPreview": "샘플 없음",
+    "play": "샘플 재생",
+    "pause": "샘플 일시 정지",
+    "unknown": "측정되지 않음",
+    "device": "현재 기기",
+    "checkedAt": "{{time}} 확인",
+    "refresh": "다시 확인",
+    "graphics": "그래픽 카드",
+    "vram": "비디오 메모리",
+    "sharedMemory": "공유 메모리",
+    "ram": "시스템 메모리",
+    "available": "{{value}} 사용 가능",
+    "cpu": "프로세서",
+    "system": "시스템",
+    "driver": "GPU 드라이버",
+    "disk": "디스크 공간",
+    "directory": "설치 폴더",
+    "changeDirectory": "폴더 선택",
+    "environment": "환경 세부 정보",
+    "environmentHint": "설치 시 Agent가 Python과 ComfyUI를 확인하거나 준비합니다. 환경이 없다고 기기가 호환되지 않는 것은 아닙니다.",
+    "python": "Python",
+    "workflowCount": "워크플로 {{count}}개",
+    "downloadSize": "다운로드 {{value}}",
+    "reusedSize": "재사용 {{value}}",
+    "details": "세부 정보",
+    "assessment": "기기 적합성 평가",
+    "assessmentHint": "용량 요구 사항은 추정치입니다. 설치 전에 Agent가 실제 워크플로와 환경을 확인합니다.",
+    "totalSize": "전체 구성 요소",
+    "download": "다운로드 필요",
+    "reused": "이미 사용 가능",
+    "versions": "버전 및 워크플로",
+    "noVersions": "설치 중 Agent가 적합한 버전과 워크플로를 선택합니다.",
+    "workflow": "워크플로",
+    "components": "구성 요소",
+    "evidence": "검증 기록",
+    "noEvidence": "성공적인 생성이 아직 검증되지 않았습니다.",
+    "loading": "기기 및 모델 확인 중",
+    "unavailable": "로컬 모델 정보를 읽지 못했습니다.",
+    "retry": "다시 시도",
+    "models": "모델 라이브러리",
+    "catalogHint": "기기 용량과 기존 구성 요소를 바탕으로 추천합니다.",
+    "search": "모델 또는 버전 검색",
+    "filter": "모델 유형",
+    "noModels": "일치하는 모델이 없습니다. 필터를 변경하거나 전체 모델을 확인하세요.",
+    "tabs": {
+      "recommended": "추천",
+      "all": "전체 모델",
+      "installed": "설치됨"
+    },
+    "filters": {
+      "all": "모든 유형",
+      "image": "이미지",
+      "video": "동영상"
+    },
+    "actions": {
+      "install": "설치 시작",
+      "use": "모델 사용",
+      "progress": "진행 상황 보기",
+      "repair": "확인 / 복구"
+    },
+    "status": {
+      "verified": "검증됨",
+      "compatible": "용량 적합",
+      "unknown": "평가 필요",
+      "insufficient": "구성 조정 필요"
+    },
+    "purpose": {
+      "image-generation": "이미지 생성",
+      "image-edit": "이미지 편집",
+      "video": "동영상 생성"
+    },
+    "errors": {
+      "load": "기기 정보를 새로 고치지 못했습니다. 설치 전에 다시 시도하세요.",
+      "action": "모델 작업을 열지 못했습니다. 다시 시도하세요.",
+      "directory": "폴더 선택기를 열지 못했습니다. 다시 시도하세요."
+    },
+    "reasons": {
+      "verified-workflow": "설치된 워크플로가 생성 검증을 통과했습니다.",
+      "component-metadata-missing": "구성 요소 크기가 확인되지 않았습니다. Agent가 설치를 평가합니다.",
+      "workflow-missing": "적합한 워크플로를 준비해야 합니다.",
+      "hardware-unknown": "GPU 용량을 측정하지 못했습니다. Agent가 기기를 확인합니다.",
+      "platform-unknown": "이 플랫폼의 호환성을 추가로 평가해야 합니다.",
+      "gpu-architecture-insufficient": "이 버전에는 다른 GPU 아키텍처가 필요합니다.",
+      "native-kernel-unverified": "이 기기에서 네이티브 연산자를 확인해야 합니다.",
+      "runtime-unverified": "Python과 ComfyUI 환경을 검증해야 합니다.",
+      "memory-insufficient": "사용 가능한 메모리가 이 버전의 예상 요구량보다 적습니다.",
+      "disk-insufficient": "선택한 디스크의 여유 공간이 부족합니다.",
+      "disk-unknown": "선택한 폴더의 여유 공간을 측정하지 못했습니다.",
+      "temporary-memory-pressure": "다른 앱이 메모리를 사용 중입니다. 실행 전에 여유 용량을 확보하세요.",
+      "offload-required": "이 구성은 시스템 메모리로의 오프로딩이 필요할 것으로 예상됩니다.",
+      "capacity-compatible": "이 기기는 알려진 용량 요구 사항을 충족합니다."
+    },
+    "installContext": "새 파일은 {{directory}}에 설치해야 합니다. 기존의 호환되는 환경과 파일은 이동하지 말고 재사용하세요. 하드웨어 확인 시각: {{checkedAt}}. 권장 구성: {{candidate}}(참고용이며 현재 하드웨어를 확인한 후 실제 계획을 결정하세요).",
+    "automaticCandidate": "자동 선택",
+    "newInstallLocation": "새 설치 위치",
+    "newFilesOnly": "새 파일에만 사용됩니다. 기존 파일은 이동하지 않습니다.",
+    "journey": {
+      "label": "로컬 창작 과정",
+      "device": "하드웨어 확인",
+      "choose": "모델 선택",
+      "create": "창작 시작",
+      "deviceHint": "이 컴퓨터의 가용 자원 확인",
+      "chooseHint": "적합한 이미지·영상 모델 찾기",
+      "createHint": "Agent가 설치와 검증 수행"
+    },
+    "recommendedHeading": "이 컴퓨터에 추천",
+    "resourceHint": "VRAM은 모델 연산에, 메모리는 구성 요소 로딩에 사용됩니다. 추천 시 두 자원과 디스크 공간을 함께 평가합니다.",
+    "descriptions": {
+      "h3": "텍스트나 참고 이미지로 영상을 만듭니다. 풍경, 제품 소개, 스토리 장면에 적합합니다.",
+      "fasth3-omni": "이미지·영상·오디오를 참고해 캐릭터 영상, 장면 확장, 여러 소재를 활용한 창작을 합니다.",
+      "qwen-edit": "자연어로 기존 이미지를 편집합니다. 의상 변경, 배경 교체, 제품 이미지 수정에 적합합니다.",
+      "z-image": "텍스트로 이미지를 만듭니다. 인물 사진, 제품 콘셉트, 아이디어 스케치에 적합합니다.",
+      "flux-3-image-klein": "가벼운 이미지 모델로 시각 콘셉트, 제품 장면, 창작 스케치를 만듭니다.",
+      "moss-image-base": "중국어 텍스트와 구도에 초점을 맞춰 포스터, 정보 이미지, 레이아웃을 만듭니다.",
+      "moss-image-sft": "미세 조정된 MOSS 이미지 모델입니다. 중국어 포스터, 인물, 장면 디자인에 적합합니다.",
+      "krea2": "스타일이 있는 이미지로 시각 콘셉트와 디자인 아이디어를 탐색합니다.",
+      "image": "설명으로 이미지를 만듭니다. 일러스트, 제품 콘셉트, 장면 디자인에 활용하세요.",
+      "editing": "이미지를 만들고 편집합니다. 참고 이미지 변형, 장면 수정, 시각 디자인에 활용하세요.",
+      "video": "로컬 영상을 만듭니다. 스토리 장면, 제품 영상, 풍경 촬영에 활용하세요."
+    },
+    "agentHandlesSetup": "원하는 창작 내용을 설명하세요. Agent가 환경을 확인하고 워크플로를 선택하며 필요한 수정을 처리합니다.",
+    "technicalDetails": "기술 정보",
+    "precisionGuide": {
+      "full": "16비트 정밀도로 가중치가 큽니다. 자원이 충분하고 양자화 영향을 줄이고 싶을 때 적합합니다.",
+      "int8": "정수 8비트로 16비트보다 가중치 용량을 줄입니다. 일상 창작과 자원 절약에 적합합니다.",
+      "fp8": "부동소수점 8비트로 가중치 용량을 줄입니다. 해당 연산을 지원하는 GPU에 적합합니다.",
+      "w4a8": "주 모델 INT8, 텍스트 인코더 가중치 4비트로 일반 INT8보다 자원을 절약합니다.",
+      "nvfp4": "부동소수점 4비트로 용량을 더 줄입니다. 설치 시 Agent가 NVFP4 지원을 확인합니다.",
+      "mixed": "구성 요소별 정밀도로 용량과 요구 사항을 조절합니다. 호환 GPU 연산이 필요합니다.",
+      "hint": "같은 모델은 창작 용도가 같고 자원 사용량과 양자화 방식이 다릅니다. 속도와 품질은 GPU, 워크플로, 입력에도 달려 있습니다. 고민된다면 추천에서 선택하세요."
+    }
+  },
+  "refreshPrompts": "다른 제안"
 }

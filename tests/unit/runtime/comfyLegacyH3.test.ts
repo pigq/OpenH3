@@ -28,6 +28,18 @@ beforeEach(() => {
 });
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 describe('legacy H3 discovery', () => {
+  it('reconstructs absent legacy workflow profiles from bundled templates without writing to the ComfyUI installation', () => {
+    const original = importLegacyH3(install, 'http://127.0.0.1:8188');
+    fs.rmSync(path.join(root, 'workflows'), { recursive: true });
+    const workflows = path.join(root, 'application-workflow-cache');
+    const profiles = importLegacyH3(install, 'http://127.0.0.1:8188', workflows);
+    expect(profiles).toHaveLength(3);
+    expect(
+      profiles.every((profile) => profile.state === 'downloaded' && profile.workflowPath.startsWith(workflows))
+    ).toBe(true);
+    expect(fs.existsSync(path.join(root, 'workflows'))).toBe(false);
+    expect(profiles.every((profile) => !original.some((saved) => saved.id === profile.id))).toBe(true);
+  });
   it('starts matching legacy profiles with the existing portable acceleration launcher', async () => {
     const ensureStarted = vi.fn(async () => ({}));
     const profile = importLegacyH3(install, 'http://127.0.0.1:8188')[0];

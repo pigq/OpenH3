@@ -1203,6 +1203,65 @@ describe('generic ComfyUI install executor', () => {
     ]);
   });
 
+  it('restores a quarantined model and its receipt when the repair download fails', async () => {
+    plan.repair = true;
+    plan.commands = [];
+    const original = plan.components[0].path;
+    const receipt = `${original}.comfy-source.json`;
+    fs.mkdirSync(path.dirname(original), { recursive: true });
+    fs.writeFileSync(original, 'broken original');
+    fs.writeFileSync(receipt, 'original receipt');
+    const { options } = fixture();
+    const failure = new Error('MODEL_SOURCE_UNREACHABLE');
+    await expect(
+      executeComfyInstall(plan, new AbortController().signal, undefined, {
+        ...options,
+        runCommand: async () => ({ stdout: '{"available":false}', stderr: '', exitCode: 0 }),
+        download: async () => {
+          throw failure;
+        },
+      })
+    ).rejects.toThrow('MODEL_SOURCE_UNREACHABLE');
+    expect(fs.readFileSync(original, 'utf8')).toBe('broken original');
+    expect(fs.readFileSync(receipt, 'utf8')).toBe('original receipt');
+  });
+
+  it('retains prior receipts with prior bytes when a failed repair left a replacement file', async () => {
+    plan.repair = true;
+    plan.commands = [];
+    const original = plan.components[0].path;
+    const receipt = `${original}.comfy-source.json`;
+    fs.mkdirSync(path.dirname(original), { recursive: true });
+    fs.writeFileSync(original, 'broken original');
+    fs.writeFileSync(receipt, 'original receipt');
+    const { options } = fixture();
+    await expect(
+      executeComfyInstall(plan, new AbortController().signal, undefined, {
+        ...options,
+        runCommand: async () => ({ stdout: '{"available":false}', stderr: '', exitCode: 0 }),
+        download: async (manifest) => {
+          fs.writeFileSync(manifest.destination, 'partial replacement');
+          throw new Error('TRANSFER_INTERRUPTED');
+        },
+      })
+    ).rejects.toThrow('TRANSFER_INTERRUPTED');
+    expect(fs.readFileSync(original, 'utf8')).toBe('partial replacement');
+    expect(fs.existsSync(receipt)).toBe(false);
+    const snapshot = path.join(
+      options.snapshotRoot,
+      fs.readdirSync(options.snapshotRoot).find((directory) => directory.startsWith('fixture-'))!
+    );
+    const retained = JSON.parse(fs.readFileSync(path.join(snapshot, 'restoration.json'), 'utf8')) as Array<{
+      state: string;
+      copy: string;
+    }>;
+    expect(retained.map((entry) => entry.state)).toEqual(['retained', 'retained']);
+    expect(retained.map((entry) => fs.readFileSync(entry.copy, 'utf8'))).toEqual([
+      'broken original',
+      'original receipt',
+    ]);
+  });
+
   it('requires the smoke image to decode into real pixels before granting verified status', async () => {
     const { options } = fixture();
     await expect(
@@ -1372,4 +1431,21 @@ describe('generic ComfyUI install executor', () => {
       verifyComfySmokeArtifact({ path: artifact, mimeType: 'image/png' }, 'image', new AbortController().signal)
     ).rejects.toThrow('COMFY_SMOKE_IMAGE_INVALID');
   });
+});
+
+it('checks existing runtime compatibility before downloading or executing commands', async () => {
+  plan.commands = [];
+  const f = fixture();
+  const validateInstallRuntime = vi.fn(async () => {
+    throw new Error('COMFY_EXISTING_RUNTIME_INCOMPATIBLE:WORKFLOW_NODE_OR_INPUT_UNSUPPORTED');
+  });
+  await expect(
+    executeComfyInstall(plan, new AbortController().signal, undefined, {
+      ...f.options,
+      engine: { ...f.options.engine, validateInstallRuntime },
+    })
+  ).rejects.toThrow('COMFY_EXISTING_RUNTIME_INCOMPATIBLE');
+  expect(validateInstallRuntime).toHaveBeenCalledOnce();
+  expect(f.options.download).not.toHaveBeenCalled();
+  expect(f.options.runCommand).not.toHaveBeenCalled();
 });

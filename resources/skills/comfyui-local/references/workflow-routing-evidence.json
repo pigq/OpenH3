@@ -1,0 +1,37 @@
+{
+  "zImageImg2img": {
+    "sourceFiles": [
+      {
+        "path": "output/playwright/model-card-20261110/validated-z-image-img2img.json",
+        "sha256": "0912ab6b78346ceafdf23eb99312965b51ae2a307c17b07943462c64b4507e35"
+      },
+      {
+        "path": "output/playwright/model-card-20261110/result-evidence.json",
+        "sha256": "7cca084ce4b55099e029d6ac484e50d3dd119a3eb28a52087236ba897c94f5e6"
+      },
+      {
+        "path": "output/playwright/model-card-20261110/beta25-workflow-repair-review.md",
+        "sha256": "9a6fa6fdad434aff53db00bde895564ead53b1d7309522e1f559683d8671ebc3"
+      }
+    ],
+    "graphSha256": "629aa347ae2b7994f8fd578120f339691e89e99679dca9eeb9a519dd7d92a88a",
+    "promptId": "c4aa6a9c-ebb1-4cc8-ada5-d213cffce6b6",
+    "jobId": "9c0d160f-0388-4e31-9393-fc1ccdca0078",
+    "checkedAt": "2026-11-09T18:43:04.046Z",
+    "coreRevision": "40c4fcdf513a4523e39d54a9d391908af8df8171",
+    "python": "3.13.14",
+    "torch": "2.13.0+cu130",
+    "hardware": "Windows x64 / NVIDIA GeForce RTX 5080",
+    "input": {
+      "type": "image",
+      "role": "edit-source",
+      "count": 1,
+      "width": 512,
+      "height": 512,
+      "denoise": 0.55,
+      "steps": 8,
+      "cfg": 1
+    },
+    "acceptance": "Decoded 512x512 image; inspected centered red paper rectangle and beige composition. No claim of identity fidelity, arbitrary edits, multi-reference support or verification on another machine."
+  }
+}

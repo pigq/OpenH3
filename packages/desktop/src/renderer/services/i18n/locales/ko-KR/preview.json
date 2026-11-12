@@ -221,5 +221,9 @@
   "zoomIn": "확대",
   "zoomOut": "축소",
   "zoomReset": "보기 재설정",
-  "diagramZoomHint": "스크롤로 확대 • 드래그로 이동 • ESC로 닫기"
+  "diagramZoomHint": "스크롤로 확대 • 드래그로 이동 • ESC로 닫기",
+  "archive": {
+    "entries": "파일 및 폴더 {{count}}개",
+    "loadFailed": "이 압축 파일을 미리 볼 수 없습니다"
+  }
 }

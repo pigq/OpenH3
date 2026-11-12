@@ -59,6 +59,51 @@ describe('generic ComfyUI environment probe', () => {
     ]);
   });
 
+  it.each([
+    { name: 'Windows venv', layout: ['venv', 'Scripts', 'python.exe'] },
+    { name: 'POSIX venv', layout: ['venv', 'bin', 'python'] },
+    { name: 'portable sibling', layout: ['..', 'python_embeded', 'python.exe'] },
+    { name: 'managed Windows sibling', layout: ['..', '.venv-py312', 'Scripts', 'python.exe'] },
+    { name: 'managed POSIX sibling', layout: ['..', '.venv-py311', 'bin', 'python'] },
+  ])('probes a root-only environment using the discovered $name interpreter', async ({ layout }) => {
+    const parent = temporaryRoot();
+    const root = path.join(parent, 'ComfyUI');
+    const python = path.join(root, ...layout);
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(path.join(root, 'main.py'), '# fixture');
+    fs.mkdirSync(path.dirname(python), { recursive: true });
+    fs.writeFileSync(python, 'fixture');
+    const runCommand = vi.fn(async (file: string) => {
+      if (file !== python) throw new Error('probe unavailable');
+      return JSON.stringify({ executable: python, version: '3.12.9', packages: {} });
+    });
+    const discovered = discoverComfyEnvironmentCandidates({
+      roots: [root],
+      homeDirectory: parent,
+      environment: {},
+    }).find((candidate) => candidate.root === root);
+    expect(discovered?.python).toBe(python);
+    const result = await probeComfyEnvironment({ root, runCommand });
+    expect(result.runtime).toMatchObject({ status: 'available', executable: discovered?.python });
+    expect(result.issues).not.toContain('PYTHON_MISSING');
+  });
+
+  it('keeps an explicitly selected missing interpreter instead of substituting a discovered one', async () => {
+    const root = temporaryRoot();
+    const discoveredPython = path.join(root, 'venv', 'Scripts', 'python.exe');
+    const selectedPython = path.join(root, 'missing', 'python.exe');
+    fs.writeFileSync(path.join(root, 'main.py'), '# fixture');
+    fs.mkdirSync(path.dirname(discoveredPython), { recursive: true });
+    fs.writeFileSync(discoveredPython, 'fixture');
+    const runCommand = vi.fn(async (_file: string) => {
+      throw new Error('probe unavailable');
+    });
+    const result = await probeComfyEnvironment({ root, python: selectedPython, runCommand });
+    expect(result.runtime).toMatchObject({ status: 'missing', executable: selectedPython });
+    expect(result.issues).toContain('PYTHON_MISSING');
+    expect(runCommand.mock.calls.some(([file]) => file === discoveredPython)).toBe(false);
+  });
+
   it('reads stable driver hardware identity without scanning Python, nodes, RAM or free GPU memory', async () => {
     const runCommand = vi.fn(async (file: string) => {
       if (file === 'nvidia-smi') return '0, NVIDIA RTX 5080, 16376, 15100, 581.42, 12.0';

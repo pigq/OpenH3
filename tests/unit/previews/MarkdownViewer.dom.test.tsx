@@ -106,6 +106,7 @@ vi.mock('@arco-design/web-react', () => ({
 
 vi.mock('@icon-park/react', () => ({
   Copy: () => <span data-testid='copy-icon' />,
+  Download: () => <span data-testid='download-icon' />,
 }));
 
 import MarkdownViewer from '@/renderer/pages/conversation/Preview/components/viewers/MarkdownViewer';
@@ -135,6 +136,18 @@ describe('MarkdownViewer', () => {
   it('renders markdown content in preview mode', () => {
     render(<MarkdownViewer content='# Hello World' />);
     expect(screen.getByText('Hello World')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['./交付/预算.pdf', 'C:/项目/交付/预算.pdf'],
+    ['file://server/share/预算%20%231.docx', '//server/share/预算 #1.docx'],
+    ['C:/项目/预算%20%231.xlsx', 'C:/项目/预算 #1.xlsx'],
+  ])('opens document link %s from the preview', async (href, path) => {
+    render(<MarkdownViewer content={`[文件](<${href}>)`} file_path='C:/项目/说明.md' />);
+    fireEvent.click(screen.getByRole('button', { name: '文件', exact: true }));
+    await waitFor(() =>
+      expect(ipcBridge.fs.getContentMetadata.invoke).toHaveBeenCalledWith({ file: { kind: 'local', path } })
+    );
   });
 
   it('renders MarkdownEditor in source mode', () => {

@@ -285,7 +285,7 @@ officecli query "$FILE" 'shape[fill=1E2761]'             # color match
 officecli query "$FILE" 'shape[width>=10cm]'             # numeric
 ```
 
-**`query --json` output schema.** Results wrap in `.data.results[]` — `jq -r '.data.results[0].format.id'`, NOT `.[0].id`. Shape name is `.name`; fill is `.format.fill`; textColor is `.format.textColor`.
+**`query --json` output schema.** Results wrap in `.data.results[]` — `jq -r '.data.results[0].format.id'`, NOT `.[0].id`. Shape name is `.format.name`; fill is `.format.fill`; textColor is `.format.textColor`. Inspect the installed version's actual output before filtering it; a missing field or an unknown schema is not a successful empty check.
 
 **Visual preview (LEAD).**
 
@@ -566,7 +566,7 @@ Pick **one** path:
 
 REJECT with `slide N: <issue>` lines, else "Gate 3 PASS" (HTML-text fallback adds "<unverified-items> not visually verified").
 
-**Fix-verify (mandatory, max 3 cycles).** Fix → re-run Gate 3 → repeat until zero new issues; one fix often surfaces another. After 3 rounds without convergence, **stop** — likely seesaw, template-level cause, or agent misread. Report `slide N: <issue> — attempted: <fixes> — likely root: <template|design-conflict|ambiguous>` and let the user decide.
+**Fix-verify (mandatory).** Fix and re-run affected checks plus Gate 3. If three attempts do not converge, diagnose the template, conflicting constraints, or renderer and change approach; continue repairs within the authorized task. Keep `slide N: <issue> → attempted: <fixes> → next approach` notes. Ask only when a necessary user decision or missing input prevents progress. If available methods cannot verify an item, report the precise limitation and do not mark it PASS.
 
 ## Common Pitfalls
 

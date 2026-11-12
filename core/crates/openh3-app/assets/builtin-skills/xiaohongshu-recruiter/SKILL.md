@@ -3,7 +3,7 @@ name: xiaohongshu-recruiter
 description: 用于在小红书上发布高质量的 AI 相关岗位招聘帖子。包含自动生成极客风格的招聘封面图和详情图，并提供自动化发布脚本。当用户需要发布招聘信息、寻找 Agent 设计师或其他 AI 领域人才时使用。
 ---
 
-> **⚠️ Platform note — read before running any command.** The command examples here are written for **macOS / Linux**. On **Windows**: run `python` (or `py`) instead of `python3`, use `$env:USERPROFILE\…` and backslashes instead of `~/…`, and translate any shell pipes/redirects (`|`, `>`, `&&`) to their PowerShell equivalents before running. The scripts themselves are cross-platform; only the way you invoke them differs.
+> 定位当前加载的本 Skill 目录，记为 `<skill-dir>`，使用脚本的绝对路径；不要假定会话工作目录含有 `scripts/`。示例中的输入/输出路径替换为实际绝对路径。Windows 使用 `python` 或 `py`，macOS/Linux 使用可用的 `python3`。输出放在新的任务目录，避免覆盖已有素材。
 
 # Xiaohongshu Recruiter (小红书招聘助手)
 
@@ -15,8 +15,8 @@ description: 用于在小红书上发布高质量的 AI 相关岗位招聘帖子
 
 当用户仅给出一句话指令（如“发布一个前端开发工程师的招聘信息到小红书”）时：
 
-1. 不再向用户追问细节，由模型自行补全招聘信息与文案。
-2. 不要求用户提供邮箱或投递方式，模型自动补一个“私信联系/评论联系”的默认投递方式。
+1. 复用已有岗位事实，自行组织文案与排版；不编造公司、薪资、地点、经验年限、职责或任职条件。缺少影响招聘准确性的必要事实时只补问该项，先完成可独立完成的草稿工作。
+2. 不强制邮箱；使用用户提供的投递方式。用户允许私信或委托选择投递方式时可写“私信联系”，否则只询问缺失的投递方式。
 3. 自动生成封面图与详情图，并直接进入发布流程。
 4. 自动打开浏览器，等待用户扫码登录后，自动填写图文信息并一键发布。
 
@@ -34,10 +34,10 @@ description: 用于在小红书上发布高质量的 AI 相关岗位招聘帖子
 
 - **操作**：
   ```bash
-  node scripts/generate_images.js
+  node "<skill-dir>/scripts/generate_images.js" "<job.json绝对路径>" "<新输出目录绝对路径>"
   ```
-  _(注：可视情况修改脚本中的文本配置)_
-- **产出**：`cover.png`, `jd_details.png`
+  先将已有事实写入 UTF-8 JSON：必需字段为 `roleTitle`（岗位）、`roleDesc`（已知岗位说明）、`contact`（已授权投递方式）；`responsibilities`、`requirements` 为可选字符串数组，未知时省略；`title1`、`title2`、`slogan1`、`slogan2` 为可选排版文案。不要修改安装目录中的脚本来配置岗位。
+- **产出**：指定目录中的 `cover.png`、`jd_details.png`。缺少必需字段时在绘图前报错；文件已存在时选择新输出目录。
 
 使用前检查图片存在、可解码且文字正确；没有可用制作工具时保留文案并说明具体缺项，不宣称素材已完成。
 
@@ -61,15 +61,15 @@ description: 用于在小红书上发布高质量的 AI 相关岗位招聘帖子
 **执行命令**：
 
 ```bash
-python3 scripts/publish_xiaohongshu.py "你的标题" "post_content.txt" "cover.png" "jd_details.png"
+python "<skill-dir>/scripts/publish_xiaohongshu.py" "你的标题" "<post_content.txt绝对路径>" "<cover.png绝对路径>" "<jd_details.png绝对路径>"
 ```
 
 **交互流程（简化一键发布）**：
 
 1. 观察浏览器窗口：脚本已打开小红书创作者中心。
 2. 若出现登录页，请扫码登录。
-3. 登录完成后，脚本自动上传图片并填写标题与正文。
-4. 脚本尝试自动点击“发布”；由 Agent 核对真实发布结果和帖子链接，不把日志、点击或浏览器保持打开当作成功。失败时可用已有获准的浏览器工具接续原页面；状态不明先检查已有帖子，不重复提交。无法核实时明确说明尚未验证，不要求用户为同一已授权发布再次确认。
+3. 使用专用浏览器配置目录（可用 `XHS_PROFILE_DIR` 指定），核对登录账号是用户授权的发布账号。脚本等待登录后上传图片，检查图片数量、标题与正文回读结果，任何必需准备步骤失败都不会点击发布。
+4. 脚本只点击一次发布；只有观察到新的“发布成功”提示才输出 `status: published`，其中 `pageUrl` 是当前页面地址，不能冒充帖子链接。由 Agent 核对帖子及实际链接。超时、缺少结果或非零退出都不能宣称成功；先检查已有帖子，避免重复提交。脚本结束时会关闭其浏览器上下文。可用已有获准的浏览器工具处理布局变化和结果核对，不要求用户为同一已授权发布再次确认。
 
 ## 资源文件
 

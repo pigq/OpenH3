@@ -1,10 +1,46 @@
 import { describe, it, expect } from 'vitest';
-import { validateComfyWorkflow } from '@/process/services/runtime/h3WorkflowPreflight';
+import {
+  validateComfyWorkflow,
+  validateComfyReferenceOutputPaths,
+  type ComfyGraph,
+} from '@/process/services/runtime/h3WorkflowPreflight';
 const info = {
   Source: { input: { required: { model: [['model.bin']] } }, output: ['IMAGE'] },
   Sink: { input: { required: { image: ['IMAGE'] } }, output: [] },
 };
 describe('Comfy workflow preflight', () => {
+  describe('reference output participation', () => {
+    const registry = {
+      Load: { output: ['IMAGE'] },
+      Combine: { output: ['IMAGE'] },
+      Save: { output: [], output_node: true },
+    };
+    const graph: ComfyGraph = {
+      first: { class_type: 'Load', inputs: { image: 'first.png' } },
+      second: { class_type: 'Load', inputs: { image: 'second.png' } },
+      combine: { class_type: 'Combine', inputs: { a: ['first', 0], b: ['second', 0] } },
+      output: { class_type: 'Save', inputs: { image: ['combine', 0] } },
+      preview: { class_type: 'Save', inputs: { image: ['combine', 0] } },
+      unused: { class_type: 'Load', inputs: { image: 'unused.png' } },
+    };
+    it('accepts shared reference ancestors across multiple declared outputs without requiring unused loaders', () => {
+      expect(() => validateComfyReferenceOutputPaths(graph, registry, ['first', 'second'])).not.toThrow();
+    });
+    it('requires every used reference to reach an output, even when another reference is connected', () => {
+      expect(() => validateComfyReferenceOutputPaths(graph, registry, ['first', 'unused'])).toThrow(
+        'COMFY_REFERENCE_INPUT_DISCONNECTED:INVALID_INPUT:node=unused'
+      );
+    });
+    it.each([undefined, false])('does not infer output nodes from class names or empty outputs (%s)', (output_node) => {
+      expect(() =>
+        validateComfyReferenceOutputPaths(graph, { ...registry, Save: { output: [], output_node } }, ['first'])
+      ).toThrow('COMFY_REFERENCE_OUTPUT_UNCONFIRMED');
+    });
+    it('does not require output metadata for a request without reference inputs', () => {
+      expect(() => validateComfyReferenceOutputPaths(graph, {}, [])).not.toThrow();
+    });
+  });
+
   it('expands required v3 autogrow groups using the live template', () => {
     const registry = {
       Math: {

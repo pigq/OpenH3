@@ -1,6 +1,6 @@
 ---
 name: morph-ppt
-description: "Use this skill when the user wants a .pptx with smooth cross-slide animation — PowerPoint Morph transitions, Keynote-style continuous motion, shapes that grow / move / rotate as the slide advances. Trigger on: 'morph', 'morph transition', 'smooth transition', 'continuous animation across slides', 'Keynote-style transition', 'animated slide sequence', 'shape continuity across slides'. Output is a single .pptx. This skill is a scene layer on top of officecli-pptx — inherits every pptx v2 rule (visual floor, grid, palettes, connector canon, Delivery Gate 1–5a). DO NOT invoke for a generic deck, pitch deck, or board review without cross-slide motion — route those to officecli-pptx base or officecli-pitch-deck."
+description: "Use when the user wants a .pptx with continuous cross-slide motion, PowerPoint Morph transitions, or shared shapes that move, resize, rotate, enter, or exit across adjacent slides. For a generic static deck or isolated entrance effects, use officecli-pptx; for fundraising without Morph, use officecli-pitch-deck."
 ---
 
 > **⚠️ Platform note — read before running any command.** The shell snippets in this skill are written for **macOS / Linux** (bash/zsh). Always check which OS you are on first. On **Windows** do **not** run them verbatim — the underlying tool/CLI commands are usually cross-platform, but the surrounding shell syntax is not. Translate it to PowerShell before running:
@@ -21,7 +21,7 @@ description: "Use this skill when the user wants a .pptx with smooth cross-slide
 
 # OfficeCLI Morph-PPT Skill
 
-**This skill is a scene layer on top of `officecli-pptx`.** Every pptx hard rule — visual delivery floor (title ≥ 36pt / body ≥ 18pt / title ≥ 2× body), 12-column grid on 33.87×19.05cm, canonical palettes, chart-choice decision table, connector canon, shell escape, resident + batch, Delivery Gate 1–5a — is inherited, not re-taught. This file adds only what **Morph** needs on top: cross-slide shape-name binding, Scene Actors vs content prefixing, ghost discipline, `transition=morph` CLI quirks, 52-style visual library lookup, and a morph-specific fresh-eyes Gate 5b extension.
+**This skill is a scene layer on top of `officecli-pptx`.** Read its current layout, tool-help, shell, and Delivery Gate sections as dependencies in this session. This file adds cross-slide naming, lifecycle planning, ghosting, style references, and Morph-specific structural/runtime checks. User-provided scope and design take precedence over default recipes; preserve factual accuracy and readable output.
 
 When the pptx base rules cover it, the text here says `→ see pptx v2 §X`. Read `skills/officecli-pptx/SKILL.md` first if you have not.
 
@@ -46,24 +46,19 @@ officecli help pptx animation       # preset + trigger + duration values
 officecli help pptx <element> --json  # machine-readable schema
 ```
 
-Help reflects the installed CLI version. When skill and help disagree, **help wins.** Every `--prop X=` in this file is grep-verified against `officecli help pptx <element>`. Specific confirmations: `transition=morph` is a listed value on `slide`; `advanceTime` / `advanceClick` are valid. `transition` is a real element (`officecli help pptx transition`, Parent: slide, set/get) — it exposes `transition`, `transitionDuration`, and `transitionSpeed`. Set the transition with the high-level path `set <slide> --prop transition=morph`; tune speed/duration with the combined shorthand `transition=morph-slow` (or `-fast`, or `transition=morph-<DUR_MS>`). Speed/duration are set only via that shorthand on the `transition` prop, not as independent sub-props. Both round-trip on readback: `transition=morph-slow`/`-fast` reads back as `transitionSpeed=slow`/`fast`, and `transition=morph-<DUR_MS>` (e.g. `morph-1500`) reads back as `transitionDuration=1500`.
+Help reflects the installed CLI version. When skill and help disagree, **help wins.** Examples use `transition=morph` and combined timing values such as `morph-slow` or `morph-1500`; establish supported syntax and actual readback from installed help/output before using them. This document is not a capture proving every property works on the current machine.
 
 ## Mental Model & Inheritance
 
-**Inherits pptx v2.** You should have read `skills/officecli-pptx/SKILL.md` first. This skill assumes you know how to: add slides + shapes + charts + connectors; address by `@name=` / `@id=`; quote paths; use `batch` heredocs; use `tailEnd=triangle` on flow connectors; run the Delivery Gate 1–5a; attribute `[AGENT-ERROR]` vs `[RENDERER-BUG]` vs `[SKILL gap]`. If any of those are unfamiliar, read pptx v2 first.
+**Inherits the current officecli-pptx skill.** Read it in this session when needed; do not open another session or ask the user to resolve a tool-knowledge gap.
 
-**Inherited from pptx v2 (do NOT re-teach):**
+**Shared rules:**
 
-- Visual delivery floor — title ≥ 36pt / body ≥ 18pt / title ≥ 2× body, cover-richness, contrast floor, no `\$\t\n` literals, ≤ 1 animation per slide / ≤ 600ms.
-- Grid math — 33.87 × 19.05cm, edge margin ≥ 1.27cm, inter-block gap ≥ 0.76cm, ≥ 20% negative space. For N-card grids: `col = (33.87 − 2·margin − (N−1)·gap) / N`.
-- Four canonical palettes (Executive navy / Forest & moss / Warm terracotta / Charcoal minimal) — morph decks may pick a different mood from `reference/styles/`, but contrast rules still apply.
-- Chart-choice table — column vs bar vs line vs pie vs scatter vs large-text KPI; `> 3 series + > 8 categories` = split.
-- Connector canon — `shape=straight|elbow|curve`, `@id=` for from/to (C-P-6), `tailEnd=triangle` on every flow.
-- Shell escape 3-layer — `$` single-quoted, heredocs for batch, `<a:br/>` for real newlines.
-- Resident mode + batch ≤ 12 ops, `<<'EOF'` single-quoted delimiter.
-- Delivery Gate 1-5a (schema, token grep, hyperlink rPr, slide-order, dark-on-dark) — every gate prints OK before declaring done.
-- Known Issues C-P-1..7 (hyperlink rPr, chart spPr warning, animation duration readback, animation remove, connector enum, connector `@name=`, chart color renderer normalization).
-- Attribution triage — `[AGENT-ERROR]` vs `[RENDERER-BUG]` vs `[SKILL gap]`.
+- Use the current base layout/readability guidance, adapted to the task's template and canvas.
+- Consult installed help for shape, chart, connector, animation, and batch support. Do not apply historical version limits as universal guarantees.
+- Follow shell quoting rules and check command status before interpreting readback.
+- Run current base Gate 1 (schema), Gate 2 (issues), Gate 2b (placeholders), and Gate 3 (visual review). Preserve its screenshot/HTML capability boundary and continue authorized repair after diagnosis.
+- Animation count and duration serve the narrative and target viewer; there is no inherited one-animation or fixed-duration cap.
 
 **Morph identity — what this skill owns (delta on top of pptx v2):**
 
@@ -72,7 +67,7 @@ Help reflects the installed CLI version. When skill and help disagree, **help wi
 - **Ghost position `x=36cm`** (off the right edge of the 33.87cm canvas). Never delete a `!!`-prefixed shape — move it off-canvas so the morph exit animation still plays.
 - **`transition=morph` auto-prefix quirk.** The CLI auto-prepends `!!` to every shape on a morph slide (`#s1-title` is stored as `!!#s1-title`). `@name=` path selectors **still resolve** — `get .../shape[@name=#s1-title]` returns the shape (matching is suffix/prefix-tolerant). The name you read back is the prefixed form. See §Known Issues.
 - **Adjacent-slide spatial variety.** Displacement ≥ 5cm or rotation ≥ 15° between pairs — otherwise morph interpolates nothing visible.
-- **Renderer reality.** Morph renders in PowerPoint 365 / Keynote / WPS. LibreOffice and many web viewers render as plain fade (runtime feature). Not a skill defect — `[RENDERER-BUG]`.
+- **Renderer reality.** Structural metadata and still images do not prove Morph playback. Verify motion in an available target presentation viewer, record the viewer/version used, and report runtime behavior as unverified if playback cannot be observed.
 
 ### Reverse handoff — when to go BACK to pptx base (or sibling skills)
 
@@ -85,21 +80,21 @@ Stay in **pptx v2 base** for any deck without cross-slide motion (board reviews,
 **Morph-specific additions:**
 
 - **`!!` in shell values — single-quote.** Bash / zsh history expansion eats unquoted `!!foo`. Always use `--prop 'name=!!scene-ring'` (single quotes). In Python `subprocess.run([...])` lists, no quoting needed — pass `"name=!!scene-ring"` as a plain string.
-- **`$` in prop text — single-quote (price tokens).** `--prop text='$9/mo'` and `--prop text='$199/yr'` — NEVER `--prop text="$9/mo"` (zsh/bash eat `$9` as empty var → text rendered as `.` / stray period). Same for `${VAR}`, `$USER`, `\n`, `\r`, `\t` inside a double-quoted prop. Gate 2 morph addendum below greps for the leak signature.
+- **`$` in prop text — single-quote literal prices.** Use `--prop text='$9/mo'`, not a double-quoted shell value that can expand positional parameters. Compare extracted text against source values; the Price / metric text integrity check below supplies review candidates only.
 - **`#` in shell values — safe, but quote anyway.** `#` is a comment leader only at the start of a shell word. `--prop name=#s1-title` works, but `--prop 'name=#s1-title'` is the habit that stops you guessing.
 - **Batch heredoc is the cleanest path for multi-shape slides.** `<<'EOF' | officecli batch $FILE` disables all shell expansion — safe for `$`, `!!`, `#`, `'` inside the JSON body.
 - **`--json` responses wrap the payload in `.data.results[]`.** Both `query` and `get` return a `.data.results[]` array. A single node's `format` sits at `.data.results[0].format.X`; that node's children sit at `.data.results[0].children[]` (each child's format at `.data.results[0].children[].format.X`). Always go through `.data.results[0]` — bare `.data.children[]` or `.data.format` returns null silently.
 - **Variable:** `FILE="deck.pptx"` at the top of every build script; every example below uses `$FILE`.
-- **Gate shell pattern — COUNT, then if/else.** Never write `grep … && echo LEAK || echo OK` — when grep exits 1 (0 matches), the `||` branch fires with empty stdout and prints "OK" confusingly (or prints "LEAK" from prior pipes). Canonical form: `COUNT=$(cmd | wc -l); if [ "$COUNT" -gt 0 ]; then echo "LEAK: …"; else echo "OK"; fi`.
+- **Gate result discipline.** Check each command exit status and response shape before counting results. Informational inventories and successful readback may print lines; neither stdout length nor a missing grep match proves success. Count only explicit confirmed defects, and keep unverified checks separate.
 
 ## Two primitives this skill owns
 
 - **Scene Actors** = persistent `!!`-named shapes (decoration or content) **paired by identical name** across adjacent slides so Morph can interpolate them. Every `!!scene-*` / `!!actor-*` shape is a scene actor.
 - **Choreography** = the plan for how actors evolve — who moves where, who enters, who exits, on which slide pair. Written BEFORE code in the §Morph Pair Planning table.
 
-Use this skill when the user asks for morph motion AND ≥ 2 consecutive slides share a visual element that transforms. Target-viewer caveat: morph needs PowerPoint 365 / Keynote / WPS — if the user is LibreOffice-only, warn first (see §Renderer honesty).
+Use this skill when the user asks for cross-slide motion and the plan contains elements that transform between slides. Confirm available target-viewer capabilities from evidence; explain a real compatibility limitation when it affects the requested output.
 
-**Speaker notes rule.** Every content slide (non-cover, non-closing) MUST carry speaker notes via `officecli add "$FILE" /slide[N] --type notes --prop text='…'`. Missing notes = not shippable — inherits pptx v2 §Hard rules (H7). Morph decks tend to be visually minimal, so notes carry the narration.
+**Speaker notes.** Add narration notes when the presentation brief calls for a speaking deck or minimal visuals need explanation. Do not invent a missing base-rule number or require notes for a user-requested silent/visual sequence.
 
 ## What is Morph? (core mechanics)
 
@@ -122,13 +117,13 @@ Morph only runs if slide N+1 carries `transition=morph`. Apply it via `officecli
 | `!!actor-*` | Content / foreground — evolves across a section | Introduced on slide N, modified on slide N+1, N+2…, **ghosted to `x=36cm`** on its exit slide | `!!actor-feature-box`, `!!actor-metric`, `!!actor-headline` |
 | `#sN-*` | Per-slide content (titles, bullets, captions) | Added fresh on slide N, **ghosted to `x=36cm`** on slide N+1 | `#s1-title`, `#s2-kpi`, `#s3-caption` |
 
-**Hard rule:** `!!scene-*` and `!!actor-*` names must NEVER collide (e.g., `!!scene-card` + `!!actor-card` in the same deck — morph engine confuses them). Disambiguate: `!!scene-card-bg` vs `!!actor-card-content`.
+**Name uniqueness:** different intended actors must not share the same full name on one slide. Exact names identify planned pairs across slides; `!!scene-card` and `!!actor-card` are different names, so their shared suffix alone is not a collision.
 
 **Charts can be morph-paired.** `officecli add … --type chart` accepts `--prop name=!!…` (the name reads back), so a chart with an identical `!!`-name on adjacent slides participates in shape-name morph pairing — the chart frame interpolates position / size. Note morph cannot interpolate the *plotted data* inside the chart frame. For bar-grow / line-grow narratives where the bars themselves must animate: (a) accept plain fade-in of the chart as-is, OR (b) build N `!!actor-bar-K` rectangles manually sized to the values and morph those — each rect carries the same `!!actor-bar-K` name across adjacent slides while width / height / fill evolves.
 
-**Ghost accumulation is silent.** Once a `!!`-prefixed shape appears on any slide, it stays visible on every subsequent morph slide unless explicitly moved to `x=36cm`. `final-check` helper does NOT detect `!!` shapes lingering in the visible area — **only Gate 5b screenshot audit does.** Plan every actor's exit slide in the pair table BEFORE coding.
+**Cloned slides can retain stale content.** Compare each slide against the lifecycle plan: an actor intentionally visible on that slide is not a leak. An actor that should have exited must be off-canvas when retained for pairing. Ghost counts alone do not establish either condition.
 
-**Spatial variety rule.** Adjacent slides must have **noticeably different** compositions — displacement ≥ 5cm OR rotation ≥ 15° OR size delta ≥ 30% on at least 3 morph-paired shapes. Without this, morph interpolates nothing visible and the transition collapses to a fade (silent-fail).
+**Spatial variety follows the story.** Plan a perceptible position, size, rotation, or appearance change where a pair is intended to move; one moving hero can be enough. Intentional holds are valid. Validate the planned change and watch the actual transition rather than requiring three actors or arbitrary distance thresholds on every pair.
 
 **Simultaneous-timing constraint.** All `!!` shapes in one morph pair animate simultaneously. To stagger shape A before shape B, insert an intermediate keyframe slide — there is no per-shape delay knob.
 
@@ -148,7 +143,7 @@ officecli add "$FILE" "/slide[3]" --type shape --prop 'name=!!actor-metric' \
   --prop text="42%" --prop x=36cm --prop y=8cm --prop width=6cm --prop height=3cm
 ```
 
-**Content (`#sN-*`) is added fresh per slide.** Because text changes every slide, Morph has no meaningful pairing to do on titles / body — it cross-fades them. This is why `#sN-*` get different names per slide (they are intentionally unpaired) and must be ghosted on slide N+1. Scene actors (`!!`) carry the continuity; content (`#`) carries the message.
+**Per-slide content (`#sN-*`).** Give slide-specific titles/captions distinct names unless they intentionally transform as the same actor. If outgoing content is retained for a slide-off, keep its paired name and ghost it; otherwise follow the planned entry/exit behavior. Do not add or ghost shapes solely to satisfy a prefix-count rule.
 
 ## Morph Pair Planning (pre-code, REQUIRED)
 
@@ -252,9 +247,9 @@ for n in range(2, 6):
 helper("final-check", FILE)                   # structural pass; DOES NOT catch !! lingering in visible area
 ```
 
-Helper signatures and source: `reference/morph-helpers.py` (`clone`, `ghost`, `verify`, `final-check`). The shell equivalent is `reference/morph-helpers.sh` — pick one per platform; do not mix.
+Helper signatures and source: `reference/morph-helpers.py` (`clone`, `ghost`, `verify`, `final-check`, `inspect-ghosts`). The bundled `reference/morph-helpers.sh` delegates its compatibility functions to Python and propagates failure status. Use an available Python runtime and inspect `--help` before adopting an older installed copy.
 
-**When to use helpers vs raw `officecli`.** For 2-3 slide decks, raw commands (recipes a, b) are clearer. For 5+ slides with repeating clone/ghost/verify cadence, helpers save ~40% of commands and provide built-in verification. Every slide is still closed by `officecli validate` before delivery.
+**When to use helpers vs raw commands.** Small decks may use raw commands with explicit error/readback checks. For repeated operations, use the Python helper and check its exit status. Read its actual checks and limitations: structural success does not establish lifecycle intent or animated playback. Preserve schema validation and visual/runtime review.
 
 ### (d) Morph + fade hybrid — entrance on morph slide
 
@@ -271,7 +266,7 @@ officecli set "$FILE" "/slide[2]/shape[@name=#s2-card]" --prop animation=fade-en
 officecli get "$FILE" "/slide[2]/shape[@name=#s2-card]" --json | jq '.data.results[0].format.animation'  # readback sanity — drops the trigger suffix, reads back as "fade-entrance-300"
 ```
 
-**Why this works.** Morph animates the `!!scene-*` shapes only (they have a pair on slide 1); the new `#s2-card` has no slide-1 counterpart, so morph would default-fade it — `fade-entrance-300-with` makes that fade explicit and timed. Keep the animation per pptx v2 floor: ≤ 600ms, no bounce / swivel / fly-from-edge (`officecli help pptx animation` for the canonical preset list).
+**Intended effect.** The paired backdrop carries continuity while the new card enters. Choose timing and supported entrance presets that fit the narrative; validate the installed syntax and observe the target viewer to confirm how entrance animation combines with Morph. Metadata readback alone cannot prove simultaneous playback.
 
 ## Choreography — animation types + staggered timing
 
@@ -297,9 +292,9 @@ Slide 3 → Slide 4:  !!actor-B moves (!!actor-A stays put or ghosts)
 
 Slide 3 is an explicit intermediate keyframe. Do NOT attempt to fake staggering via timing props on the shape's `animation=` prop — Morph runs before per-shape animations.
 
-**Good-enough variety heuristic (Best Practice — creative flexibility).** For a morph to read as "motion", change at least 3 of {x, y, width, height, rotation, fill, opacity} on the dominant paired shape, with displacement ≥ 5cm OR rotation ≥ 15° OR size delta ≥ 30%. One shape × 3 props is a valid creative pattern (focus on one hero element).
+**Motion design heuristic.** Position, scale, rotation, fill, and opacity are options for making a planned change visible. Use the properties needed by the story; a single hero translation or an intentional hold can be correct. Judge the rendered transition, not a fixed property-count quota.
 
-**Delivery Gate 5b-morph-2 is stricter.** The gate hard-asserts ≥ 3 DIFFERENT `!!`-prefixed shapes each vary by ≥ 1 of {x, y, width, height, rotation, font-size} across the pair — integrity check for "is this really a morph or a pretend-morph". Heuristic informs creative intent; Gate decides delivery. **Brand-constant scenery (pinned header strip, footer bar, logo badge) does NOT count toward the 3-shape quota** — these are supposed to stay put; motion must come from 3 other named shapes. When in doubt, satisfy the stricter Gate.
+**Structural review follows the choreography.** Check exact expected counterparts and planned endpoints for every intended pair. Persistent logos and fixed scenery are allowed. There is no three-shape acceptance quota; runtime motion remains a separate check.
 
 **Deck-length rhythm.** Filling every transition with morph reads as anxious, not cinematic. Pace morph moments to deck length:
 - **8-10 slides (dense):** 3-5 morph moments; motion can cluster.
@@ -332,149 +327,98 @@ Confirm the actor's target position does not overlap any `#sN-*` content shape's
 
 ## Style library lookup workflow
 
-`reference/styles/` holds 52 visual style directories (dark / light / warm / vivid / bw / mixed moods) — design inspiration, not templates. Use the library as **on-demand reference**, not as a content dump.
+`reference/styles/` contains the currently bundled visual styles (dark / light / warm / vivid / bw / mixed) as design inspiration. The directory inventory is authoritative; not every style has a build script. Use the library as an on-demand reference.
 
-**Why lookup, not copy.** Each of the 52 `build.sh` files is a complete style demo — but the coordinates were hand-tuned for that specific demo's content length. Copying them verbatim into a deck with different content produces overlaps and misalignment (flagged in `INDEX.md` L5-11). The library's value is the **design logic**: palette choice for a mood, signature shape, choreography pattern. Apply that logic to your own grid math.
+**Why lookup, not copy.** Available build demos illustrate design techniques, but their coordinates fit their own content and may contain layout issues. Read design intent and adapt palette, shapes, and choreography to the actual content; do not run or copy a demo blindly.
 
 **Four-step lookup:**
 
-1. **Browse INDEX.** `reference/styles/INDEX.md` groups all 52 styles by palette category and mood (e.g. `dark--premium-navy` = authoritative / refined; `warm--earth-organic` = organic / grounded). The Quick Lookup table also shows each style's **primary hex trio** (bg / fg / accent) — if the user specified a brand color, scan the hex column to find the nearest match without opening every `style.md`. Pick 1 style that matches the topic mood OR aligns with the user-specified hex.
+1. **Browse INDEX.** `reference/styles/INDEX.md` groups the available styles by palette and mood. Pick a style that fits the topic and user brand; verify its directory exists before reading it.
 2. **Read philosophy.** Open `reference/styles/<style-id>/style.md` for design intent — type pairing, color logic, signature elements.
-3. **Glance technique.** Open `reference/styles/<style-id>/build.sh` ONLY for technique reference (signature shapes, palette hex codes, choreography ideas) — **coordinates are known-buggy per `INDEX.md` L5-11**; do not copy them.
+3. **Glance technique when present.** Read `reference/styles/<style-id>/build.sh` only if that file exists and implementation reference is useful. A style with only `style.md` is valid; continue from its design guidance without installing or inventing a missing script.
 4. **Apply on your own canvas.** Build your deck using pptx v2 grid math + visual floor; borrow only the palette and the signature gesture.
 
 **Pointer:** `→ see reference/styles/<style-id>/` — never inline-copy coordinates from a style build.sh.
 
-## Delivery Gate (inherits pptx v2 + morph additions)
+## Delivery Gate (current pptx base + Morph checks)
 
-**Gate 1–5a: full port from pptx v2.** → see pptx v2 §Delivery Gate. Schema (whitelisting C-P-2 chart spPr), token grep (`$…$` / `{{…}}` / `\$\t\n` / `()` / `[]`), hyperlink rPr (C-P-1), slide-order sanity, dark-on-dark contrast (Gate 5a). **Refuse to declare done until every pptx Gate 1–5a prints its OK message.** Morph decks have the same token / schema / order risks as any pptx.
+Run the current `officecli-pptx` Delivery Gate by heading: schema, issues, placeholders, and visual review (Gates 1, 2, 2b, 3). Do not substitute historical C-P rules or obsolete numbered gates. Then apply the Morph checks below.
 
-### Gate 2 morph addendum — price / metric tokens eaten by zsh
+### Price / metric text integrity
 
-Pptx v2 Gate 2 covers `$…$`, `{{…}}`, `\$\t\n` literals, empty `()` / `[]`. Morph decks add a class of leaks: price / metric tokens (`$9/mo`, `$29/month`, `$199/yr`) written in double-quoted `--prop text="…"` — the shell eats `$9` as an empty variable and the CLI stores `/mo` or a stray period. Run this in addition to pptx Gate 2:
+Single-quote literal currency text when constructing shell commands. Compare rendered/extracted values to the source copy. A valid `$9/mo` or `$199/yr` is not a leak. This grep only locates suspicious missing-amount suffixes and escape/template tokens for review:
 
 ```bash
-# Gate 2 morph — price / metric token leaks + stray-period placeholders
-# Pattern hits: bare prices ($9, $29, $9.99), /unit suffix ($9/mo, $199/yr), ${VAR}, \n/\r/\t, lone period
-LEAKS=$(officecli view "$FILE" text | grep -nE '\$[0-9]+(\.[0-9]+)?(/(mo|month|yr|year|day|wk|week|hr|hour))?|\$\{[A-Z_]+\}|\\[nrt]|^\.$' || true)
-if [ -z "$LEAKS" ]; then echo "Gate 2 morph OK"; else echo "LEAK: $LEAKS"; fi
+if ! MORPH_TEXT=$(officecli view "$FILE" text); then
+  echo "REJECT: text extraction failed"; exit 1
+fi
+PRICE_REVIEW=$(printf '%s\n' "$MORPH_TEXT" | grep -nE '(^|[[:space:]])/(mo|month|yr|year|day|wk|week|hr|hour)([^[:alpha:]]|$)|\$\{[A-Z_]+\}|\\[nrt]|^\.$' || true)
+printf '%s\n' "$PRICE_REVIEW"
 ```
 
-Covers: `$9` `$9.99` `$29/month` `$199/yr` `$1/day` `${VAR}` `\n`/`\r`/`\t` literals + stray `.` placeholders. Fix: single-quote the prop (`--prop text='$9/mo'`).
+A match is a review candidate, not automatic rejection: units, code examples, and punctuation can be intentional. Compare each suspect line against the actual intended text; fix confirmed substitutions, and do not treat an empty candidate list as proof that all amounts are intact.
 
-### Gate 5b — Visual audit via HTML preview (MANDATORY) — extended for morph
+### Complete slide inventory
 
-Run `officecli view "$FILE" html` and Read the returned HTML path. For every slide, answer the pptx v2 Gate 5b questions (overlap / dark-on-dark / divider overlap / order sanity / missing arrowheads) PLUS these four morph-specific checks:
+Read every slide in the actual deck order, not a fixed five-slide sample. The example below uses the documented `.data.results`/`.children` layout; confirm the installed CLI contract before adopting it. Command failure or malformed/missing data cannot be PASS. PowerShell implementations must check `$LASTEXITCODE` before parsing JSON.
 
-**Important: selectors with prefix match.** `officecli query` only supports operators `=`, `!=`, `~=`, `>=`, `<=`, `>`, `<` — there is NO `^=` prefix operator. A selector like `shape[name^=!!actor-]` returns an `invalid_selector` error. For "starts-with" filtering, use a `get --depth 1` loop + `jq startswith()` as shown below.
+```bash
+SLIDES_JSON=$(officecli query "$FILE" slide --json) || exit 1
+SLIDE_PATHS=$(printf '%s\n' "$SLIDES_JSON" | jq -er '
+  .data.results | if type == "array" and length > 0 then
+    .[] | .path | if type == "string" and length > 0 then . else error("missing slide path") end
+  else error("missing slide inventory") end') || exit 1
+while IFS= read -r SLIDE_PATH; do
+  SLIDE_JSON=$(officecli get "$FILE" "$SLIDE_PATH" --depth 1 --json) || exit 1
+  printf '%s\n' "$SLIDE_JSON" | jq -e '
+    .data.results | type == "array" and length == 1 and (.[0].children | type == "array")' >/dev/null || exit 1
+  printf 'INVENTORY %s\n' "$SLIDE_PATH"
+  printf '%s\n' "$SLIDE_JSON" | jq '.data.results[0]'
+done <<< "$SLIDE_PATHS"
+```
 
-- **5b-morph-1 — `!!actor-*` leak into visible area after its section ends.** For every `!!actor-*` that should have exited, confirm `x ≥ 33.87cm` (canvas right edge). Loop + filter (selector-safe):
-  ```bash
-  NSLIDES=$(officecli query "$FILE" slide --json | jq '.data.results | length')
-  for N in $(seq 1 $NSLIDES); do
-    officecli get "$FILE" "/slide[$N]" --depth 1 --json | \
-      jq -r --arg n "$N" '.data.results[0].children[]? |
-        select(.format.name? // "" | startswith("!!actor-")) |
-        select((.format.x // "0cm" | rtrimstr("cm") | tonumber) < 33.87) |
-        "slide \($n) leak: \(.format.name) stuck at x=\(.format.x)"'
-  done
-  ```
-  Any line printed = actor stuck visible. `final-check` misses this — only the loop + Read HTML do.
+These are diagnostic inventories; normal output is not a defect. For the full deck, record each check's evidence and status:
 
-- **5b-morph-2 — Adjacent slides have identical spatial composition (no motion).** Hard rule: between every morph pair, ≥ 3 DIFFERENT `!!`-prefixed shapes must each differ by ≥ 1 of {x, y, width, height, rotation, font-size}. Proof loop (dump both slides, diff same-name shapes, count differing shapes):
-  ```bash
-  for K in 1 2 3 4; do
-    A=$(officecli get "$FILE" "/slide[$K]" --depth 1 --json | \
-      jq -r '.data.results[0].children[]? | select(.format.name? // "" | startswith("!!")) |
-        "\(.format.name)|\(.format.x)|\(.format.y)|\(.format.width)|\(.format.height)|\(.format.rotation // 0)"')
-    B=$(officecli get "$FILE" "/slide[$((K+1))]" --depth 1 --json | \
-      jq -r '.data.results[0].children[]? | select(.format.name? // "" | startswith("!!")) |
-        "\(.format.name)|\(.format.x)|\(.format.y)|\(.format.width)|\(.format.height)|\(.format.rotation // 0)"')
-    VARIES=$(diff <(echo "$A") <(echo "$B") | grep -c '^[<>]')
-    if [ "$VARIES" -lt 6 ]; then echo "pair $K→$((K+1)) FLAT: only $VARIES diff-lines (need ≥ 6 = 3 shapes × 2 sides)"; fi
-  done
-  ```
+1. **Actor lifecycle:** compare each `!!actor-*` against its expected state in `brief.md` on that specific slide: active, exiting, already exited, or intentionally re-entering. Visible active actors are valid. Only planned off-canvas actors that remain visible are leaks. Use the real slide dimensions and shape bounds, including transforms; do not default missing geometry to zero or blindly apply the 33.87cm example width.
+2. **Planned transformations:** inspect every adjacent pair intended to Morph, including pairs beyond slide 5. Compare properties of the same planned names on both sides; added/removed rows in a text diff do not prove motion. A single paired hero or an intentional hold is valid when planned. Missing expected counterparts, wrong endpoints, or missing transition metadata are structural defects.
+3. **Name pairing:** compare exact readback names across each planned pair. Normalize an optional `!!` only when classifying content prefixes (`#sN-*` and `!!#sN-*`); preserve exact names when determining pairs. Do not infer pairing from a count of any two names. Duplicate text alone is a review hint, not a defect: repeated logos, labels, and captions can be intentional.
+4. **Per-slide content:** inspect all older content retained on each later slide, not only the immediately previous prefix. Recognize both `#sN-*` and `!!#sN-*`. Match the intended lifecycle: retained outgoing elements needed for a slide-off should be off-canvas; do not invent an absent counterpart or move current content off-canvas just to satisfy a filter.
+5. **Visual and runtime review:** apply base Gate 3 to every slide. Static HTML/PNG and structural helper results cannot validate animated playback; observe the intended transitions in an available target viewer, and record any unverified runtime behavior.
 
-- **5b-morph-3 — Morph-pair name mismatches.** Adjacent slides must share at least 2 `!!`-prefixed names exactly. Proof (note: children live at `.data.results[0].children[]` — bare `.data.children[]` returns null):
-  ```bash
-  for N in 1 2 3 4 5; do
-    echo "--- slide $N ---"
-    officecli get "$FILE" "/slide[$N]" --depth 1 --json | \
-      jq -r '.data.results[0].children[]? | select(.format.name? // "" | startswith("!!")) | .format.name'
-  done
-  ```
-  Visually compare sequential blocks — shared `!!` names between N and N+1 are the morph pairs. Zero overlap = the pair is a plain fade.
-
-- **5b-morph-4 — `#sN-*` lingering on slide N+1 (ghost leak).** Per-slide content MUST be ghosted (`x=36cm`) on the NEXT slide. Loop + filter per N≥2:
-  ```bash
-  NSLIDES=$(officecli query "$FILE" slide --json | jq '.data.results | length')
-  for N in $(seq 2 $NSLIDES); do
-    PREV=$((N-1))
-    officecli get "$FILE" "/slide[$N]" --depth 1 --json | \
-      jq -r --arg n "$N" --arg p "$PREV" '.data.results[0].children[]? |
-        select(.format.name? // "" | startswith("#s\($p)-")) |
-        select((.format.x // "0cm" | rtrimstr("cm") | tonumber) < 33.87) |
-        "slide \($n) leak: \(.format.name) stuck at x=\(.format.x)"'
-  done
-  ```
-  Any line printed = a `#s(N-1)-*` shape stayed visible on slide N. Ghost it.
-
-**REJECT the delivery** if any 5b-morph-1..4 loop prints a line. Collect stdout from all four loops into one stream and enforce with the COUNT pattern: `LEAK_COUNT=$(...all four loops... | wc -l); if [ "$LEAK_COUNT" -gt 0 ]; then echo "REJECT: $LEAK_COUNT morph leaks"; else echo "Gate 5b-morph OK"; fi`.
+Reject confirmed structural/content defects and continue authorized repair. Informational lines, deliberate composition choices, and explicitly unverified runtime checks must not be converted into automatic rejection or fake PASS by counting stdout lines.
 
 ## Renderer honesty
 
-**Morph renders in:** PowerPoint 365 (Windows/Mac), Keynote, WPS, PowerPoint Online.
+Viewer support varies with application and version. Use an available presentation viewer that supports the requested transition and record what was actually observed. If a viewer falls back to a fade or static page, investigate compatibility and the file's transition structure before attributing a renderer bug.
 
-**Morph does NOT render in:** LibreOffice Impress (renders static, sometimes as fade), Google Slides web viewer (loses interpolation), most HTML / SVG viewers, `officecli view html` (structural only — morph is runtime). This is `[RENDERER-BUG]`, not a skill defect. Tell the user explicitly: "Open in PowerPoint 365 / Keynote / WPS to see the morph motion; other viewers will show static or plain fade."
-
-Static screenshots from any renderer **cannot verify morph motion** (the motion only exists at runtime). Use Gate 5b queries above to prove pair correctness; use a live viewer to prove motion quality.
+Static screenshots, HTML previews, and helper checks establish only their stated structural/visual evidence. They do not prove Morph interpolation, timing, or motion quality. If runtime inspection is unavailable, deliver the authorized work with a precise "Morph playback not verified" limitation rather than asserting motion works in a named application.
 
 ## Ghost Discipline & Actor Lifecycle
 
 **Every `!!actor-*` and `#sN-*` shape must be managed across EVERY slide, not just its "exit" slide.**
 
-### The Per-Slide Ghosting Rule
+### Per-slide lifecycle rule
 
-When building a multi-slide morph deck:
-1. **Slide N: Introduce `!!actor-ring` (visible at x=0cm)**
-2. **Slide N+1: Add new content. Before finishing, ghost `!!actor-ring` to `x=36cm`.**
-3. **Slide N+2: Add more content. Re-ghost `!!actor-ring` to `x=36cm` again.** (Not optional — even though it was already off-screen, each slide is a fresh canvas.)
-4. **Slide N+3: If `!!actor-ring` should be visible again, move it back to x=0cm or its new position.**
+Each slide has its own shape list. Cloning can carry an earlier shape forward, while creating a blank slide does not automatically add it. Follow the planned lifecycle instead of ghosting every actor on every slide:
 
-**Why:** Each slide's shape list is independent. Moving a shape off-canvas on slide N does NOT carry over to slide N+1 — if you forget to re-ghost it, it will re-appear at its original position on N+1.
+1. Keep actors visible on the slides where they carry content.
+2. On a planned slide-off transition, retain the exact paired name on the destination and move that counterpart outside the actual canvas.
+3. On later slides, inspect retained/cloned shapes and keep exited actors off-canvas unless re-entry is planned. Do not add redundant shapes where no pairing requires them.
+4. Check command success and readback after every mutation; missing selectors or failed writes are not harmless results to suppress with `|| true`.
 
-### Workflow Pattern (Bash)
+### Ghost inventory and cleanup
 
-```bash
-# After adding new content shapes to slide $SLIDE:
-for ACTOR in "!!actor-ring" "!!actor-dot" "!!actor-accent-bar"; do
-  officecli set "$FILE" "/slide[$SLIDE]/shape[@name=$ACTOR]" --prop x=36cm || true
-done
-```
+Use `morph-helpers.py final-check` as the structural check described by its actual help/output. A large ghost inventory or repeated text is a review prompt, not proof of a leak. Confirm lifecycle and adjacency before any cleanup.
 
-Or in a build loop:
+For a continuous Morph deck, `final-check` defaults to requiring Morph metadata on every slide after slide 1. For a mixed-transition deck, pass the actual **destination slide numbers** from the choreography, for example:
 
 ```bash
-for SLIDE_NUM in 3 4 5 6 7 8 9 10 11; do
-  # Add content specific to this slide
-  officecli add "$FILE" "/slide[$SLIDE_NUM]" --type shape ...
-  
-  # IMMEDIATELY ghost all old actors (M-2 prevention)
-  officecli set "$FILE" "/slide[$SLIDE_NUM]/shape[@name=!!actor-ring]" --prop x=36cm || true
-  officecli set "$FILE" "/slide[$SLIDE_NUM]/shape[@name=!!actor-dot]" --prop x=36cm || true
-done
+python "$MORPH_HELPER" final-check "$FILE" --morph-slides 2,4,6 || exit 1
 ```
 
-### Detection: Ghost Count Gate
+Resolve `MORPH_HELPER` to this skill's absolute `reference/morph-helpers.py` path. Every slide still receives the helper's content/structure checks; only the listed destinations require Morph metadata. The single-slide `verify` command expects Morph on slides after slide 1, so do not use it to reject an intentionally static destination. This flag is a structural scope declaration, not proof of runtime motion or a substitute for lifecycle review.
 
-`morph-helpers.py final-check` counts all shapes at `x ≥ 34cm`. If count > 50, it prints:
-```
-REJECT: Found 135 accumulated ghosts — likely M-2 ghost accumulation.
-Run: officecli query deck.pptx 'shape[x>=34cm]' --json | jq '.data.results | length'
-Expected ≤ 50 (roughly 4–5 active actors × 10–12 slides).
-```
-
-**Fix:** Review the build log, ensure every slide re-ghosts all actors that should not appear in it. Re-run final-check. If still > 50, use `morph-helpers.py clean-accumulation deck.pptx` (see reference section).
+`morph-helpers.py clean-accumulation` is a **read-only** inventory alias in the bundled helper; it must not delete shapes by count. Never remove an arbitrary tail of off-canvas shapes to reach a fixed threshold. If editing redundant shapes is needed, identify them individually from the plan, preserve every required pair, and recheck affected transitions afterward.
 
 ## Common Morph Pitfalls (design + workflow traps)
 
@@ -482,15 +426,15 @@ Base pptx pitfalls (shell quoting, zsh `[N]` globbing, hex `#` prefix, `\n` in p
 
 | Pitfall | Correct approach |
 |---|---|
-| `!!scene-card` and `!!actor-card` in the same deck | Names must be unique across prefixes. Rename: `!!scene-card-bg` vs `!!actor-card-content` |
+| `!!scene-card` and `!!actor-card` | These full names differ and can coexist. Reject duplicate full names only when they ambiguously identify distinct actors on the same slide. |
 | Renaming shapes mid-build after some slides are already done | Ghost accumulation bug waiting to happen. Stop, redraw the §Morph Pair Planning table, rerun affected slides |
 | Placing `!!actor-*` into the content core without planning an exit | Every `!!actor-*` needs a ghost slide. Plan it in the pair table BEFORE coding |
-| **Ghost accumulation (M-2): forgetting to re-ghost `!!actor-*` on later slides** | **CRITICAL:** When you add new content to slide N+1, ALL `!!actor-*` from slide N that should not be visible must be moved to `x=36cm` again. Do NOT assume they stay off-screen once ghosted — each slide is independent. Build pattern: `for each new slide: add content shapes → then loop: set each active !!actor-* to x=36cm`. `morph-helpers.py final-check` will REJECT if ghost count exceeds 50. |
-| Forgetting `transition=morph` on a slide | Silent fade. Gate 5b-morph-2 (no motion) catches it; fix via `set /slide[N] --prop transition=morph` |
+| **Unexpected retained content (M-2)** | Compare every slide with the actor lifecycle plan. Ghost only actors expected to be off-canvas there; count alone does not establish a defect or authorize deletion. |
+| Missing intended Morph transition metadata | Check every planned destination slide using installed help/readback; then verify playback in the target viewer. |
 | Assuming `@name=` paths break on a morph slide | They do not — `@name=` still resolves after `transition=morph` (M-1); only the *readback* name gains a `!!` prefix |
-| Adjacent slides visually identical | Morph has nothing to interpolate — collapses to plain fade. Apply §Scene-actor spatial rule and move ≥ 3 shapes by ≥ 5cm / ≥ 15° |
+| Adjacent slides visually identical | Compare with the plan: a hold can be intentional. For intended motion, change the planned actor properties and observe the transition; no universal minimum actor count applies. |
 | Trying to stagger 2 shapes via per-shape timing | Not supported — split the pair into two transitions with an intermediate keyframe slide |
-| Testing morph motion in LibreOffice or a browser | `[RENDERER-BUG]`, not skill defect. Test in PowerPoint 365 / Keynote / WPS |
+| Testing Morph through a static preview | Static rendering cannot prove runtime playback. Record the actual viewer/version and observed behavior; leave unavailable runtime checks unverified. |
 | Deleting a `!!` shape on exit instead of ghosting it | Deletion breaks morph pairing — the shape vanishes without animation. Always ghost to `x=36cm` |
 | Writing `--prop text="$9/mo"` with double quotes | Shell eats `$9` as empty variable → text stored as `/mo` or stray `.`. Use single quotes: `--prop text='$9/mo'`. Gate 2 morph addendum greps this leak. |
 | Using `<a:br/>` literal inside `--prop text='line1<a:br/>line2'` | Stored as 7 literal characters, not a line break. Use `officecli add "/slide[N]/shape[@id=K]" --type paragraph` once per line (M-6). |
@@ -499,17 +443,17 @@ Base pptx pitfalls (shell quoting, zsh `[N]` globbing, hex `#` prefix, `\n` in p
 
 ## Known Issues & Pitfalls
 
-Base pptx bugs C-P-1..7 (hyperlink rPr, chart ChartShapeProperties warning, animation duration readback, animation remove, connector enum, connector `@name=`, chart-color renderer normalization) all apply. **→ see pptx v2 §Known Issues C-P-1..7 for workarounds.**
+Read the current `officecli-pptx` §Common Pitfalls and installed element help. Historical numbered C-P sections are not a current contract; apply a workaround only when evidence shows the relevant issue.
 
 **Morph-specific (M-1..5):**
 
 | # | Symptom | Workaround |
 |---|---|---|
 | **M-1** | After `officecli set '/slide[N]' --prop transition=morph`, every shape on that slide has `!!` auto-prepended to its name (`#s1-title` → `!!#s1-title`). The readback name is the prefixed form. **Selector filter caveat:** after auto-prefix, `!!#sN-caption` coexists alongside `!!actor-*` — filtering "scene actors" in `jq` with `startswith("!!")` produces false matches on auto-prefixed content. Always filter with `startswith("!!actor-")` or `startswith("!!scene-")`, never bare `startswith("!!")`. | `@name=` path selectors **still resolve** — `/slide[N]/shape[@name=#s1-title]` returns the shape (matching is suffix/prefix-tolerant), so no path rewrite is needed. When you need the prefixed name in a jq filter, account for the leading `!!`. |
-| **M-2 🚨** | **Ghost accumulation — `!!actor-*` introduced on slide 3 stays visible on slides 4, 5, 6 unless EXPLICITLY ghosted every page.** `final-check` helper detects this and rejects if ghost count > 50. | **MANDATORY per-slide rule:** After you add new content to a slide, immediately set ALL active `!!actor-*` from previous slides to `x=36cm` (or explicitly position them visible if they belong in the current context). Example: `officecli set /slide[4]/shape[@name=!!actor-ring] --prop x=36cm`. Run after EVERY slide addition, not just at the end. See §Ghost Discipline & Actor Lifecycle below. |
+| **M-2** | Cloned slides can retain actors after their planned exit. | Compare expected lifecycle with actual per-slide shapes. Preserve active actors and needed off-canvas counterparts; do not reject or delete based on ghost count. |
 | **M-3** | Section-transition boundary — on the first slide of a new topic section, previous-section `!!actor-*` shapes visibly linger. No command errors; only visual clutter. | On every section-start slide, explicitly ghost ALL `!!actor-*` from the previous section to `x=36cm`. Scene shapes (`!!scene-*`) stay. |
 | **M-4** | Agents sometimes invent `morph.duration=` / `transition.delay=` as independent props — they are rejected as UNSUPPORTED. | Use the combined shorthand on the `transition` prop: `transition=morph-slow` / `-fast`, or `transition=morph-<DUR_MS>` (e.g. `transition=morph-1500`). Both round-trip on readback (`transitionSpeed=slow`, `transitionDuration=1500`). Only beyond what the shorthand exposes (fine control of the raw XML), fall back to `raw-set` on `<p:transition>` — see M-4 example block below. |
-| **M-5** | `[RENDERER-BUG]` LibreOffice / Google Slides web viewer render morph slides as plain fade (no interpolation). | Test in PowerPoint 365 / Keynote / WPS. Not a skill defect — do not chase. |
+| **M-5** | Runtime Morph playback differs between viewers or versions. | Inspect the file and available target viewer. Structural validation is not playback validation; report what was actually tested. |
 | **M-6** | `<a:br/>` written inside `--prop text='line1<a:br/>line2'` is stored as the literal 7-character string, NOT interpreted as a line break. Audience sees `line1<a:br/>line2` rendered verbatim. | For multi-line bullets / captions, add one paragraph per line: `officecli add "/slide[N]/shape[@id=K]" --type paragraph --prop text='line1'` then repeat with `text='line2'`. See pptx v2 §Shell escape for the real-newline workflow. |
 
 **M-4 example — slow down all morph transitions, raw-set fallback** (prefer `transition=morph-slow`; use this only for control beyond the shorthand). Note `//p:transition` matches both `mc:Choice` and `mc:Fallback` on a morph slide, yielding `2 element(s) affected`:
@@ -526,7 +470,7 @@ Readback: `officecli query "$FILE" slide --json | jq '.data.results[].format | s
 
 ## Outputs & delivery
 
-Every morph deck ships with three artifacts, each as a standalone file:
+By default, deliver these three artifacts; follow the user's requested output scope when it differs:
 
 1. `<topic>.pptx` — the deck, closed + `officecli validate` clean (Delivery Gate 1 OK).
 2. `build.sh` or `build.py` — the re-runnable script (bash for shell-native builds; Python for multi-slide arcs using `morph-helpers.py`). Must recreate the deck from a fresh `officecli create` call.
@@ -537,20 +481,20 @@ Every morph deck ships with three artifacts, each as a standalone file:
 
 **Pre-deliver reminder to the user (verbatim-safe wording):**
 
-- "The deck is ready with morph transitions. Open it in PowerPoint 365 / Keynote / WPS to see the motion — LibreOffice and web viewers render static."
+- State the observed verification status: "The deck includes Morph transition metadata; playback was verified in <viewer/version>" only when actually observed, otherwise "Morph playback has not been verified in the target viewer."
 - "While the build script is running, the `.pptx` may be rewritten several times. If you want to preview progress, use `officecli watch "$FILE"` and open the live preview in OpenH3 — do NOT click 'Open with system app' during the build, or you'll hit a file lock."
 
 ## Adjustments after creation
 
-Standard adjustments table → see pptx v2 §Common Pitfalls / `swap` / `move` / `remove` / `set`. Morph caveat: **after any `swap` or `move` that reorders morph-paired slides, re-verify the adjacency of shared `!!` names.** Run Gate 5b-morph-3 query above on the affected pairs — if the swap broke a pair, either rename shapes or re-choreograph the transition.
+Standard adjustments → see current pptx base guidance and installed `swap` / `move` / `remove` / `set` help. After any reorder, recheck the actual adjacency, exact paired names, endpoints, and lifecycle of every affected pair; update the choreography when the order changes.
 
-**Final sanity check before delivery.** Run the full Delivery Gate (1 through 5b-morph-1..4), open the `.pptx` in PowerPoint 365 / Keynote / WPS, watch one full slide-to-slide morph to confirm motion is visible. If any Gate prints REJECT, fix and re-run — never deliver with a known-open gate.
+**Final sanity check before delivery.** Run the current base gates and all applicable Morph checks above. Inspect runtime transitions in an available compatible viewer; if unavailable, state the exact limitation. Repair confirmed defects and recheck affected pairs. A structural helper success never implies that animated playback was tested.
 
 ## References
 
 - `reference/decision-rules.md` — Pyramid Principle, SCQA, page-type menu, `brief.md` schema. Read during §Morph Pair Planning to decide narrative arc before writing commands.
 - `reference/pptx-design.md` — residual design notes (Scene Actors mechanics, page-type table, choreography patterns). Canvas / fonts / colors live in pptx v2 — this file covers only the morph-unique material.
 - `reference/morph-helpers.py` — Cross-platform (Mac / Windows / Linux) Python helpers for clone + ghost + verify + final-check. Import as a library or call via CLI args. Preferred for 5+ slide arcs.
-- `reference/morph-helpers.sh` — Bash equivalent. Pick one per project; do not mix.
-- `reference/styles/INDEX.md` — 52-style visual library, grouped by palette (dark / light / warm / vivid / bw / mixed) and mood. Lookup workflow in §Style library lookup workflow above.
-- `skills/officecli-pptx/SKILL.md` — base pptx v2 rules (visual floor, grid, canonical palettes, chart-choice, connector canon, Delivery Gate 1–5a, Known Issues C-P-1..7, Shell escape 3-layer).
+- `reference/morph-helpers.sh` — Bash compatibility functions delegated to the Python helper, preserving its exit status; Windows can call Python directly.
+- `reference/styles/INDEX.md` — current bundled visual style inventory grouped by palette and mood. Style guidance is usable even when no build script is present.
+- `skills/officecli-pptx/SKILL.md` — current base layout/readability, shell, tool-help, Common Pitfalls, and Delivery Gate sections.

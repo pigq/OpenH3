@@ -5,7 +5,7 @@
  */
 
 import { EditOne, FolderClose, Peoples, Plus, Pushpin, Right } from '@icon-park/react';
-import { Input, Message, Modal, Spin, Tooltip } from '@arco-design/web-react';
+import { Button, Input, Message, Modal, Spin, Tooltip } from '@arco-design/web-react';
 import classNames from 'classnames';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -197,9 +197,12 @@ const TeamSiderSection: React.FC<TeamSiderSectionProps> = ({
             {/* [E2E SYNC] data-testid="team-create-btn" 是 E2E 测试的入口 selector，不得删除或重命名。
                 如需修改，必须同步更新 tests/e2e/cases/teams/team-create.e2e.ts。 */}
             <Tooltip content={t('team.sider.createTeam')} position='top'>
-              <div
+              <Button
+                type='text'
+                size='mini'
+                aria-label={t('team.sider.createTeam')}
                 data-testid='team-create-btn'
-                className='ms-auto -me-4px size-20px rd-4px flex items-center justify-center hover:bg-fill-4 transition-all shrink-0 cursor-pointer text-t-secondary hover:text-t-primary'
+                className='ms-auto sider-section-add'
                 onClick={(e) => {
                   e.stopPropagation();
                   setCreateTeamVisible(true);
@@ -212,7 +215,7 @@ const TeamSiderSection: React.FC<TeamSiderSectionProps> = ({
                   className='block leading-none'
                   style={{ lineHeight: 0 }}
                 />
-              </div>
+              </Button>
             </Tooltip>
           </div>
           {expanded &&

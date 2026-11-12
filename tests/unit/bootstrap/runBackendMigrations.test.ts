@@ -66,6 +66,10 @@ vi.mock('@/common/config/configMigration', () => ({
 
 vi.mock('@/process/utils/initStorage', () => ({
   getBuiltinMcpScriptPath: (name: string) => `/mock/${name}.js`,
+  getBuiltinMcpNodeRuntime: () => ({
+    executable: '/mock/resources/node/node.exe',
+    npxCli: '/mock/resources/node/node_modules/npm/bin/npx-cli.js',
+  }),
 }));
 
 vi.mock('@/process/utils/migrateAssistants', () => ({
@@ -272,9 +276,12 @@ describe('built-in browser upgrades', () => {
     const browser = inventory.find((server) => server.id === legacy.id)!;
     expect(browser.transport).toEqual({
       type: 'stdio',
-      command: 'node',
+      command: '/mock/resources/node/node.exe',
       args: ['/mock/builtin-mcp-browser.js'],
-      env: { CUSTOM_BROWSER_SETTING: 'preserve' },
+      env: {
+        CUSTOM_BROWSER_SETTING: 'preserve',
+        OPENH3_NPX_CLI: '/mock/resources/node/node_modules/npm/bin/npx-cli.js',
+      },
     });
     const updateCount = updateServerMock.mock.calls.length;
     const importCount = batchImportServersMock.mock.calls.length;

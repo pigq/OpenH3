@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { resolveComfyGit } from './discovery/environment';
 import {
   comfyInstallPlanSchema,
   comfyProfileSchema,
@@ -36,7 +37,10 @@ export type ComfyInstallCommandRunner = (
 export type ComfyInstallExecutorOptions = {
   engine: Pick<ComfyWorkflowEngine, 'validate' | 'generate' | 'snapshotFingerprint'> &
     Partial<
-      Pick<ComfyWorkflowEngine, 'assertInstallable' | 'stopOwned' | 'resume' | 'clearMemory' | 'runtimeResourceKey'>
+      Pick<
+        ComfyWorkflowEngine,
+        'assertInstallable' | 'validateInstallRuntime' | 'stopOwned' | 'resume' | 'clearMemory' | 'runtimeResourceKey'
+      >
     >;
   runtimeCoordinator?: ComfyRuntimeCoordinator;
   download?: typeof downloadH3FromSources;
@@ -768,7 +772,7 @@ async function checkSpace(
 /** Run an approved executable and argument vector without a shell, retaining only bounded output. */
 export const runComfyInstallCommand: ComfyInstallCommandRunner = async (executable, args, options) =>
   new Promise((resolve, reject) => {
-    const child = spawn(executable, args, {
+    const child = spawn(/^git(?:\.exe)?$/i.test(executable) ? resolveComfyGit() : executable, args, {
       cwd: options.cwd,
       signal: options.signal,
       windowsHide: true,
@@ -957,6 +961,7 @@ export async function executeComfyInstall(
   await checkSpace(frozen, reusable, options.freeBytes ?? defaultFreeBytes);
   checkedAbort(signal);
   const snapshotDirectory = fs.mkdtempSync(path.join(snapshotRoot, `${frozen.id}-`));
+  const quarantined: Array<{ original: string; quarantine: string; receipt?: string }> = [];
   let log = Buffer.alloc(0);
   const output = (text: string): void => {
     log = Buffer.concat([log, Buffer.from(text)]).subarray(-MAX_LOG_BYTES);
@@ -999,7 +1004,10 @@ export async function executeComfyInstall(
       ...checkProfileFields
     } = frozen;
     const checkProfile: ComfyProfile = { ...checkProfileFields, state: 'downloaded' };
-    await options.engine.assertInstallable?.(checkProfile);
+    await options.engine.assertInstallable?.(checkProfile, {
+      additive: !frozen.repair && frozen.commands.length === 0,
+    });
+    await options.engine.validateInstallRuntime?.(frozen);
     for (const bootstrap of new Set(
       frozen.commands
         .map((step) => bootstrapForCommand(step, frozen))
@@ -1130,7 +1138,6 @@ export async function executeComfyInstall(
     await options.engine.stopOwned?.(checkProfile);
     assertPlanWrites(frozen, scope);
     fs.mkdirSync(frozen.targetRoot, { recursive: true });
-    const quarantined: Array<{ original: string; quarantine: string; receipt?: string }> = [];
     for (const component of damaged) {
       checkedAbort(signal);
       const quarantine = `${component.path}.comfy-repair-${path.basename(snapshotDirectory)}`;
@@ -1483,6 +1490,39 @@ export async function executeComfyInstall(
     onProgress?.('completed');
     return verified;
   } catch (cause) {
+    const restoration: Array<{
+      original: string;
+      copy: string;
+      state: 'restored' | 'retained' | 'failed';
+      error?: string;
+    }> = [];
+    // Restore only paths still absent. A completed replacement or concurrent
+    // user file remains intact, with its prior copy retained in quarantine.
+    for (const entry of [...quarantined].reverse()) {
+      let restored = false;
+      const files = [
+        { original: entry.original, copy: entry.quarantine },
+        ...(entry.receipt ? [{ original: receiptPath(entry.original), copy: entry.receipt }] : []),
+      ];
+      for (const file of files) {
+        try {
+          assertScopedPath(file.original, scope);
+          assertScopedPath(file.copy, scope);
+          if (!fs.existsSync(file.copy)) continue;
+          if (fs.existsSync(file.original) || (file.original !== entry.original && !restored)) {
+            restoration.push({ ...file, state: 'retained' });
+            continue;
+          }
+          fs.renameSync(file.copy, file.original);
+          if (file.original === entry.original) restored = true;
+          restoration.push({ ...file, state: 'restored' });
+        } catch (error) {
+          restoration.push({ ...file, state: 'failed', error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+    }
+    if (restoration.length)
+      fs.writeFileSync(path.join(snapshotDirectory, 'restoration.json'), JSON.stringify(restoration, null, 2));
     const message = signal.aborted
       ? 'COMFY_INSTALL_CANCELLED'
       : cause instanceof Error
@@ -1493,6 +1533,7 @@ export async function executeComfyInstall(
       JSON.stringify({
         message,
         failedAt: new Date().toISOString(),
+        ...(restoration.length ? { restoration } : {}),
         diagnosticLogPath: cause instanceof Error && 'diagnosticLogPath' in cause ? cause.diagnosticLogPath : undefined,
       })
     );

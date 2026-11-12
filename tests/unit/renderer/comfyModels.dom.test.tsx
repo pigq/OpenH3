@@ -3,21 +3,143 @@ import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useCreationModels } from '@/renderer/pages/guid/Creation/useCreationModels';
 
-const mocks = vi.hoisted(() => ({ profiles: [] as Array<Record<string, unknown>>, refresh: vi.fn() }));
-vi.mock('@/common/chat/document/creation/comfyApi', () => ({ comfyApi: { profiles: vi.fn() } }));
+const mocks = vi.hoisted(() => ({
+  profiles: [] as Array<Record<string, unknown>>,
+  diagnostics: [] as Array<{ code: string; path?: string }>,
+  refresh: vi.fn(),
+}));
+vi.mock('@/common/chat/document/creation/comfyApi', () => ({
+  COMFY_INVENTORY_CACHE_KEY: 'creation.comfy-inventory',
+  comfyApi: { inventory: vi.fn() },
+}));
 vi.mock('@/renderer/hooks/agent/useConfigModelListWithImage', () => ({ default: () => ({ modelListWithImage: [] }) }));
 vi.mock('swr', () => ({
   default: (key: string) => ({
-    data: key === 'creation.comfy-profiles' ? mocks.profiles : undefined,
+    data:
+      key === 'creation.comfy-inventory'
+        ? { profiles: mocks.profiles, complete: !mocks.diagnostics.length, diagnostics: mocks.diagnostics }
+        : undefined,
     mutate: mocks.refresh,
     isLoading: false,
   }),
 }));
 
 describe('local ComfyUI profile selection', () => {
+  it.each(['image', 'video'] as const)(
+    'retains an Agent-registered custom %s in the selector and saved preference',
+    (kind) => {
+      const custom = {
+        id: `custom-${kind}`,
+        family: `custom-${kind}`,
+        name: `Custom ${kind}`,
+        kind,
+        state: 'downloaded',
+      };
+      mocks.profiles = [custom];
+      localStorage.setItem(
+        'creation.selection',
+        JSON.stringify({ source: 'local', kind, modelIds: { [`local-${kind}`]: custom.id } })
+      );
+      const { result, rerender } = renderHook(() => useCreationModels(true));
+      expect(result.current.models).toHaveLength(1);
+      expect(result.current.model).toMatchObject({
+        profileId: custom.id,
+        family: custom.family,
+        name: custom.name,
+        kind,
+      });
+      mocks.profiles = [];
+      rerender();
+      expect(result.current.model).toMatchObject({
+        profileId: custom.id,
+        family: custom.family,
+        name: custom.name,
+        state: 'unavailable',
+      });
+    }
+  );
+  it('groups proven model bytes once while preserving every workflow and its validation state', () => {
+    const recipe = {
+      family: 'moss-image-sft',
+      name: 'MOSS SFT',
+      kind: 'image',
+      version: 'v1',
+      quantization: 'BF16',
+      capabilities: ['text-to-image'],
+      environment: { root: 'C:/OpenH3/ComfyUI', python: 'C:/OpenH3/python.exe', baseUrl: 'http://127.0.0.1:8188' },
+      components: [
+        {
+          role: 'diffusion',
+          name: 'moss.safetensors',
+          path: 'C:/OpenH3/models/moss.safetensors',
+          version: 'v1',
+          precision: 'BF16',
+          sha256: 'b'.repeat(64),
+        },
+      ],
+      nodes: [{ id: 'comfy', version: 'v1' }],
+      workflowPath: 'C:/OpenH3/workflows/moss.json',
+      workflowSha256: 'a'.repeat(64),
+      bindings: { prompt: [{ nodeId: '1', input: 'text' }] },
+      defaults: {},
+    };
+    mocks.profiles = [
+      { ...recipe, id: 'moss-verified', state: 'verified' },
+      {
+        ...recipe,
+        id: 'found-moss-copy',
+        state: 'downloaded',
+        workflowPath: 'C:/OpenH3/workflows/moss-edit.json',
+        environment: { ...recipe.environment, baseUrl: 'http://127.0.0.1:18777' },
+      },
+    ];
+    localStorage.setItem(
+      'creation.selection',
+      JSON.stringify({ source: 'local', kind: 'image', modelIds: { 'local-image': 'found-moss-copy' } })
+    );
+    const { result } = renderHook(() => useCreationModels(true));
+    expect(result.current.models).toHaveLength(1);
+    expect(result.current.model).toMatchObject({
+      id: 'found-moss-copy',
+      state: 'downloaded',
+      available: true,
+      workflowMode: 'auto',
+    });
+    expect(result.current.profiles).toHaveLength(2);
+    act(() =>
+      result.current.setSelection((previous) => ({
+        ...previous,
+        modelIds: { 'local-image': 'moss-verified' },
+      }))
+    );
+    expect(result.current.selection.modelConstraint?.selectionRevision).toBe(0);
+    act(() =>
+      result.current.setSelection((previous) => ({
+        ...previous,
+        modelIds: { 'local-image': 'found-moss-copy' },
+      }))
+    );
+    expect(result.current.selection.modelConstraint?.selectionRevision).toBe(0);
+  });
   beforeEach(() => {
     mocks.profiles = [];
+    mocks.diagnostics = [];
     localStorage.clear();
+  });
+
+  it('retains good models when another directory is incomplete and exposes the affected path', () => {
+    mocks.profiles = [{ id: 'moss', family: 'moss-image-sft', name: 'MOSS SFT', kind: 'image', state: 'downloaded' }];
+    mocks.diagnostics = [{ code: 'COMFY_INVENTORY_INTERPRETER_UNCONFIRMED', path: 'C:/OpenH3/old-checkout' }];
+    const { result } = renderHook(() => useCreationModels(true));
+    act(() =>
+      result.current.setSelection((previous) => ({ ...previous, kind: 'image', source: 'local', modelIds: {} }))
+    );
+    expect(result.current.model).toMatchObject({ id: 'moss', state: 'downloaded' });
+    expect(result.current.inventoryError).toContain('C:/OpenH3/old-checkout');
+    expect(result.current.inventoryError).toContain('COMFY_INVENTORY_INTERPRETER_UNCONFIRMED');
+    mocks.profiles = [];
+    const next = renderHook(() => useCreationModels(true));
+    expect(next.result.current.model.state).toBe('unavailable');
   });
 
   it('lists only discovered image profiles with their validation states', () => {

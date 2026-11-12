@@ -202,5 +202,9 @@
   },
   "selectedCount": "Selected {{count}}",
   "selectedSkills": "Selected skills",
-  "aiAssistant": "AI Assistant"
+  "aiAssistant": "AI Assistant",
+  "rendererRecovery": {
+    "title": "Page error",
+    "description": "This page could not be displayed. Reload to continue."
+  }
 }

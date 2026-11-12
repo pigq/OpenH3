@@ -3,9 +3,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
+import * as childProcess from 'node:child_process';
 import { H3RuntimeManager } from '@/process/services/runtime/H3RuntimeManager';
 import { H3PortableInstaller } from '@/process/services/runtime/H3PortableInstaller';
 import * as acceleration from '@/process/services/runtime/h3Acceleration';
+
+vi.mock('node:child_process', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('node:child_process')>()),
+  spawn: vi.fn(),
+}));
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -54,14 +60,91 @@ describe('H3 runtime manager', () => {
     }
   });
 
-  it.each(['auto', 'sla'] as const)(
-    'rejects missing acceleration in existing-only %s mode without starting dense',
-    async (mode) => {
+  it.each([false, true])(
+    'cold-starts existing auto mode with fallback marker=%s without installation',
+    async (fallback) => {
+      const bundleRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'h3-auto-existing-'));
+      const portableRoot = path.join(bundleRoot, 'runtime', 'ComfyUI_windows_portable');
+      const accelerationRoot = path.join(bundleRoot, 'acceleration');
+      fs.mkdirSync(path.join(portableRoot, 'python_embeded'), { recursive: true });
+      fs.mkdirSync(path.join(portableRoot, 'ComfyUI'));
+      fs.writeFileSync(path.join(portableRoot, 'python_embeded', 'python.exe'), 'fixture');
+      fs.writeFileSync(path.join(portableRoot, 'ComfyUI', 'main.py'), 'fixture');
+      const fallbackPath = path.join(accelerationRoot, '.h3-acceleration-fallback.json');
+      const fallbackContent = JSON.stringify({ backend: 'dense', reason: 'H3_ACCELERATION_PYTHON_CATALOG_FAILED' });
+      if (fallback) {
+        fs.mkdirSync(accelerationRoot, { recursive: true });
+        fs.writeFileSync(fallbackPath, fallbackContent);
+      }
+      const install = vi.spyOn(H3PortableInstaller.prototype, 'ensureInstalled').mockImplementation(() => {
+        throw new Error('unexpected installation');
+      });
+      const models = vi.spyOn(H3PortableInstaller.prototype, 'modelsDirectory').mockImplementation(() => {
+        throw new Error('unexpected model preparation');
+      });
+      const prepare = vi.spyOn(acceleration, 'prepareH3Acceleration').mockRejectedValue(new Error('unexpected pip'));
+      let started = false;
+      const spawnProcess = vi.fn(() => {
+        started = true;
+        return { kill: vi.fn() } as never;
+      });
+      const manager = new H3RuntimeManager(
+        {
+          systemStats: async () => {
+            if (!started) throw new Error('offline');
+            return { ok: true };
+          },
+        },
+        { bundleRoot, acceleration: { mode: 'auto' }, spawnProcess }
+      );
+      try {
+        expect(manager.accelerationStatus()).toMatchObject({
+          mode: 'auto',
+          backend: 'dense',
+          reason: fallback ? 'ACCELERATION_INSTALL_FAILED' : 'ACCEL_ROOT_NOT_CONFIGURED',
+        });
+        await expect(manager.ensureStarted({ allowInstall: false })).resolves.toEqual({ ok: true });
+        expect(install).not.toHaveBeenCalled();
+        expect(models).not.toHaveBeenCalled();
+        expect(prepare).not.toHaveBeenCalled();
+        expect(spawnProcess).toHaveBeenCalledExactlyOnceWith(
+          path.join(portableRoot, 'python_embeded', 'python.exe'),
+          [
+            '-s',
+            'ComfyUI/main.py',
+            '--windows-standalone-build',
+            '--listen',
+            '127.0.0.1',
+            '--port',
+            '8188',
+            '--disable-auto-launch',
+            '--models-directory',
+            path.join(bundleRoot, 'models'),
+          ],
+          expect.objectContaining({ cwd: portableRoot, windowsHide: true })
+        );
+        if (fallback) expect(fs.readFileSync(fallbackPath, 'utf8')).toBe(fallbackContent);
+        expect(fs.existsSync(path.join(accelerationRoot, 'aionui_h3_accel_launcher.py'))).toBe(false);
+      } finally {
+        manager.stop();
+        fs.rmSync(bundleRoot, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each([false, true])(
+    'rejects missing acceleration in existing-only explicit SLA mode with fallback marker=%s',
+    async (fallback) => {
       const portableRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'h3-no-install-sla-'));
       fs.mkdirSync(path.join(portableRoot, 'python_embeded'), { recursive: true });
       fs.mkdirSync(path.join(portableRoot, 'ComfyUI'));
       fs.writeFileSync(path.join(portableRoot, 'python_embeded', 'python.exe'), 'fixture');
       fs.writeFileSync(path.join(portableRoot, 'ComfyUI', 'main.py'), 'fixture');
+      const accelerationRoot = path.join(portableRoot, 'missing-accel');
+      if (fallback) {
+        fs.mkdirSync(accelerationRoot);
+        fs.writeFileSync(path.join(accelerationRoot, '.h3-acceleration-fallback.json'), '{}');
+      }
       const spawnProcess = vi.fn(() => {
         const child = Object.assign(new EventEmitter(), { kill: vi.fn() });
         queueMicrotask(() => child.emit('error', new Error('unexpected dense launch')));
@@ -74,11 +157,11 @@ describe('H3 runtime manager', () => {
             throw new Error('offline');
           },
         },
-        { portableRoot, acceleration: { mode, root: path.join(portableRoot, 'missing-accel') }, spawnProcess }
+        { portableRoot, acceleration: { mode: 'sla', root: accelerationRoot }, spawnProcess }
       );
       try {
         await expect(manager.ensureStarted({ allowInstall: false })).rejects.toThrow(
-          'H3_ACCELERATION_DEPENDENCIES_MISSING:TRITON_NOT_FOUND'
+          `H3_ACCELERATION_DEPENDENCIES_MISSING:${fallback ? 'ACCELERATION_INSTALL_FAILED' : 'TRITON_NOT_FOUND'}`
         );
         expect(spawnProcess).not.toHaveBeenCalled();
         expect(prepare).not.toHaveBeenCalled();
@@ -88,6 +171,44 @@ describe('H3 runtime manager', () => {
       }
     }
   );
+
+  it('rejects explicit SLA when allowed preparation still leaves dependencies unavailable', async () => {
+    const bundleRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'h3-explicit-sla-'));
+    const portableRoot = path.join(bundleRoot, 'runtime');
+    const accelerationRoot = path.join(bundleRoot, 'acceleration');
+    fs.mkdirSync(path.join(portableRoot, 'python_embeded'), { recursive: true });
+    fs.mkdirSync(path.join(portableRoot, 'ComfyUI'));
+    fs.writeFileSync(path.join(portableRoot, 'python_embeded', 'python.exe'), 'fixture');
+    fs.writeFileSync(path.join(portableRoot, 'ComfyUI', 'main.py'), 'fixture');
+    const prepare = vi.spyOn(acceleration, 'prepareH3Acceleration').mockImplementation(async () => {
+      fs.mkdirSync(accelerationRoot);
+      fs.writeFileSync(path.join(accelerationRoot, '.h3-acceleration-fallback.json'), '{}');
+    });
+    const spawn = vi.spyOn(childProcess, 'spawn').mockImplementation(() => {
+      const child = Object.assign(new EventEmitter(), { kill: vi.fn() });
+      queueMicrotask(() => child.emit('error', new Error('unexpected dense launch')));
+      return child as never;
+    });
+    const manager = new H3RuntimeManager(
+      {
+        systemStats: async () => {
+          throw new Error('offline');
+        },
+      },
+      { bundleRoot, portableRoot, acceleration: { mode: 'sla', root: accelerationRoot } }
+    );
+    try {
+      await expect(manager.ensureStarted({ allowInstall: true })).rejects.toThrow(
+        'H3_ACCELERATION_DEPENDENCIES_MISSING:ACCELERATION_INSTALL_FAILED'
+      );
+      expect(prepare).toHaveBeenCalledExactlyOnceWith(bundleRoot, portableRoot);
+      expect(spawn).not.toHaveBeenCalled();
+      expect(fs.existsSync(path.join(portableRoot, 'comfyui-service.log'))).toBe(false);
+    } finally {
+      manager.stop();
+      fs.rmSync(bundleRoot, { recursive: true, force: true });
+    }
+  });
 
   it('rejects a missing existing runtime without extracting the bundled archive', async () => {
     const bundleRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'h3-no-extract-'));

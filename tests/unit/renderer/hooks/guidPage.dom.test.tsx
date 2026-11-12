@@ -307,6 +307,7 @@ const guidInputCardProps = {
 
 describe('GuidPage', () => {
   beforeEach(() => {
+    localStorage.removeItem('openh3.creative-prompt-round');
     vi.stubGlobal('__APP_VERSION__', '2.2.2');
     locationMock.state = null;
     locationMock.key = 'guid-location';
@@ -520,6 +521,10 @@ describe('GuidPage', () => {
       requestId: expect.any(String),
     });
     expect(capturedGuidInputCardProps.at(-1)?.focusRequestKey).toBeTruthy();
+    const controls = capturedGuidActionRowProps.at(-1)?.creationControls as React.ReactElement;
+    const target = render(controls);
+    expect(target.getByTestId('creation-install-target').textContent).toContain(name);
+    expect(target.queryByTestId('creation-model-selector')).toBeNull();
     expect(sendMock.sendMessageHandler).not.toHaveBeenCalled();
   });
 
@@ -550,37 +555,50 @@ describe('GuidPage', () => {
     locationMock.pathname = '/ai-creation';
     swrMock.useSWRMock.mockImplementation((key: string | null) => ({
       data:
-        key === 'creation.comfy-profiles'
-          ? [
-              {
-                id: 'qwen-fp8',
-                family: 'qwen-edit',
-                kind: 'image',
-                name: 'Qwen-Edit FP8',
-                version: '2509',
-                quantization: 'fp8',
-                state: 'verified',
-                capabilities: ['image-edit'],
-              },
-              {
-                id: 'z-bf16',
-                family: 'z-image',
-                kind: 'image',
-                name: 'Z-Image BF16',
-                version: 'v1',
-                quantization: 'bf16',
-                state: 'downloaded',
-                capabilities: ['text-to-image'],
-              },
-            ]
+        key === 'creation.comfy-inventory'
+          ? {
+              complete: true,
+              diagnostics: [],
+              profiles: [
+                {
+                  id: 'qwen-fp8',
+                  family: 'qwen-edit',
+                  kind: 'image',
+                  name: 'Qwen-Edit FP8',
+                  version: '2509',
+                  quantization: 'fp8',
+                  state: 'verified',
+                  capabilities: ['image-edit'],
+                },
+                {
+                  id: 'z-bf16',
+                  family: 'z-image',
+                  kind: 'image',
+                  name: 'Z-Image BF16',
+                  version: 'v1',
+                  quantization: 'bf16',
+                  state: 'downloaded',
+                  capabilities: ['text-to-image'],
+                },
+              ],
+            }
           : null,
     }));
     render(<GuidPage />);
-    fireEvent.click(screen.getByRole('button', { name: /guid.comfy.(use|selected)/ }));
+    fireEvent.click(
+      within(screen.getByRole('region', { name: 'Qwen-Edit' })).getByRole('button', {
+        name: /guid.comfy.(use|selected)/,
+      })
+    );
     expect(capturedGuidSendDeps.at(-1)?.creationModel).toMatchObject({ profileId: 'qwen-fp8', kind: 'image' });
-    const repair = within(screen.getByRole('region', { name: 'Z-Image' })).getByRole('button', {
-      name: 'guid.comfy.actions.repair',
-    });
+    fireEvent.click(
+      within(screen.getByRole('region', { name: 'Z-Image' })).getByRole('button', {
+        name: 'guid.comfy.workflows.details',
+      })
+    );
+    const repair = within(screen.getByRole('dialog'))
+      .getAllByRole('button', { name: 'guid.comfy.actions.repair' })
+      .at(-1)!;
     fireEvent.click(repair);
     expect(capturedGuidSendDeps.at(-1)?.creationIntent).toMatchObject({
       family: 'z-image',
@@ -653,9 +671,32 @@ describe('GuidPage', () => {
   it('falls back to default instruction prompts when the selected assistant has no recommendations', () => {
     render(<GuidPage />);
 
-    expect(screen.getByRole('button', { name: 'guid.defaultPrompts.understand' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'guid.defaultPrompts.cleanup' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'guid.defaultPrompts.create' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'guid.defaultPrompts.image' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'guid.defaultPrompts.reference' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'guid.defaultPrompts.story' })).toBeInTheDocument();
+    const setup = screen.getByRole('button', { name: 'guid.defaultPrompts.models' });
+    fireEvent.click(setup);
+    expect(guidInputMock.setInput).toHaveBeenCalledWith('guid.defaultPrompts.models');
+  });
+
+  it('rotates creative suggestions on demand and on a new conversation without changing the draft', () => {
+    const { rerender } = render(<GuidPage />);
+    guidInputMock.setInput.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'guid.refreshPrompts' }));
+    expect(screen.queryByRole('button', { name: 'guid.defaultPrompts.image' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'guid.defaultPrompts.product' })).toBeInTheDocument();
+    guidInputMock.input = 'my unfinished request';
+    rerender(<GuidPage />);
+    expect(screen.getByRole('button', { name: 'guid.defaultPrompts.product' })).toBeInTheDocument();
+    expect(guidInputMock.setInput).not.toHaveBeenCalled();
+    locationMock.key = 'another-conversation';
+    locationMock.state = { resetAssistant: true };
+    rerender(<GuidPage />);
+    expect(screen.getByRole('button', { name: 'guid.defaultPrompts.poster' })).toBeInTheDocument();
+    locationMock.key = 'consumed-reset-state';
+    locationMock.state = null;
+    rerender(<GuidPage />);
+    expect(screen.getByRole('button', { name: 'guid.defaultPrompts.poster' })).toBeInTheDocument();
   });
 
   it('does not seed skill defaults from the assistant list while detail is loading', async () => {
@@ -694,8 +735,52 @@ describe('GuidPage', () => {
     });
   });
 
+  it('waits for assistant defaults before automatically sending a model-center installation', async () => {
+    locationMock.pathname = '/ai-creation';
+    locationMock.state = {
+      modelCenterEntry: {
+        token: 'install-click',
+        action: 'install',
+        intent: { family: 'z-image', intent: 'install', requestId: 'center-install' },
+      },
+    };
+    guidInputMock.input = 'guid.comfy.prompts.install';
+    swrMock.useSWRMock.mockImplementation((key: unknown) => ({
+      data: typeof key === 'string' && key.startsWith('guid.assistant.detail.') ? assistantDetailFixture : undefined,
+    }));
+    resolveGuidAssistantDefaultsMock.mockReturnValue({
+      modelId: 'gpt-4.1',
+      permissionMode: 'yolo',
+      disabledBuiltinSkillIds: [],
+      skillIds: [],
+      mcpIds: [],
+    });
+    modelSelectionMock.modelList = [
+      { id: 'test-provider', name: 'Test', models: ['gpt-4.1'], use_model: 'gpt-4.1', enabled: true },
+    ];
+    modelSelectionMock.current_model = modelSelectionMock.modelList[0];
+    let finish!: () => void;
+    modelSelectionMock.setCurrentModel.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        })
+    );
+    sendMock.sendMessageHandler.mockClear();
+    const view = render(<GuidPage />);
+    await waitFor(() => expect(modelSelectionMock.setCurrentModel).toHaveBeenCalled());
+    expect(sendMock.sendMessageHandler).not.toHaveBeenCalled();
+    finish();
+    await waitFor(() => expect(sendMock.sendMessageHandler).toHaveBeenCalledTimes(1));
+    expect(agentSelectionMock.setSelectedMode).toHaveBeenCalledWith('yolo', { persistPreference: false });
+    view.unmount();
+    modelSelectionMock.current_model = undefined;
+  });
+
   it('applies an aionrs assistant default model after provider models load', async () => {
-    swrMock.useSWRMock.mockReturnValue({ data: assistantDetailFixture });
+    swrMock.useSWRMock.mockImplementation((key: unknown) => ({
+      data: key === null ? undefined : assistantDetailFixture,
+    }));
     resolveGuidAssistantDefaultsMock.mockReturnValue({
       modelId: 'gpt-4.1',
       disabledBuiltinSkillIds: [],
@@ -731,7 +816,9 @@ describe('GuidPage', () => {
   });
 
   it('does not reapply assistant default model over a guid-page model selection', async () => {
-    swrMock.useSWRMock.mockReturnValue({ data: assistantDetailFixture });
+    swrMock.useSWRMock.mockImplementation((key: unknown) => ({
+      data: key === null ? undefined : assistantDetailFixture,
+    }));
     resolveGuidAssistantDefaultsMock.mockReturnValue({
       modelId: 'default',
       disabledBuiltinSkillIds: [],

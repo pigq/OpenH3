@@ -444,9 +444,12 @@ impl ProcessSpawner for DefaultProcessSpawner {
 
         let mut builder = CmdBuilder::clean_cli(&command.program);
         builder.args(command.args.iter());
-        let output = builder
-            .output()
+        let output = tokio::time::timeout(Duration::from_secs(180), builder.output())
             .await
+            .map_err(|_| {
+                tracing::warn!("officecli installer timed out after 180 seconds");
+                OfficeError::InstallFailed("officecli installer timed out".into())
+            })?
             .map_err(|e| OfficeError::InstallFailed(e.to_string()))?;
 
         if !output.status.success() {

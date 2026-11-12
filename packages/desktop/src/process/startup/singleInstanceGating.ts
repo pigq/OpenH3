@@ -19,3 +19,19 @@
 export function shouldRegisterBackendStartup(gotTheLock: boolean): boolean {
   return gotTheLock === true;
 }
+
+/** A second launch during asynchronous quit must run after the old process exits. */
+export function createShutdownRelaunchGate(deps: {
+  isQuitting: () => boolean;
+  relaunch: (deepLinkUrl?: string) => void;
+}): (deepLinkUrl?: string) => boolean {
+  let scheduled = false;
+  return (deepLinkUrl) => {
+    if (!deps.isQuitting()) return false;
+    if (!scheduled) {
+      deps.relaunch(deepLinkUrl);
+      scheduled = true;
+    }
+    return true;
+  };
+}

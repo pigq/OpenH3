@@ -202,5 +202,9 @@
   "goBack": "Back",
   "selectedCount": "{{count}} seleccionado(s)",
   "selectedSkills": "Habilidades seleccionadas",
-  "aiAssistant": "Asistente de IA"
+  "aiAssistant": "Asistente de IA",
+  "rendererRecovery": {
+    "title": "Error de página",
+    "description": "No se pudo mostrar esta página. Recárgala para continuar."
+  }
 }

@@ -15,7 +15,7 @@ content, use the user's language.
 
 ## Rules
 
-1. First run `"$OPENH3_HELPER_BIN" diagnose capabilities`; use only `"$OPENH3_HELPER_BIN" diagnose ...` thereafter.
+1. First run `"$OPENH3_HELPER_BIN" diagnose capabilities`; use only `"$OPENH3_HELPER_BIN" diagnose ...` thereafter. In PowerShell, the equivalent direct invocation is `& $env:OPENH3_HELPER_BIN diagnose ...`.
 2. Start with `diagnose overview` for broad "what is wrong" requests.
 3. Use named diagnose commands first. Use `diagnose http get` only when no named
    command covers the diagnostic need.
@@ -28,6 +28,22 @@ content, use the user's language.
    conversation and compare runtime fields, message progress, and logs.
 
 ## Capability Discovery
+
+Examples marked `bash` require a POSIX shell. In PowerShell, discover with `& $env:OPENH3_HELPER_BIN diagnose capabilities`. Reading the helper path for invocation is allowed; never print or change runtime environment values. For JSON stdin on Windows PowerShell 5.1 or PowerShell 7, keep the payload in memory and temporarily use UTF-8 (without a BOM). Do not save a command containing secrets to a script or payload file.
+
+```powershell
+$openh3Payload = @'
+{"conversation_id":"current"}
+'@
+$previousOutputEncoding = $OutputEncoding
+try {
+    $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $openh3Payload | & $env:OPENH3_HELPER_BIN diagnose conversations get
+    if ($LASTEXITCODE -ne 0) { throw "OpenH3 helper failed with exit code $LASTEXITCODE" }
+} finally { $OutputEncoding = $previousOutputEncoding }
+```
+
+Use this pattern for the other JSON commands below, changing only subcommands and JSON fields. All commands remain read-only.
 
 When unsure which command or stdin fields are available, ask the CLI:
 

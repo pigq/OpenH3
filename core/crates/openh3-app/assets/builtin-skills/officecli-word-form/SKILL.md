@@ -196,8 +196,10 @@ officecli set "$FILE" / --prop protection=forms
 Two SDT text fields, one checkbox, protection. Paste and adapt; this is the smallest form worth shipping.
 
 ```bash
+# Choose an unused output name without removing an existing document.
 FILE=intake.docx
-officecli close "$FILE" 2>/dev/null; rm -f "$FILE"   # preflight: clear stale resident / prior file (cold-start after CLI upgrade commonly leaks a resident)
+N=1
+while [ -e "$FILE" ]; do FILE="intake-$N.docx"; N=$((N + 1)); done
 officecli create "$FILE"
 officecli open "$FILE"
 
@@ -613,41 +615,49 @@ officecli set "$FILE" / --prop protection=forms
 
 ## Delivery Gate (executable)
 
-Run every gate below after every form. Each gate must print its `OK` line. Any `REJECT` = do not deliver.
+Run every applicable gate after closing the file. Resolve `DOCX_CHECKS` to the absolute path of `officecli-docx/scripts/document_checks.py` in the sibling skill (reuse this helper only; the base prose-layout gates do not apply to forms). A failed command, missing output, invalid JSON, or unresolved check is never OK. For PowerShell, check `$LASTEXITCODE` before parsing native output. For read/inspect-only tasks, report existing defects without silently rewriting the file.
 
 ```bash
 # Assumes FILE=<your-form.docx>, document has been closed with officecli close "$FILE"
 
 # Gate 1 — Validate (must be clean; protection=forms no longer produces a schema error)
-VAL_OUT=$(officecli validate "$FILE" 2>&1)
+if ! VAL_OUT=$(officecli validate "$FILE" 2>&1); then
+  echo "REJECT Gate 1: validate command failed"; echo "$VAL_OUT"; exit 1
+fi
 VAL_ERRS=$(echo "$VAL_OUT" | grep -c '\[Schema\]')
-if [ "$VAL_ERRS" -eq 0 ]; then echo "Gate 1 OK (validate clean)"
+if [ "$VAL_ERRS" -eq 0 ] && echo "$VAL_OUT" | grep -qi "no errors found"; then echo "Gate 1 OK (validate clean)"
 else echo "REJECT Gate 1: $VAL_ERRS schema errors"; echo "$VAL_OUT"; exit 1
 fi
 
 # Gate 2 — Token / placeholder leak (labels used as visual underscore substitutes)
-LEAK=$(officecli view "$FILE" text | grep -niE '_{3,}|TBD|\(fill in\)|\{\{|xxxx|lorem|placeholder')
+if ! FORM_TEXT=$(officecli view "$FILE" text); then echo "REJECT Gate 2: text extraction failed"; exit 1; fi
+LEAK=$(printf '%s\n' "$FORM_TEXT" | grep -niE '_{3,}|TBD|\(fill in\)|\{\{|xxxx|lorem|placeholder')
 [ -z "$LEAK" ] && echo "Gate 2 OK (no underscore / placeholder leak)" || { echo "REJECT Gate 2:"; echo "$LEAK"; exit 1; }
 
-# Gate 3 — At least one structured field exists
-SDT_N=$(officecli query "$FILE" sdt --json | jq '.data.results | length')
-FF_N=$(officecli query "$FILE" formfield --json | jq '.data.results | length')
-FLD_N=$(officecli query "$FILE" field --json | jq '.data.results | length')
+# Gate 3 — At least one structured field exists; command/schema errors cannot count as zero.
+SDT_JSON=$(officecli query "$FILE" sdt --json) || exit 1
+FF_JSON=$(officecli query "$FILE" formfield --json) || exit 1
+FLD_JSON=$(officecli query "$FILE" field --json) || exit 1
+SDT_N=$(printf '%s\n' "$SDT_JSON" | jq -er '.data.results | if type == "array" then length else error("missing SDT results") end') || exit 1
+FF_N=$(printf '%s\n' "$FF_JSON" | jq -er '.data.results | if type == "array" then length else error("missing formfield results") end') || exit 1
+FLD_N=$(printf '%s\n' "$FLD_JSON" | jq -er '.data.results | if type == "array" then length else error("missing field results") end') || exit 1
 TOTAL=$((SDT_N + FF_N + FLD_N))
 [ "$TOTAL" -gt 0 ] && echo "Gate 3 OK ($SDT_N sdt + $FF_N formfield + $FLD_N field)" || { echo "REJECT Gate 3: 0 structured fields — this is not a form"; exit 1; }
 
 # Gate 4 — Every SDT has alias + tag (skill-imposed H2)
 # NOTE: `query`/`get --json` wrap prop fields under `.data.results[N].format.{prop}` — use `.data.results[0].format.alias` / `.format.tag`, never bare `.alias` or `.data.format`.
-SDT_MISSING=$(officecli query "$FILE" sdt --json | jq '[.data.results[] | select(.format.alias == null or .format.alias == "" or .format.tag == null or .format.tag == "")] | length')
+SDT_MISSING=$(printf '%s\n' "$SDT_JSON" | jq -er '[.data.results[] | select(.format.alias == null or .format.alias == "" or .format.tag == null or .format.tag == "")] | length') || exit 1
 [ "$SDT_MISSING" -eq 0 ] && echo "Gate 4 OK (every SDT has alias+tag)" || { echo "REJECT Gate 4: $SDT_MISSING SDT(s) missing alias or tag"; exit 1; }
 
 # Gate 5 — Protection enforced + per-field lock inventory
-PROT=$(officecli get "$FILE" / --json | jq -r '.data.results[0].format.protection // "none"')
-[ "$PROT" = "forms" ] && echo "Gate 5 OK (protection=forms enforced)" || { echo "REJECT Gate 5: protection is '$PROT', expected 'forms'"; exit 1; }
-officecli view "$FILE" forms | head -40   # visual spot-check: every dropdown shows items=; every date shows format=; every locked SDT shows lock=
+python "$DOCX_CHECKS" protection "$FILE" || exit 1
+echo "Gate 5 OK (forms mode and enforcement checked in OOXML)"
+
+FORM_INVENTORY=$(officecli view "$FILE" forms) || exit 1
+printf '%s\n' "$FORM_INVENTORY"   # inspect every field: dropdown items, date format, and intended locks
 
 # Gate 6 — No type=checkbox leaked onto any SDT
-BAD_CB=$(officecli query "$FILE" sdt --json | jq '[.data.results[] | select(.format.type == "checkbox")] | length')
+BAD_CB=$(printf '%s\n' "$SDT_JSON" | jq -er '[.data.results[] | select(.format.type == "checkbox")] | length') || exit 1
 [ "$BAD_CB" -eq 0 ] && echo "Gate 6 OK (no SDT checkbox — formfield only)" || { echo "REJECT Gate 6: $BAD_CB SDT with type=checkbox"; exit 1; }
 ```
 

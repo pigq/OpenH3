@@ -7,7 +7,8 @@
 import React from 'react';
 import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
-import rehypeSanitize from 'rehype-sanitize';
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
+import type { Options } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -34,7 +35,25 @@ export const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkMath, remarkBreaks];
  * Sanitizing before KaTeX (not after) is what lets raw HTML be shown safely while
  * math keeps working — this is the behaviour that must not regress.
  */
-export const SANITIZED_HTML_REHYPE_PLUGINS = [rehypeRaw, rehypeSanitize, rehypeKatex];
+// Local links still pass through the renderer's file-path parser/urlTransform.
+// Permit file URLs and Windows drive prefixes here so sanitization doesn't erase
+// their destinations before the renderer can turn them into application controls.
+const localSchemes = ['file', ...'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'];
+export const SANITIZED_HTML_REHYPE_PLUGINS: NonNullable<Options['rehypePlugins']> = [
+  rehypeRaw,
+  [
+    rehypeSanitize,
+    {
+      ...defaultSchema,
+      protocols: {
+        ...defaultSchema.protocols,
+        href: [...(defaultSchema.protocols?.href ?? []), ...localSchemes],
+        src: [...(defaultSchema.protocols?.src ?? []), ...localSchemes],
+      },
+    },
+  ],
+  rehypeKatex,
+];
 
 /** Table override shared by the chat and preview renderers: horizontal scroll + collapsed borders. */
 export const MarkdownTable = ({ node: _node, ...rest }: Record<string, unknown>) => (

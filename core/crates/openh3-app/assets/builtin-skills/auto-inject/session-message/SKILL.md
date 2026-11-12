@@ -18,8 +18,8 @@ to reply.
 2. `to` must be a conversation id. Names are not addresses, and there is no
    broadcast — one `send-message` call reaches exactly one conversation.
 3. Never pass, inline, export, echo, or set any `OPENH3_...` environment variable.
-4. Commands must directly call `"$OPENH3_HELPER_BIN" session ...`. Pass payloads
-   through stdin heredocs. Do not write payload JSON files to disk.
+4. Commands must directly call `"$OPENH3_HELPER_BIN" session ...` in POSIX shells, or `& $env:OPENH3_HELPER_BIN session ...` in PowerShell. Pass payloads
+   through stdin heredocs or the UTF-8 PowerShell pattern below. Do not write payload JSON files to disk.
 5. If the current conversation belongs to a team, do NOT use this skill. Use
    `team send-message` instead.
 6. On `rate_limited`, STOP delivering and tell the user. It means the two
@@ -47,6 +47,22 @@ The first line is a hint that this skill is how to deliver, with a fallback to
 target: `name`, tab, `id`, tab, `workspace:`. Use the **id**.
 
 ## Delivering a message
+
+Examples marked `bash` require a POSIX shell. In PowerShell, use `& $env:OPENH3_HELPER_BIN` with the same subcommands; query with `& $env:OPENH3_HELPER_BIN session list`. Reading the helper path for invocation is allowed; never print or change runtime environment values. For JSON stdin on Windows PowerShell 5.1 or PowerShell 7, keep the payload in memory and temporarily use UTF-8 (without a BOM). Do not save a command containing secrets to a script or payload file. The same target-selection and user-authorization rules apply.
+
+```powershell
+$openh3Payload = @'
+{"to":"conv_019f…","message":"接口定完了吗？请回复第一行。\n再补充进度。"}
+'@
+$previousOutputEncoding = $OutputEncoding
+try {
+    $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $openh3Payload | & $env:OPENH3_HELPER_BIN session send-message
+    if ($LASTEXITCODE -ne 0) { throw "OpenH3 helper failed with exit code $LASTEXITCODE" }
+} finally { $OutputEncoding = $previousOutputEncoding }
+```
+
+Use this stdin pattern for the other JSON commands below, including `diagnose conversations get`.
 
 ```bash
 "$OPENH3_HELPER_BIN" session send-message <<'JSON'

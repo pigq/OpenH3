@@ -1,9 +1,18 @@
 {
-  "promptExamplesHint": "Bu talimatları deneyin",
+  "promptExamplesHint": "Yaratıcı bir fikirle başlayın",
   "defaultPrompts": {
-    "understand": "Bu projeyi incele ve ne yaptığını, nereden başlamam gerektiğini basit bir dille anlat",
-    "cleanup": "Bu klasördeki yinelenen ve gereksiz dosyaları bul, onaylamam için listele",
-    "create": "Bana şık bir kişisel ana sayfa yap ve bitince doğrudan açıp göster"
+    "image": "Sinematik, yağmurlu bir gece sokağı oluştur, dikey 3:4",
+    "reference": "Yüklediğim fotoğraftan kişinin kimliğini koruyan bir portre afişi oluştur",
+    "story": "Bir kuryenin gününü anlatan kısa bir hikâye videosu hazırla, kurgu ve müziği tamamla",
+    "models": "Bilgisayarımı kontrol et, uygun yerel modelleri kur ve görsel üretimini doğrula",
+    "product": "16:9 yatay biçimde minimalist bir kahve reklamı tasarla",
+    "portrait": "Yüklediğim portreyi yüz hatlarını koruyarak doğal ışıklı bir dergi kapağına dönüştür",
+    "travel": "Deniz kıyısında bir gezi filmi oluştur, sahneleri planla, kurgula ve müzik ekle",
+    "repair": "Yerel modellerimi kontrol et, bozuk yapılandırmaları onar ve üretimi doğrula",
+    "poster": "“Çiçekler Arasında Mektuplar” başlıklı çiçek afişini 3:4 dikey tasarla",
+    "restyle": "Fotoğrafımı konusunu ve kompozisyonunu koruyarak suluboyaya dönüştür",
+    "storyboard": "“Şafaktan önce açılan bir fırın” hikâyesini tutarlı görsel stille üç perdelik videoya dönüştür",
+    "edit": "Verdiğim videoları altyazı ve müzikle canlı bir kısa filme dönüştür"
   },
   "selectAssistantHint": "Göreve başlamak için bir asistan seçin",
   "workspace": {
@@ -33,18 +42,19 @@
       "moss-image-sft": "Çince metin ve düzen üretimi (SFT)"
     },
     "actions": {
-      "install": "Rehberli kurulum",
+      "install": "Kurulumu başlat",
       "repair": "Kontrol et / onar",
       "install-other": "Diğer sürüm",
       "generate": "Oluştur"
     },
     "intentSummary": "Yerel model: {{model}} · {{intent}} · {{profile}}.",
     "prompts": {
-      "install": "comfyui-local ile cihazı otomatik algıla, uyumlu bir yerel {{family}} sürümü seç, uygun iş akışıyla birlikte indir ve kur.",
-      "repair": "comfyui-local ile yerel {{family}} profilini ({{profile}}) incele ve onar; diğer çalışan profilleri koru.",
-      "install-other": "comfyui-local ile cihazı algıla, uyumlu başka bir {{family}} sürümünü uygun iş akışıyla ayrı olarak indir ve kur; çalışan sürümleri koru."
+      "install": "Yerel {{family}} modelini ve uygun iş akışını kur. Uyumlu mevcut ortam ve dosyaları yeniden kullan, uygun yapılandırmayı seç, hataları düzelt ve tamamlandı demeden önce gerçek üretimi doğrula.",
+      "repair": "Diğer çalışan ortamları ve modelleri koruyarak yerel {{family}} profili {{profile}} için tanılama ve onarım yap. Gerçek üretimi doğrula.",
+      "install-other": "Çalışan sürümleri koruyarak yerel {{family}} için ayrı bir alternatif sürüm ve uygun iş akışını kur. Kurulum hatalarını gider ve gerçek üretimi doğrula."
     },
     "operation": {
+      "recovering": "Agent bu görevi inceliyor ve onarıyor.",
       "title": "ComfyUI model planı",
       "authorize": "Planı onayla ve asistandan devam etmesini iste",
       "continue": "Asistandan devam etmesini iste",
@@ -68,9 +78,11 @@
       },
       "snapshotDirectory": "Kurtarma anlık görüntüsü",
       "submittedContext": "Uygulama {{id}} kurulumunu gönderdi ({{state}}); iş ilerleme paneli otomatik güncellenir. Yeni bir kurulum göndermeden veya sohbette tekrar onay istemeden mevcut işlemin durumunu açıklayın.",
-      "preparationFailed": "Kurulum hazırlığı tamamlanmadı: {{reason}}. İstek korundu; ayrıntılar için iş ilerlemesini kontrol edin."
+      "preparationFailed": "Kurulum hazırlığı tamamlanmadı: {{reason}}. İstek korundu; ayrıntılar için iş ilerlemesini kontrol edin.",
+      "agentPreparing": "Agent’a gönderildi; kurulum ortamının denetlenmesi bekleniyor.",
+      "agentRetry": "{{model}} kurulumuna devam et. Kaydedilmiş görevleri ve hataları incele; yinelenen kurulum oluşturmadan comfyui-local ile tanıla ve sürdür."
     },
-    "profileSummary": "Seçilen yerel profil: {{profile}}. Tam olarak bu profili kullan.",
+    "profileSummary": "Seçilen yerel profil: {{profile}}. Modelini, sayısal hassasiyetini ve istenen parametreleri koru; onarımı tamamlamak için doğrulanmış bir onarım varyantı kullanılabilir.",
     "session": {
       "title": "Yerel üretim profili",
       "hint": "Sonraki üretime uygulanır. Gönderilen işler kayıtlı profillerini korur.",
@@ -90,7 +102,9 @@
       },
       "adjusted": "Parametreler bu profilin onaylanmış sınırları içinde ayarlandı.",
       "actualInput": "Gerçek üretim parametreleri",
-      "submissionUncertain": "Gönderim doğrulanmadı. Yeniden göndermeden önce mevcut ComfyUI kuyruğunu kontrol et."
+      "submissionUncertain": "Gönderim doğrulanmadı. Yeniden göndermeden önce mevcut ComfyUI kuyruğunu kontrol et.",
+      "recovered": "Düzeltildi · önceki hatayı görüntüle",
+      "elapsed": "Geçen süre: {{seconds}} saniye"
     },
     "illustrativeCover": "Örnek kapak",
     "preview": {
@@ -112,7 +126,34 @@
       "krea2": "comfyui-local: references/z-image.md#krea2 — BF16 / FP8 / INT8-ConvRot / NVFP4; Turbo steps=8, CFG=1; CLIPLoader.type=krea2. Varsayılan Turbo olsun; Raw ağırlıkları karıştırma veya otomatik stil LoRA ekleme. Bu temel yalnızca metinden görüntüyü doğrular; stil referansları ayrı uyumlu iş akışı gerektirir.",
       "moss-image-sft": "comfyui-local: references/z-image.md#moss-image-sft — MOSS-Image-SFT, BF16 / INT8-ConvRot / INT8-ConvRot+W4A8; steps=50, CFG=3; CLIPLoader.type=moss_image. Keep SFT separate from Base and use the fixed native moss_image ComfyUI route with shift=5 and negative-branch SLG layer=22. Prefer ModelScope, then verified domestic mirror, then upstream with fixed revision, size and SHA-256; only real generation verification marks the profile usable."
     },
-    "imageRecipeRequirements": "openh3_comfy_environment ile işletim sistemi, GPU mimarisi, sürücü, Python/Torch, gerçek hassasiyet/attention çekirdekleri, boş VRAM/RAM, offload ve diski denetle. Cihaz gereksinimleri karşılanmıyor ile tespit tamamlanmadı durumlarını ayır ve eksikleri belirt; yalnız VRAM kapasitesine göre seçme. NVFP4 uyumlu Blackwell gerektirir. Doğrulanmış ModelScope, SHA-256 eşleşen hf-mirror.com ve resmî kaynak sırasını kullan; revision, boyut ve SHA-256 sabitlenip indirme devam ettirilsin. Doğrulanmamış veya izin isteyen kaynakları açıkla, sürüm uydurma. Yalnız gerçek görüntü üretimi başarılı olduğunda kullanılabilir işaretle."
+    "imageRecipeRequirements": "openh3_comfy_environment ile işletim sistemi, GPU mimarisi, sürücü, Python/Torch, gerçek hassasiyet/attention çekirdekleri, boş VRAM/RAM, offload ve diski denetle. Cihaz gereksinimleri karşılanmıyor ile tespit tamamlanmadı durumlarını ayır ve eksikleri belirt; yalnız VRAM kapasitesine göre seçme. NVFP4 uyumlu Blackwell gerektirir. Doğrulanmış ModelScope, SHA-256 eşleşen hf-mirror.com ve resmî kaynak sırasını kullan; revision, boyut ve SHA-256 sabitlenip indirme devam ettirilsin. Doğrulanmamış veya izin isteyen kaynakları açıkla, sürüm uydurma. Yalnız gerçek görüntü üretimi başarılı olduğunda kullanılabilir işaretle.",
+    "workflows": {
+      "advanced": "Gelişmiş iş akışları",
+      "mode": "İş akışı seçimi",
+      "auto": "İş akışını otomatik seç",
+      "fixed": "Sabit iş akışı",
+      "autoHint": "Seçilen model içinde göreve uygun iş akışını seçer. Her zaman aynı yolu kullanmak için bir iş akışını sabitleyin.",
+      "details": "Ayrıntılar",
+      "environment": "Ortam",
+      "workflow": "İş akışı",
+      "states": {
+        "verified": "Doğrulandı",
+        "pending-validation": "Doğrulama bekliyor",
+        "needs-preparation": "Hazırlık gerekiyor",
+        "needs-repair": "Onarım gerekiyor"
+      },
+      "tasks": {
+        "text-to-image": "Metinden görsele",
+        "image-to-image": "Görselden görsele",
+        "image-edit": "Görsel düzenleme",
+        "multi-reference-image": "Çoklu görsel referansı",
+        "inpaint": "Bölgesel düzenleme",
+        "text-to-video": "Metinden videoya",
+        "image-to-video": "Görselden videoya",
+        "reference-to-video": "Referanstan videoya",
+        "first-last-frame-video": "İlk ve son kareden videoya"
+      }
+    }
   },
   "creation": {
     "states": {
@@ -140,7 +181,7 @@
     "cloudVideo": "Bulut video modeli",
     "manageLocal": "Yerel modelleri yönet",
     "configureCloud": "Bulut API yapılandır",
-    "requestSummary": "Oluşturma ayarları: {{kind}} · {{source}} · {{model}} ({{state}}). Seçilen modeli kullan; kullanılamıyorsa yüklememi veya yapılandırmamı iste. Başka bir modele ya da bulut hizmetine otomatik geçme.",
+    "requestSummary": "Oluşturma ayarları (uygulama bağlamı; kullanıcı talimatları önceliklidir): {{kind}} · {{source}} · {{model}} ({{state}}). Seçilen modeli ve istenen parametreleri koru. Kullanılamıyorsa geçerli onay modu kapsamında sorunu tanıla, yapılandır veya onar ve göreve devam et. Tam otomatik modda ek sohbet onayı gerekmez; gerçek araç izinleri geçerliliğini korur. Yalnızca zorunlu bir girdi eksikse veya kullanıcının açıkça korunmasını istediği model ya da parametre değişmek zorundaysa gerekli bilgiyi veya kararı sor.",
     "toolsUnavailable": "Oluşturma araçları henüz hazır değil. Kısa süre sonra tekrar deneyin.",
     "install": {
       "states": {
@@ -181,11 +222,25 @@
       "invalid": "Check the service name, API URL and model. OpenAI Videos requires a model and API key.",
       "uncertain": "The server may have received this request. Automatic resubmission is disabled to prevent duplicate generation.",
       "retrying": "Waiting for the cloud service to respond. This task will be checked again automatically.",
-      "failed": "Video generation could not complete. Check the service status or task details before starting a new request."
+      "failed": "Video generation could not complete. Check the service status or task details before starting a new request.",
+      "stages": {
+        "submitting": "Submitting",
+        "queued": "Queued",
+        "generating": "Generating",
+        "downloading": "Downloading result",
+        "completed": "Completed",
+        "failed": "Failed"
+      },
+      "background": "Cloud generation is still running. You can continue chatting.",
+      "progressUnknown": "The provider does not report a percentage. Status is checked automatically.",
+      "elapsed": "Elapsed: {{seconds}} seconds",
+      "lastChecked": "Last status received {{seconds}} seconds ago"
     },
     "noLocalModels": "Yerel model yok",
     "noLocalModelsHint": "Yerel model bulunamadı. Önce bir model yükleyin veya ekleyin.",
-    "addCloud": "Bulut API ekle"
+    "addCloud": "Bulut API ekle",
+    "inventoryIncomplete": "Model tarama ayrıntıları",
+    "inventoryIncompleteHint": "Bazı konumlar tamamen denetlenemedi. Bulunan modeller korunur. Tanılama için aşağıdaki ayrıntıları kopyalayın."
   },
   "aiCreation": "Yapay zekâ ile oluştur",
   "aiCreationSubtitle": "Hayal gücünüzü esere dönüştürün",
@@ -417,5 +472,142 @@
   },
   "templateReferenceRequired": "Referans gerekli",
   "templateReferenceHint": "İsteği göndermeden önce portre veya kaynak görsel yükleyin.",
-  "templateReferencePrompt": "Şablona göre kimliği veya asıl konuyu koruyarak yüklediğim referans görselleri kullan. Referans yoksa oluşturmadan önce yüklememi iste. Referans içeriği uydurma. En boy oranı: {{ratio}}.\n\n{{prompt}}"
+  "templateReferencePrompt": "Şablona göre kimliği veya asıl konuyu koruyarak yüklediğim referans görselleri kullan. Referans yoksa oluşturmadan önce yüklememi iste. Referans içeriği uydurma. En boy oranı: {{ratio}}.\n\n{{prompt}}",
+  "localModels": {
+    "title": "Yerel modeller",
+    "subtitle": "Bu cihaza uygun modelleri bulun ve yerel üretim araçlarınızı yönetin.",
+    "preview": "{{name}} örneği",
+    "noPreview": "Örnek yok",
+    "play": "Örneği oynat",
+    "pause": "Örneği duraklat",
+    "unknown": "Ölçülmedi",
+    "device": "Bu cihaz",
+    "checkedAt": "{{time}} tarihinde kontrol edildi",
+    "refresh": "Yenile",
+    "graphics": "Ekran kartı",
+    "vram": "Video belleği",
+    "sharedMemory": "Paylaşılan bellek",
+    "ram": "Sistem belleği",
+    "available": "{{value}} kullanılabilir",
+    "cpu": "İşlemci",
+    "system": "Sistem",
+    "driver": "GPU sürücüsü",
+    "disk": "Disk alanı",
+    "directory": "Kurulum klasörü",
+    "changeDirectory": "Klasör seç",
+    "environment": "Ortam ayrıntıları",
+    "environmentHint": "Agent, kurulum sırasında Python ve ComfyUI ortamını kontrol eder veya hazırlar. Ortamın eksik olması cihazın uyumsuz olduğu anlamına gelmez.",
+    "python": "Python",
+    "workflowCount": "{{count}} iş akışı",
+    "downloadSize": "İndirme: {{value}}",
+    "reusedSize": "Yeniden kullanılabilir: {{value}}",
+    "details": "Ayrıntıları gör",
+    "assessment": "Cihaz değerlendirmesi",
+    "assessmentHint": "Kapasite gereksinimleri tahminidir. Agent kurulumdan önce gerçek iş akışını ve ortamı kontrol eder.",
+    "totalSize": "Toplam bileşenler",
+    "download": "İndirilecek",
+    "reused": "Zaten kullanılabilir",
+    "versions": "Sürümler ve iş akışları",
+    "noVersions": "Agent kurulum sırasında uygun sürümü ve iş akışını seçer.",
+    "workflow": "İş akışı",
+    "components": "Bileşenler",
+    "evidence": "Doğrulama kanıtları",
+    "noEvidence": "Henüz başarılı bir üretim doğrulanmadı.",
+    "loading": "Cihaz ve modeller kontrol ediliyor",
+    "unavailable": "Yerel model bilgileri okunamadı.",
+    "retry": "Tekrar dene",
+    "models": "Model kitaplığı",
+    "catalogHint": "Öneriler cihaz kapasitesini ve mevcut bileşenleri dikkate alır.",
+    "search": "Model veya sürüm ara",
+    "filter": "Model türü",
+    "noModels": "Eşleşen model yok. Filtreyi değiştirin veya tüm modelleri görüntüleyin.",
+    "tabs": {
+      "recommended": "Önerilen",
+      "all": "Tüm modeller",
+      "installed": "Kurulu"
+    },
+    "filters": {
+      "all": "Tüm türler",
+      "image": "Görsel",
+      "video": "Video"
+    },
+    "actions": {
+      "install": "Kurulumu başlat",
+      "use": "Modeli kullan",
+      "progress": "İlerlemeyi gör",
+      "repair": "Kontrol et / onar"
+    },
+    "status": {
+      "verified": "Doğrulandı",
+      "compatible": "Kapasite uygun",
+      "unknown": "Değerlendirme gerekli",
+      "insufficient": "Ayar gerekli"
+    },
+    "purpose": {
+      "image-generation": "Görsel üretimi",
+      "image-edit": "Görsel düzenleme",
+      "video": "Video üretimi"
+    },
+    "errors": {
+      "load": "Cihaz bilgileri yenilenemedi. Kurulumdan önce tekrar deneyin.",
+      "action": "Model görevi açılamadı. Tekrar deneyin.",
+      "directory": "Klasör seçici açılamadı. Tekrar deneyin."
+    },
+    "reasons": {
+      "verified-workflow": "Kurulu bir iş akışı üretim doğrulamasını geçti.",
+      "component-metadata-missing": "Bileşen boyutları doğrulanmadı. Agent kurulumu değerlendirecek.",
+      "workflow-missing": "Uygun bir iş akışı hâlâ hazırlanmalı.",
+      "hardware-unknown": "GPU kapasitesi ölçülemedi. Agent cihazı inceleyecek.",
+      "platform-unknown": "Bu platformun uyumluluğu daha fazla değerlendirme gerektiriyor.",
+      "gpu-architecture-insufficient": "Bu sürüm farklı bir GPU mimarisi gerektiriyor.",
+      "native-kernel-unverified": "Yerel operatörler bu cihazda hâlâ kontrol edilmeli.",
+      "runtime-unverified": "Python ve ComfyUI ortamı hâlâ doğrulanmalı.",
+      "memory-insufficient": "Kullanılabilir bellek bu sürümün tahmini gereksiniminin altında.",
+      "disk-insufficient": "Seçilen diskte yeterli boş alan yok.",
+      "disk-unknown": "Seçilen klasördeki boş alan ölçülemedi.",
+      "temporary-memory-pressure": "Diğer uygulamalar bellek kullanıyor. Çalıştırmadan önce kapasite açın.",
+      "offload-required": "Bu yapılandırmanın sistem belleğine aktarma kullanması bekleniyor.",
+      "capacity-compatible": "Bu cihaz bilinen kapasite gereksinimlerini karşılıyor."
+    },
+    "installContext": "Yeni dosyalar {{directory}} klasörüne yerleştirilmelidir. Mevcut uyumlu ortamları ve dosyaları taşımadan yeniden kullanın. Donanım kontrol zamanı: {{checkedAt}}. Önerilen yapılandırma: {{candidate}} (yol göstericidir; mevcut donanımı inceleyip gerçek planı belirleyin).",
+    "automaticCandidate": "Otomatik seç",
+    "newInstallLocation": "Yeni kurulum konumu",
+    "newFilesOnly": "Bu konum yalnızca yeni dosyalar içindir. Mevcut dosyalar yerinde kalır.",
+    "journey": {
+      "label": "Yerel üretim süreci",
+      "device": "Donanımı kontrol et",
+      "choose": "Model seç",
+      "create": "Üretmeye başla",
+      "deviceHint": "Bu bilgisayarın kaynaklarını görün",
+      "chooseHint": "Uygun görsel ve video modellerini bulun",
+      "createHint": "Agent kurulumu ve doğrulamayı yapar"
+    },
+    "recommendedHeading": "Bu bilgisayar için önerilenler",
+    "resourceHint": "VRAM model hesaplamasında, RAM yüklü bileşenlerde kullanılır. Öneriler ikisini ve boş disk alanını dikkate alır.",
+    "descriptions": {
+      "h3": "Metin veya referans görsellerden video: manzara, ürün tanıtımı ve hikâye sahneleri için.",
+      "fasth3-omni": "Görsel, video veya ses referanslarıyla karakter klipleri, sahne uzatmaları ve çoklu ortam üretimi.",
+      "qwen-edit": "Görselleri doğal dille düzenleyin: kıyafet, arka plan ve ürün görselleri için.",
+      "z-image": "Metinden görsel üretin: portreler, ürün konseptleri ve görsel fikirler için.",
+      "flux-3-image-klein": "Görsel konseptler, ürün sahneleri ve yaratıcı eskizler için hafif bir model.",
+      "moss-image-base": "Çince metin ve kompozisyon odaklı: afişler, bilgilendirici görseller ve düzen denemeleri için.",
+      "moss-image-sft": "Çince afişler, portreler ve sahne tasarımı için ince ayarlanmış bir MOSS modeli.",
+      "krea2": "Görsel konseptler ve tasarım ilhamı için stilize görseller keşfedin.",
+      "image": "Açıklamalardan illüstrasyonlar, ürün konseptleri ve sahne tasarımları oluşturun.",
+      "editing": "Referans uyarlamaları, sahne değişiklikleri ve görsel tasarım için görseller üretin ve düzenleyin.",
+      "video": "Hikâye sahneleri, ürün klipleri ve manzaralar için yerel video oluşturun."
+    },
+    "agentHandlesSetup": "Ne oluşturmak istediğinizi anlatın. Agent ortamı kontrol eder, iş akışını seçer ve gereken onarımları yapar.",
+    "technicalDetails": "Teknik ayrıntılar",
+    "precisionGuide": {
+      "full": "16 bit hassasiyet ve daha büyük ağırlıklar; bol kaynak ve daha az niceleme etkisi için.",
+      "int8": "8 bit tamsayı ağırlıklar 16 bitten daha az yer kaplar; günlük üretimde kaynak tasarrufu için.",
+      "fp8": "8 bit kayan noktalı ağırlıklar boyutu küçültür; gereken işlemleri destekleyen GPU’lar için.",
+      "w4a8": "INT8 ana model ve 4 bit metin kodlayıcı ağırlıkları; standart INT8’den daha az kaynak kullanır.",
+      "nvfp4": "4 bit kayan nokta daha fazla yer kazandırır; Agent kurulumda NVFP4 desteğini kontrol eder.",
+      "mixed": "Bileşenler boyut ve ihtiyaçlarına göre farklı hassasiyetler kullanır; uyumlu GPU işlemleri gerekir.",
+      "hint": "Yaratıcı kullanım alanları aynıdır; kaynak ihtiyacı ve niceleme değişir. Hız ve kalite GPU, iş akışı ve girdiye de bağlıdır. Emin değilseniz Önerilenler’den başlayın."
+    }
+  },
+  "refreshPrompts": "Başka fikirler"
 }

@@ -38,6 +38,7 @@ import VideoViewer from '../Video';
 import MarkdownEditor from '../editors/MarkdownEditor';
 import MarkdownPreview from '../viewers/MarkdownViewer';
 import PDFPreview from '../viewers/PDFViewer';
+import ArchivePreview from '../documents/ArchivePreview';
 import OfficeDocPreview from '../viewers/OfficeDocViewer';
 import PptViewer from '../viewers/PptViewer';
 import CodeEditor from '../editors/CodeEditor';
@@ -1143,6 +1144,7 @@ const PreviewPanel: React.FC<{ conversationId?: string }> = ({ conversationId })
     } else if (content_type === 'word') {
       return (
         <OfficeDocPreview
+          tabId={activeTabId ?? undefined}
           fileRef={metadata?.fileRef}
           file_path={metadata?.file_path}
           content={content}
@@ -1152,11 +1154,16 @@ const PreviewPanel: React.FC<{ conversationId?: string }> = ({ conversationId })
     } else if (content_type === 'excel') {
       return (
         <ExcelPreview
+          tabId={activeTabId ?? undefined}
           fileRef={metadata?.fileRef}
           file_path={metadata?.file_path}
           content={content}
           workspace={metadata?.workspace}
         />
+      );
+    } else if (content_type === 'archive') {
+      return (
+        <ArchivePreview tabId={activeTabId ?? undefined} fileRef={metadata?.fileRef} file_path={metadata?.file_path} />
       );
     } else if (content_type === 'image') {
       return (

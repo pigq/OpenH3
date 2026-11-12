@@ -28,6 +28,7 @@ import AionrsSendBox from './AionrsSendBox';
 import type { AionrsModelSelection } from './useAionrsModelSelection';
 
 const AionrsChat: React.FC<{
+  creationRequest?: ConversationContextValue['creationRequest'];
   conversation_id: string;
   workspace: string;
   modelSelection: AionrsModelSelection;
@@ -43,6 +44,7 @@ const AionrsChat: React.FC<{
   assistantId?: string;
   forkCapability?: { at_turn: boolean };
 }> = ({
+  creationRequest,
   conversation_id,
   workspace,
   modelSelection,
@@ -63,6 +65,7 @@ const AionrsChat: React.FC<{
   usePlanRecovery(conversation_id);
   const conversationValue = useMemo<ConversationContextValue>(() => {
     return {
+      creationRequest,
       conversation_id: conversation_id,
       workspace,
       type: 'aionrs',
@@ -74,6 +77,7 @@ const AionrsChat: React.FC<{
       forkCapability,
     };
   }, [
+    creationRequest,
     conversation_id,
     workspace,
     cron_job_id,

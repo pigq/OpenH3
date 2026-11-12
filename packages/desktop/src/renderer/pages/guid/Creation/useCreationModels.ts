@@ -1,13 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
 import type { CreationModel, CreationSelection } from '@/common/chat/document/creation/creation';
-import { comfyApi } from '@/common/chat/document/creation/comfyApi';
+import { comfyApi, COMFY_INVENTORY_CACHE_KEY } from '@/common/chat/document/creation/comfyApi';
 import { cloudCreationModels } from '@/common/chat/document/creation/cloudModels';
 import { cloudVideoApi } from '@/common/chat/document/creation/cloudVideoApi';
 import { getClientBusinessSetting } from '@/renderer/services/clientBusinessSettings';
 import useConfigModelListWithImage from '@/renderer/hooks/agent/useConfigModelListWithImage';
 import { COMFY_FAMILIES } from './comfyDraft';
-import type { ComfyFamily } from '@/common/chat/document/creation/comfy';
+import { comfyModelFamilySchema, type ComfyFamily, type ComfyProfile } from '@/common/chat/document/creation/comfy';
+import {
+  comfyWorkflowStatus,
+  getComfyModelSetId,
+  groupComfyModels,
+} from '@/common/chat/document/creation/workflows/identity';
 
 let draftSelection: CreationSelection = { kind: 'video', source: 'local', modelIds: {} };
 
@@ -19,8 +24,7 @@ function savedProfileDetails(id: string | undefined): { name: string; family: Co
       { name: string; family: ComfyFamily }
     >;
     const saved = details[id];
-    if (saved && typeof saved.name === 'string' && COMFY_FAMILIES.some((family) => family.family === saved.family))
-      return saved;
+    if (saved && typeof saved.name === 'string' && comfyModelFamilySchema.safeParse(saved.family).success) return saved;
   } catch {
     /* A damaged preference must not change the model family. */
   }
@@ -48,8 +52,30 @@ function storedSelection(): CreationSelection {
 export function useCreationModels(enabled: boolean) {
   const { modelListWithImage: providers } = useConfigModelListWithImage();
   const [selection, setState] = useState(storedSelection);
+  const currentProfiles = useRef<ComfyProfile[]>([]);
   const setSelection = useCallback((update: React.SetStateAction<CreationSelection>) => {
-    draftSelection = typeof update === 'function' ? update(draftSelection) : update;
+    const next = { ...(typeof update === 'function' ? update(draftSelection) : update) };
+    const selectedProfile =
+      next.source === 'local'
+        ? currentProfiles.current.find((profile) => profile.id === next.modelIds[`local-${next.kind}`])
+        : undefined;
+    if (selectedProfile) {
+      const modelSetId = getComfyModelSetId(selectedProfile);
+      const priorId = draftSelection.modelIds[`local-${draftSelection.kind}`];
+      const priorProfile = currentProfiles.current.find((profile) => profile.id === priorId);
+      const priorModelSetId =
+        draftSelection.modelConstraint?.modelSetId ?? (priorProfile && getComfyModelSetId(priorProfile));
+      next.modelConstraint =
+        modelSetId === priorModelSetId && draftSelection.modelConstraint
+          ? draftSelection.modelConstraint
+          : {
+              modelSetId,
+              selectionRevision:
+                (draftSelection.modelConstraint?.selectionRevision ?? 0) + (modelSetId === priorModelSetId ? 0 : 1),
+              workflowMode: 'auto',
+            };
+    }
+    draftSelection = next;
     try {
       localStorage.setItem('creation.selection', JSON.stringify(draftSelection));
     } catch {
@@ -58,14 +84,20 @@ export function useCreationModels(enabled: boolean) {
     setState(draftSelection);
   }, []);
   const {
-    data: profiles,
+    data: inventory,
     error,
     isLoading,
     mutate,
-  } = useSWR(enabled ? 'creation.comfy-profiles' : null, () => comfyApi.profiles(), {
+  } = useSWR(enabled ? COMFY_INVENTORY_CACHE_KEY : null, () => comfyApi.inventory(), {
     refreshInterval: 30_000,
     shouldRetryOnError: false,
   });
+  const profiles = inventory?.profiles ?? [];
+  currentProfiles.current = profiles;
+  const inventoryError =
+    error instanceof Error
+      ? error.message
+      : (inventory?.diagnostics.map((issue) => [issue.code, issue.path].filter(Boolean).join(': ')).join('\n') ?? '');
   const { data: configuredImage } = useSWR(
     enabled && selection.source === 'cloud' ? 'creation.cloud-image-default' : null,
     () => getClientBusinessSetting('tools.imageGenerationModel')
@@ -92,22 +124,29 @@ export function useCreationModels(enabled: boolean) {
     const { kind, source } = selection;
     if (source === 'local') {
       const matching = (Array.isArray(profiles) ? profiles : []).filter((profile) => profile.kind === kind);
-      return matching.map(
-        (profile): CreationModel => ({
+      const preferredId = selection.modelIds[`local-${kind}`];
+      return groupComfyModels(matching).map(({ modelSetId, profiles: routes }): CreationModel => {
+        const profile =
+          routes.find((route) => route.id === preferredId) ??
+          routes.find((route) => comfyWorkflowStatus(route) === 'verified') ??
+          routes[0];
+        return {
           id: profile.id,
           name: profile.name,
           profileId: profile.id,
+          modelSetId,
+          workflowMode: 'auto',
           family: profile.family,
           kind,
           source,
           state: profile.state,
-          available: profile.state === 'verified',
+          available: routes.some((route) => comfyWorkflowStatus(route) === 'verified'),
           intent: 'generate',
-        })
-      );
+        };
+      });
     }
     return cloudCreationModels(providers, kind, videoConnections);
-  }, [selection.kind, selection.source, providers, profiles, error, isLoading, videoConnections]);
+  }, [selection.kind, selection.source, selection.modelIds, providers, profiles, videoConnections]);
   const slot = `${selection.source}-${selection.kind}` as const;
   const savedModelId = selection.modelIds[slot];
   const unavailableSelection: CreationModel | undefined =
@@ -136,7 +175,7 @@ export function useCreationModels(enabled: boolean) {
       name: '',
       kind: selection.kind,
       source: selection.source,
-      state: isLoading ? 'checking' : error ? 'unavailable' : 'not-installed',
+      state: isLoading ? 'checking' : inventoryError ? 'unavailable' : 'not-installed',
       available: false,
     } satisfies CreationModel);
   return {
@@ -145,8 +184,10 @@ export function useCreationModels(enabled: boolean) {
     models: unavailableSelection ? [...models, unavailableSelection] : models,
     model,
     profiles: Array.isArray(profiles) ? profiles : [],
+    workflowPreparations: inventory?.workflowPreparations,
     isLoading,
     error,
+    inventoryError,
     refresh: mutate,
   };
 }

@@ -133,6 +133,13 @@ win:
   icon: resources/app.ico # Use the checked-in Windows icon resource for executable metadata/icon patching
   artifactName: ${productName}-${version}-${os}-${arch}.${ext}
   extraResources:
+    - from: resources/bundled-python/win32-${arch}/python
+      to: bundled-python
+    - from: resources/bundled-git/win32-${arch}
+      to: bundled-git
+      filter:
+        - '**/*'
+        - '!mingit.zip'
     - from: resources/ffmpeg/win32-${arch}
       to: ffmpeg
 

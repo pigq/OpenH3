@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Skill Packager - Creates a distributable .skill file of a skill folder
+Skill Packager - Creates an OpenH3-importable .zip archive of a skill folder
 
 Usage:
-    python utils/package_skill.py <path/to/skill-folder> [output-directory]
+    python scripts/package_skill.py <path/to/skill-folder> [output-directory]
 
 Example:
-    python utils/package_skill.py skills/public/my-skill
-    python utils/package_skill.py skills/public/my-skill ./dist
+    python scripts/package_skill.py skills/public/my-skill
+    python scripts/package_skill.py skills/public/my-skill ./dist
 """
 
 import sys
@@ -18,15 +18,17 @@ from quick_validate import validate_skill
 
 def package_skill(skill_path, output_dir=None):
     """
-    Package a skill folder into a .skill file.
+    Package a skill folder into a .zip archive accepted by OpenH3.
 
     Args:
         skill_path: Path to the skill folder
-        output_dir: Optional output directory for the .skill file (defaults to current directory)
+        output_dir: Optional output directory for the .zip file (defaults to current directory)
 
     Returns:
-        Path to the created .skill file, or None if error
+        Path to the created .zip file, or None if error
     """
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(errors='backslashreplace')
     skill_path = Path(skill_path).resolve()
 
     # Validate skill folder exists
@@ -61,9 +63,9 @@ def package_skill(skill_path, output_dir=None):
     else:
         output_path = Path.cwd()
 
-    skill_filename = output_path / f"{skill_name}.skill"
+    skill_filename = output_path / f"{skill_name}.zip"
 
-    # Create the .skill file (zip format)
+    # Create the ZIP archive recognized by the OpenH3 import service.
     try:
         with zipfile.ZipFile(skill_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
             # Walk through the skill directory
@@ -78,16 +80,18 @@ def package_skill(skill_path, output_dir=None):
         return skill_filename
 
     except Exception as e:
-        print(f"❌ Error creating .skill file: {e}")
+        print(f"❌ Error creating .zip file: {e}")
         return None
 
 
 def main():
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(errors='backslashreplace')
     if len(sys.argv) < 2:
-        print("Usage: python utils/package_skill.py <path/to/skill-folder> [output-directory]")
+        print("Usage: python scripts/package_skill.py <path/to/skill-folder> [output-directory]")
         print("\nExample:")
-        print("  python utils/package_skill.py skills/public/my-skill")
-        print("  python utils/package_skill.py skills/public/my-skill ./dist")
+        print("  python scripts/package_skill.py skills/public/my-skill")
+        print("  python scripts/package_skill.py skills/public/my-skill ./dist")
         sys.exit(1)
 
     skill_path = sys.argv[1]

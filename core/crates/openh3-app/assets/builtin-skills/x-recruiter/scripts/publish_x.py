@@ -1,85 +1,89 @@
+"""Publish authorized content; a click alone never proves publication."""
+import json
 import sys
-import time
 from pathlib import Path
-
+from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 
 
-def read_text(path: str) -> str:
-    return Path(path).read_text(encoding="utf-8").strip()
+def verify_post_response(payload, content, image_count=0):
+    try:
+        if payload.get('errors'):
+            raise ValueError('API errors')
+        result = payload['data']['create_tweet']['tweet_results']['result']
+        legacy = result['legacy']
+        media = legacy.get('entities', {}).get('media', [])
+        returned_text = legacy['full_text']
+        for item in media:
+            url = item.get('url', '')
+            if url and returned_text.endswith(' ' + url):
+                returned_text = returned_text[:-(len(url) + 1)]
+        post_id = result['rest_id']
+        if not isinstance(post_id, str) or not post_id.isdigit() or returned_text != content or len(media) != image_count:
+            raise ValueError('post does not match requested text/media')
+        return f'https://x.com/i/status/{post_id}'
+    except (KeyError, TypeError, AttributeError, ValueError) as error:
+        raise RuntimeError('Publication outcome unknown: no matching created post. Check existing posts before any retry.') from error
 
 
-def main() -> None:
+def prepare_and_publish(page, content, images):
+    composer = page.locator("div[role='textbox'][data-testid='tweetTextarea_0']")
+    composer.wait_for(state='visible', timeout=120000)
+    composer.fill(content)
+    if composer.inner_text().strip() != content:
+        raise RuntimeError('Composer content mismatch; nothing submitted.')
+    if images:
+        page.locator("input[type='file'][data-testid='fileInput']").set_input_files(images)
+        previews = page.locator("[data-testid='attachments'] [data-testid='removeMedia']")
+        previews.nth(len(images) - 1).wait_for(state='visible', timeout=30000)
+        if previews.count() != len(images):
+            raise RuntimeError('Attachment count mismatch; nothing submitted.')
+    post = page.locator("[data-testid='tweetButtonInline'], [data-testid='tweetButton']").first
+    post.wait_for(state='visible', timeout=30000)
+    if not post.is_enabled():
+        raise RuntimeError('Post is disabled or uploads are incomplete; nothing submitted.')
+    try:
+        with page.expect_response(
+            lambda response: urlparse(response.url).netloc in ('x.com', 'twitter.com')
+            and urlparse(response.url).path.endswith('/CreateTweet')
+            and response.request.method == 'POST', timeout=30000
+        ) as response_info:
+            post.click()
+        response = response_info.value
+        if not response.ok:
+            raise RuntimeError('CreateTweet request failed')
+        url = verify_post_response(response.json(), content, len(images))
+    except Exception as error:
+        raise RuntimeError('Publication outcome unknown: check existing posts before any retry.') from error
+    return {'status': 'published', 'url': url}
+
+
+def main():
     if len(sys.argv) < 2:
-        print("用法: python3 scripts/publish_x.py <post_content.txt> [cover.png] [jd_details.png]")
+        raise ValueError('Usage: publish_x.py <post_content.txt> [image ...]')
+    content = Path(sys.argv[1]).resolve().read_text(encoding='utf-8-sig').strip()
+    if not content:
+        raise ValueError('Post content is empty.')
+    images = [str(Path(value).resolve()) for value in sys.argv[2:]]
+    if len(images) > 4:
+        raise ValueError('At most four images are supported by this helper.')
+    for image in images:
+        if not Path(image).is_file() or Path(image).stat().st_size == 0:
+            raise ValueError(f'Missing or empty image: {image}')
+    print('Complete login in the opened browser. The authorized post will be submitted automatically.', flush=True)
+    with sync_playwright() as runtime:
+        browser = runtime.chromium.launch(headless=False)
+        try:
+            page = browser.new_page()
+            page.goto('https://x.com/home', wait_until='domcontentloaded')
+            print(json.dumps(prepare_and_publish(page, content, images)), flush=True)
+        finally:
+            browser.close()
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as error:
+        print(str(error), file=sys.stderr)
         sys.exit(1)
-
-    content_path = sys.argv[1]
-    cover_path = sys.argv[2] if len(sys.argv) > 2 else None
-    details_path = sys.argv[3] if len(sys.argv) > 3 else None
-
-    content = read_text(content_path)
-
-    print("🚀 X 发布脚本已启动")
-    print("操作指南：")
-    print("1) 观察浏览器窗口：脚本会打开 X 首页或发帖页。")
-    print("2) 若出现登录页，请完成登录。")
-    print("3) 登录完成后，脚本会自动填充文案与图片。")
-    print("4) 请在浏览器中检查内容，确认无误后点击“Post”。")
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
-        context = browser.new_context()
-        page = context.new_page()
-
-        page.goto("https://x.com/home", wait_until="domcontentloaded")
-        page.wait_for_timeout(2000)
-
-        # If not logged in, X will redirect to login or show a login wall.
-        if "login" in page.url or "i/flow/login" in page.url:
-            print("⏳ [步骤 2] 等待登录：请在浏览器窗口完成登录。")
-            print("   脚本将自动检测登录完成后继续；如检测不到，请回到终端按 Enter 继续。")
-            try:
-                page.wait_for_url("https://x.com/home", timeout=120000)
-            except Exception:
-                input("登录完成后回到终端，按 Enter 继续...")
-                page.goto("https://x.com/home", wait_until=\"domcontentloaded\")
-            page.wait_for_timeout(2000)
-
-        # Focus composer
-        composer = page.locator("div[role='textbox'][data-testid='tweetTextarea_0']")
-        if not composer.is_visible():
-            # Try clicking the compose button if needed
-            compose_btn = page.locator("a[data-testid='SideNav_NewTweet_Button'], div[data-testid='SideNav_NewTweet_Button']")
-            if compose_btn.is_visible():
-                compose_btn.click()
-            page.wait_for_timeout(1000)
-
-        composer = page.locator("div[role='textbox'][data-testid='tweetTextarea_0']")
-        composer.wait_for(timeout=10000)
-        composer.click()
-        composer.fill(content)
-
-        # Upload images if provided
-        if cover_path or details_path:
-            files = [p for p in [cover_path, details_path] if p]
-            file_input = page.locator("input[type='file'][data-testid='fileInput']")
-            file_input.set_input_files(files)
-            page.wait_for_timeout(3000)
-
-        # Click Post
-        post_btn = page.locator("div[data-testid='tweetButtonInline']")
-        post_btn.wait_for(timeout=10000)
-        post_btn.click()
-
-        # Wait a bit to ensure posting
-        page.wait_for_timeout(3000)
-        print("✅ 已提交发布，请在 X 上确认。")
-        time.sleep(5)
-
-        context.close()
-        browser.close()
-
-
-if __name__ == "__main__":
-    main()

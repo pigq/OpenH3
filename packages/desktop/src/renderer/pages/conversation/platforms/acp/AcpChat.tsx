@@ -29,6 +29,7 @@ import AcpSendBox from './AcpSendBox';
 import { useAcpMessage } from './useAcpMessage';
 
 const AcpChat: React.FC<{
+  creationRequest?: import('@/common/chat/document/creation/creation').CreationRequest;
   conversation_id: string;
   workspace?: string;
   backend: string;
@@ -46,6 +47,7 @@ const AcpChat: React.FC<{
   forkCapability?: { at_turn: boolean };
   promptCapability?: { image: boolean; audio: boolean };
 }> = ({
+  creationRequest,
   conversation_id,
   workspace,
   backend,
@@ -75,6 +77,7 @@ const AcpChat: React.FC<{
   return (
     <ConversationProvider
       value={{
+        creationRequest,
         conversation_id: conversation_id,
         workspace,
         type: 'acp',

@@ -4,7 +4,7 @@ description: Guide for creating effective skills. Use when the user wants to cre
 license: Complete terms in LICENSE.txt
 ---
 
-> **⚠️ Platform note — read before running any command.** The command examples here are written for **macOS / Linux**. On **Windows**: run `python` (or `py`) instead of `python3`, use `$env:USERPROFILE\…` and backslashes instead of `~/…`, and translate any shell pipes/redirects (`|`, `>`, `&&`) to their PowerShell equivalents before running. The scripts themselves are cross-platform; only the way you invoke them differs.
+> **Platform and dependencies.** Resolve this skill's directory before invoking its scripts; do not assume the task's working directory is the skill directory. Use an available Python 3 interpreter (`python3` on many POSIX systems, `python` or `py` on Windows). Validation and packaging require PyYAML in that interpreter; check with `python -c "import yaml"` (adjust the interpreter), and use an existing permitted environment or install the missing dependency within the task's authorized scope. On PowerShell invoke an absolute interpreter path with `& 'C:\path\python.exe' 'C:\path\skill-creator\scripts\package_skill.py' 'C:\path\my-skill' 'C:\path\dist'`. Keep paths quoted; scripts read/write skill files as UTF-8.
 
 # Skill Creator
 
@@ -265,12 +265,12 @@ At this point, it is time to actually create the skill.
 
 Skip this step only if the skill being developed already exists, and iteration or packaging is needed. In this case, continue to the next step.
 
-When creating a new skill from scratch, always run the `init_skill.py` script. The script conveniently generates a new template skill directory that automatically includes everything a skill requires, making the skill creation process much more efficient and reliable.
+When creating a new skill from scratch, use `init_skill.py` to generate a starting template. If Python is unavailable, create the same files with permitted file tools and report that the initializer was not run. Templates still need completed instructions, resources, and task-specific verification.
 
 Usage:
 
 ```bash
-scripts/init_skill.py <skill-name> --path <output-directory>
+python scripts/init_skill.py <skill-name> --path <output-directory>
 ```
 
 The script:
@@ -325,29 +325,27 @@ Write instructions for using the skill and its bundled resources.
 
 ### Step 5: Packaging a Skill
 
-Once development of the skill is complete, it must be packaged into a distributable .skill file that gets shared with the user. The packaging process automatically validates the skill first to ensure it meets all requirements:
+When the user needs a distributable package, create a `.zip` archive accepted by OpenH3's skill importer. For an in-place skill update, packaging is optional unless requested. Run from this skill's directory (or use absolute script paths):
 
 ```bash
-scripts/package_skill.py <path/to/skill-folder>
+python scripts/package_skill.py <path/to/skill-folder>
 ```
 
 Optional output directory specification:
 
 ```bash
-scripts/package_skill.py <path/to/skill-folder> ./dist
+python scripts/package_skill.py <path/to/skill-folder> ./dist
 ```
 
 The packaging script will:
 
-1. **Validate** the skill automatically, checking:
-   - YAML frontmatter format and required fields
-   - Skill naming conventions and directory structure
-   - Description completeness and quality
-   - File organization and resource references
+1. **Validate basic frontmatter** automatically, checking UTF-8 readability, YAML mapping syntax, allowed keys, nonempty string `name` and `description`, and their character/length constraints.
 
-2. **Package** the skill if validation passes, creating a .skill file named after the skill (e.g., `my-skill.skill`) that includes all files and maintains the proper directory structure for distribution. The .skill file is a zip file with a .skill extension.
+2. **Package** the directory if those checks pass, creating a `.zip` file named after the directory (e.g., `my-skill.zip`) that includes its files under a top-level skill directory. Choose an output directory outside the skill directory. OpenH3 recognizes `.zip` archives; do not rename them to `.skill`.
 
 If validation fails, the script will report the errors and exit without creating a package. Fix any validation errors and run the packaging command again.
+
+These checks do **not** validate instruction quality, resource existence, directory-name agreement, external dependencies, or runtime behavior. Separately resolve each local resource referenced by the instructions, check that it exists, and execute applicable scripts on representative inputs. If a referenced resource is missing, add it, repair/remove the reference, or clearly state the unavailable capability. Report which checks actually ran and any unverified behavior; a successful package alone is not proof that the skill works.
 
 ### Step 6: Iterate
 

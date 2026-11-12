@@ -13,15 +13,18 @@ const fs = require('fs');
 const path = require('path');
 const { Buffer } = require('buffer');
 
-// Check if dependencies are installed
+// Resolve PNG-only dependencies after selecting the format.
 let extract, PNGtext;
-try {
-  extract = require('png-chunks-extract');
-  PNGtext = require('png-chunk-text');
-} catch (error) {
-  console.error('Error: Required dependencies not found.');
-  console.error('Please run: npm install png-chunks-extract png-chunk-text');
-  process.exit(1);
+function loadPngDependencies() {
+  if (extract && PNGtext) return;
+  try {
+    extract = require('png-chunks-extract');
+    PNGtext = require('png-chunk-text');
+  } catch {
+    throw new Error(
+      'PNG dependencies unavailable. Use an existing metadata parser or a dedicated helper directory with png-chunks-extract@1.0.0 and png-chunk-text@1.0.0; preserve the project package.json.'
+    );
+  }
 }
 
 /**
@@ -31,6 +34,7 @@ try {
  * @returns {string} - Character card JSON string
  */
 function extractFromPng(imagePath) {
+  loadPngDependencies();
   try {
     const buffer = fs.readFileSync(imagePath);
     const chunks = extract(new Uint8Array(buffer));
@@ -72,6 +76,7 @@ function extractFromPng(imagePath) {
  * @returns {string} - World info JSON string
  */
 function extractWorldInfoFromPng(imagePath) {
+  loadPngDependencies();
   try {
     const buffer = fs.readFileSync(imagePath);
     const chunks = extract(new Uint8Array(buffer));
@@ -128,10 +133,10 @@ if (require.main === module) {
         jsonData = extractFromPng(imagePath);
       }
     } else if (ext === '.webp') {
-      // WebP support would require additional library
-      // For now, suggest converting to PNG or using JSON format
-      console.error('Error: WebP format parsing requires additional setup.');
-      console.error('Please convert to PNG or use JSON format.');
+      console.error(
+        'Error: This helper does not extract WebP metadata. Use a compatible metadata parser or a JSON export.'
+      );
+      console.error('Do not convert the artwork to PNG unless preservation of embedded card data is verified.');
       process.exit(1);
     } else {
       console.error(`Error: Unsupported file format: ${ext}`);

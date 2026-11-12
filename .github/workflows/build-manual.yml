@@ -237,6 +237,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Harness regression failed.' }
 
   acceptance-candidate:
+    secrets: inherit
     permissions:
       contents: read
       actions: read

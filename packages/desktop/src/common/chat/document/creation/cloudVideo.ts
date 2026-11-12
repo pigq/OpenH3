@@ -46,6 +46,16 @@ export type CloudVideoJob = {
   model: string;
   status: 'queued' | 'running' | 'succeeded' | 'failed';
   progress: number;
+  /** False when the provider does not expose a real percentage. Legacy jobs may omit it. */
+  progressKnown?: boolean;
+  stage?: 'submitting' | 'queued' | 'generating' | 'downloading' | 'completed' | 'failed';
+  updatedAt?: string;
+  lastCheckedAt?: string;
+  downloadBytes?: number;
+  downloadTotalBytes?: number;
+  aspectRatio?: string;
+  width?: number;
+  height?: number;
   remoteId?: string;
   submissionUncertain?: boolean;
   error?: string;

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import type { LocalDeviceSnapshot } from '@/common/chat/document/creation/workflows/localModels';
 
 export type ComfyCommandOptions = { cwd?: string; timeout: number; windowsHide: boolean; maxBuffer: number };
 export type ComfyCommandRunner = (file: string, args: string[], options: ComfyCommandOptions) => Promise<string>;
@@ -70,6 +71,8 @@ export type ComfyNetworkReport = {
 };
 export type ComfyEnvironmentProbeOptions = {
   root?: string;
+  /** Disk budget for new files may differ from an existing runtime's location. */
+  installDirectory?: string;
   python?: string;
   baseUrl?: string;
   runCommand?: ComfyCommandRunner;
@@ -103,8 +106,38 @@ export type ComfyEnvironmentDiscoveryOptions = {
 };
 
 const exec = promisify(execFile);
+/** Resolve application-owned Git before PATH; no global PATH mutation or administrator install. */
+export function resolveComfyGit(platform = process.platform, env = process.env): string {
+  if (platform !== 'win32') return 'git';
+  const resources = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+  const roots = [env.OPENH3_RESOURCES_ROOT, resources, path.join(path.dirname(process.execPath), 'resources')].filter(
+    (v): v is string => Boolean(v)
+  );
+  const candidates = [
+    ...roots.flatMap((root) => [
+      path.join(root, 'bundled-git', 'cmd', 'git.exe'),
+      path.join(root, 'bundled-git', `win32-${process.arch}`, 'cmd', 'git.exe'),
+    ]),
+    ...(env.PATH ?? '')
+      .split(path.delimiter)
+      .filter(Boolean)
+      .map((root) => path.join(root, 'git.exe')),
+    ...[env.ProgramFiles, env['ProgramFiles(x86)'], env.LOCALAPPDATA && path.join(env.LOCALAPPDATA, 'Programs')]
+      .filter((v): v is string => Boolean(v))
+      .map((root) => path.join(root, 'Git', 'cmd', 'git.exe')),
+  ];
+  return (
+    candidates.find((candidate) => {
+      try {
+        return fs.statSync(candidate).isFile();
+      } catch {
+        return false;
+      }
+    }) ?? 'git'
+  );
+}
 export const runComfyCommand: ComfyCommandRunner = async (file, args, options) =>
-  (await exec(file, args, options)).stdout;
+  (await exec(/^git(?:\.exe)?$/i.test(file) ? resolveComfyGit() : file, args, options)).stdout;
 const commandOptions: ComfyCommandOptions = { timeout: 10_000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 };
 
 function existingDirectory(value: string | undefined): string | undefined {
@@ -126,7 +159,7 @@ function candidateRoot(root: string): string | undefined {
   return nested && fs.existsSync(path.join(nested, 'main.py')) ? nested : undefined;
 }
 
-function candidatePython(root: string): string | undefined {
+export function candidatePython(root: string): string | undefined {
   return [
     path.join(root, '.venv', 'Scripts', 'python.exe'),
     path.join(root, '.venv', 'bin', 'python'),
@@ -134,15 +167,25 @@ function candidatePython(root: string): string | undefined {
     path.join(root, 'venv', 'bin', 'python'),
     path.join(root, 'python_embeded', 'python.exe'),
     path.join(path.dirname(root), 'python_embeded', 'python.exe'),
+    path.join(path.dirname(root), '.venv', 'Scripts', 'python.exe'),
+    path.join(path.dirname(root), '.venv', 'bin', 'python'),
+    path.join(path.dirname(root), 'venv', 'Scripts', 'python.exe'),
+    path.join(path.dirname(root), 'venv', 'bin', 'python'),
+    ...['312', '311', '313', '310'].flatMap((abi) =>
+      [root, path.dirname(root)].flatMap((base) => [
+        path.join(base, `.venv-py${abi}`, 'Scripts', 'python.exe'),
+        path.join(base, `.venv-py${abi}`, 'bin', 'python'),
+      ])
+    ),
   ].find((value) => fs.existsSync(value));
 }
 
 /**
  * Find existing ComfyUI roots without traversing an entire disk.
  *
- * The caller supplies persisted/recent roots when available. Built-in paths are
- * deliberately small and platform-specific; each path is checked at most one
- * level below its parent. No process is started and no files are downloaded.
+ * This is the shallow external-path scan. Complete application-owned discovery
+ * lives in applicationPaths and has no depth, entry or candidate cutoff.
+ * No process is started and no files are downloaded.
  */
 export function discoverComfyEnvironmentCandidates(
   options: ComfyEnvironmentDiscoveryOptions = {}
@@ -165,6 +208,7 @@ export function discoverComfyEnvironmentCandidates(
   ];
   const seen = new Set<string>();
   const candidates: ComfyEnvironmentCandidate[] = [];
+  let inspected = 0;
   const add = (value: string | undefined, reason: ComfyEnvironmentCandidate['reason']): void => {
     const root = value && candidateRoot(value);
     if (!root) return;
@@ -173,7 +217,42 @@ export function discoverComfyEnvironmentCandidates(
     seen.add(key);
     candidates.push({ root, reason, python: candidatePython(root), baseUrl: 'http://127.0.0.1:8188' });
   };
-  for (const root of options.roots ?? []) add(root, 'recent-path');
+  const inspectChildren = (directory: string, depth = 0): void => {
+    if (depth > 2 || inspected >= 256 || candidates.length >= maxCandidates) return;
+    try {
+      for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+        if (inspected++ >= 256) break;
+        if (!entry.isDirectory() || entry.isSymbolicLink() || entry.name.startsWith('.')) continue;
+        if (
+          /^(?:models?|output|input|temp|node_modules|skills|conversations|cache|logs|python.*|venv|site-packages|custom_nodes)$/i.test(
+            entry.name
+          )
+        )
+          continue;
+        const child = path.join(directory, entry.name);
+        add(child, 'recent-path');
+        if (!candidateRoot(child)) inspectChildren(child, depth + 1);
+      }
+    } catch {
+      /* Recent roots can be absent or on a removable volume. */
+    }
+  };
+  for (const root of [env.COMFYUI_PATH, env.COMFYUI_ROOT, ...(options.roots ?? [])].slice(0, 64)) {
+    add(root, 'recent-path');
+    if (!root) continue;
+    // Recover interrupted and completed managed installs as well as portable H3 layouts.
+    add(path.join(root, 'runtime', 'ComfyUI_windows_portable'), 'recent-path');
+    try {
+      for (const entry of fs.readdirSync(path.join(root, 'comfy-runtimes'), { withFileTypes: true }).slice(0, 32))
+        if (entry.isDirectory()) add(path.join(root, 'comfy-runtimes', entry.name), 'recent-path');
+    } catch {
+      /* No managed runtimes at this root. */
+    }
+    // Agent-created installations may use a named task folder and a versioned
+    // ComfyUI checkout rather than the managed installer's directory layout.
+    inspected = 0;
+    inspectChildren(root);
+  }
   for (const root of known) add(root, 'known-path');
   return candidates;
 }
@@ -412,7 +491,14 @@ async function revision(root: string, run: ComfyCommandRunner): Promise<string |
     const value = (await run('git', ['-C', root, 'rev-parse', 'HEAD'], commandOptions)).trim();
     return /^[a-f\d]{7,64}$/i.test(value) ? value : undefined;
   } catch {
-    return undefined;
+    try {
+      const version = /__version__\s*=\s*['"]([\d.]+)['"]/.exec(
+        fs.readFileSync(path.join(root, 'comfyui_version.py'), 'utf8')
+      )?.[1];
+      return version ? `v${version}` : undefined;
+    } catch {
+      return undefined;
+    }
   }
 }
 function disk(root: string): ComfyEnvironmentReport['machine']['disk'] {
@@ -424,6 +510,41 @@ function disk(root: string): ComfyEnvironmentReport['machine']['disk'] {
   } catch {
     return undefined;
   }
+}
+
+/** Machine counters only: no interpreter, tensor, server, download, or filesystem writes. */
+export async function probeLocalDevice(
+  installDirectory: string,
+  options: Pick<
+    ComfyEnvironmentProbeOptions,
+    'runCommand' | 'platform' | 'arch' | 'totalMemoryBytes' | 'freeMemoryBytes'
+  > = {}
+): Promise<LocalDeviceSnapshot> {
+  const platform = options.platform ?? process.platform;
+  const run = options.runCommand ?? runComfyCommand;
+  const gpus = await probeGpus(platform, (file, args, settings) => run(file, args, { ...settings, timeout: 3000 }));
+  return {
+    checkedAt: new Date().toISOString(),
+    os: platform,
+    osRelease: os.release(),
+    arch: options.arch ?? process.arch,
+    cpu: os.cpus()[0]?.model ?? 'unknown',
+    totalMemoryBytes: options.totalMemoryBytes ?? os.totalmem(),
+    freeMemoryBytes: options.freeMemoryBytes ?? os.freemem(),
+    gpuStatus: gpus.length ? 'available' : 'unknown',
+    gpus: gpus.map((gpu) => ({
+      ...gpu,
+      // Win32_VideoController.AdapterRAM is a 32-bit counter; never use it as a capacity ceiling.
+      totalMemoryBytes: platform === 'win32' && gpu.freeMemoryBytes === undefined ? undefined : gpu.totalMemoryBytes,
+      sharedMemory:
+        gpu.vendor === 'apple' ||
+        /integrated|radeon(?:\(tm\))? graphics|radeon\s+\d{3}m\b|ryzen.*graphics/i.test(gpu.name)
+          ? true
+          : undefined,
+    })),
+    installDirectory: path.resolve(installDirectory),
+    disk: disk(installDirectory),
+  };
 }
 
 function redactedUrl(value: URL): string {
@@ -598,15 +719,7 @@ export async function probeComfyEnvironment(
   const run = options.runCommand ?? runComfyCommand;
   const platform = options.platform ?? process.platform;
   const root = options.root ? path.resolve(options.root) : undefined;
-  const python =
-    options.python ??
-    (root
-      ? [
-          path.join(root, '.venv', 'Scripts', 'python.exe'),
-          path.join(root, '.venv', 'bin', 'python'),
-          path.join(root, 'python_embeded', 'python.exe'),
-        ].find((candidate) => fs.existsSync(candidate))
-      : undefined);
+  const python = options.python ?? (root ? candidatePython(root) : undefined);
   const [runtime, gpus, gitRevision] = await Promise.all([
     readPythonRuntime(python, { runCommand: run, root }),
     probeGpus(platform, run),
@@ -672,7 +785,7 @@ export async function probeComfyEnvironment(
       arch: options.arch ?? process.arch,
       totalMemoryBytes: options.totalMemoryBytes ?? os.totalmem(),
       freeMemoryBytes: options.freeMemoryBytes ?? os.freemem(),
-      disk: disk(root ?? process.cwd()),
+      disk: disk(options.installDirectory ?? root ?? process.cwd()),
       gpuStatus: gpus.length ? 'available' : 'unknown',
       gpus,
     },

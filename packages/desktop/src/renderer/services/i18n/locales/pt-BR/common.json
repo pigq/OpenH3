@@ -202,5 +202,9 @@
   },
   "selectedCount": "{{count}} selecionado(s)",
   "selectedSkills": "Habilidades selecionadas",
-  "aiAssistant": "Assistente de IA"
+  "aiAssistant": "Assistente de IA",
+  "rendererRecovery": {
+    "title": "Erro na página",
+    "description": "Esta página não pôde ser exibida. Recarregue para continuar."
+  }
 }

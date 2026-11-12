@@ -4,7 +4,8 @@ import type { ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { ComfyProfile } from '@/common/chat/document/creation/comfy';
+import { createHash } from 'node:crypto';
+import type { ComfyInstallPlan, ComfyProfile } from '@/common/chat/document/creation/comfy';
 import { ComfyWorkflowEngine, inspectComfyServiceIdentity } from '@/process/services/media/comfy/workflowEngine';
 import * as comfyEnvironment from '@/process/services/media/comfy/discovery/environment';
 import { ComfyRuntimeCoordinator } from '@/process/services/media/comfy/runtimeCoordinator';
@@ -15,7 +16,14 @@ let profile: ComfyProfile;
 const registry = {
   Text: { input: { required: { text: ['STRING'] } }, output: ['STRING'] },
   Model: { input: { required: { model: [['valid.safetensors']] } }, output: ['MODEL'] },
-  Save: { input: { required: { text: ['STRING'], model: ['MODEL'] } }, output: [] },
+  Save: {
+    input: {
+      required: { text: ['STRING'], model: ['MODEL'] },
+      optional: { image: ['IMAGE'], conditioning: ['CONDITIONING'] },
+    },
+    output: [],
+    output_node: true,
+  },
   LoadImage: { input: { required: { image: ['STRING'] } }, output: ['IMAGE'] },
 };
 const stats = { system: { python_version: '3.12.9', pytorch_version: '2.9.0', comfyui_version: '0.3.60' } };
@@ -113,6 +121,47 @@ function engine(fetchImpl = fetchFixture(), options: Record<string, unknown> = {
     ...options,
   });
 }
+
+it('validates indexed model directories and invalidates evidence when a shard changes', async () => {
+  const directory = path.join(root, 'sharded');
+  fs.mkdirSync(directory);
+  const shard = path.join(directory, 'model-00001-of-00001.safetensors');
+  fs.writeFileSync(shard, 'weights');
+  fs.writeFileSync(
+    path.join(directory, 'model.safetensors.index.json'),
+    JSON.stringify({
+      weight_map: { layer: path.basename(shard) },
+    })
+  );
+  profile.components[0].path = directory;
+  const instance = engine();
+  const validated = await instance.validate(profile);
+  fs.appendFileSync(shard, 'changed');
+  expect(await instance.snapshotFingerprint(profile)).not.toBe(validated.fingerprint);
+  fs.unlinkSync(shard);
+  await expect(instance.validate(profile)).rejects.toThrow('COMFY_MISSING_MODEL');
+});
+
+it.each(['image', 'video'] as const)(
+  'rejects reference inputs before runtime work for a text-only %s workflow',
+  async (kind) => {
+    const fetchImpl = fetchFixture();
+    const runtimeInspector = vi.fn();
+    profile.kind = kind;
+    profile.family = kind === 'image' ? 'moss-image-sft' : 'h3';
+    profile.capabilities = [kind === 'image' ? 'text-to-image' : 'text-to-video'];
+    profile.nodes = [{ id: 'ComfyUI', version: 'stale-revision' }];
+    const input = {
+      prompt: 'Preserve the supplied person',
+      references: [{ type: 'image' as const, path: path.join(root, 'person.jpg') }],
+    };
+    await expect(
+      engine(fetchImpl, { runtimeInspector }).generate(profile, input, new AbortController().signal)
+    ).rejects.toThrow('COMFY_IMAGE_BINDINGS_MISSING');
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(runtimeInspector).not.toHaveBeenCalled();
+  }
+);
 
 describe('Windows ComfyUI socket owner identity', () => {
   const originalPlatform = process.platform;
@@ -363,6 +412,7 @@ describe('generic ComfyUI workflow engine', () => {
     profile.bindings.image = [{ nodeId: '4', input: 'image' }];
     const graph = JSON.parse(fs.readFileSync(profile.workflowPath, 'utf8'));
     graph['4'] = { class_type: 'LoadImage', inputs: { image: 'placeholder.png' } };
+    graph['3'].inputs.image = ['4', 0];
     fs.writeFileSync(profile.workflowPath, JSON.stringify(graph));
     const fetchImpl = fetchFixture({ '/upload/image': { name: 'uploaded.png', subfolder: 'images', type: 'input' } });
     const runtime = engine(fetchImpl);
@@ -377,6 +427,166 @@ describe('generic ComfyUI workflow engine', () => {
     expect(JSON.parse(String(request?.[1]?.body)).prompt['4'].inputs.image).toBe('images/uploaded.png');
   });
 
+  it('routes a mask and edit source by declared roles even when reference order is reversed', async () => {
+    profile.bindings.image = [
+      { nodeId: '4', input: 'image' },
+      { nodeId: '5', input: 'image' },
+    ];
+    profile.workflowMetadata = {
+      id: 'inpaint',
+      revision: 'r1',
+      tasks: ['inpaint'],
+      adapter: 'native',
+      preparation: 'ready',
+      inputs: [
+        { role: 'edit-source', type: 'image', minCount: 1, maxCount: 1, binding: 'image', bindingIndex: 0 },
+        { role: 'mask', type: 'image', minCount: 1, maxCount: 1, binding: 'image', bindingIndex: 1 },
+      ],
+    };
+    const graph = JSON.parse(fs.readFileSync(profile.workflowPath, 'utf8'));
+    graph['4'] = { class_type: 'LoadImage', inputs: { image: 'source.png' } };
+    graph['5'] = { class_type: 'LoadImage', inputs: { image: 'mask.png' } };
+    graph['3'].inputs.image = ['4', 0];
+    graph['3'].inputs.mask = ['5', 1];
+    fs.writeFileSync(profile.workflowPath, JSON.stringify(graph));
+    const source = path.join(root, 'source.png'),
+      mask = path.join(root, 'mask.png');
+    fs.writeFileSync(source, 'source');
+    fs.writeFileSync(mask, 'mask');
+    const baseFetch = fetchFixture({
+      '/object_info': {
+        ...registry,
+        LoadImage: { ...registry.LoadImage, output: ['IMAGE', 'MASK'] },
+        Save: {
+          ...registry.Save,
+          input: { ...registry.Save.input, optional: { ...registry.Save.input.optional, mask: ['MASK'] } },
+        },
+      },
+    });
+    const fetchImpl = vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
+      if (String(url).endsWith('/upload/image'))
+        return Response.json({ name: ((options!.body as FormData).get('image') as File).name });
+      return baseFetch(url, options);
+    }) as typeof fetch;
+    await engine(fetchImpl).generate(
+      profile,
+      {
+        prompt: 'Edit the masked area',
+        requirements: { task: 'inpaint' },
+        references: [
+          { id: 'mask', type: 'image', role: 'mask', maskFor: 'source', path: mask },
+          { id: 'source', type: 'image', role: 'edit-source', path: source },
+        ],
+      },
+      new AbortController().signal
+    );
+    const request = vi.mocked(fetchImpl).mock.calls.find(([url]) => String(url).endsWith('/prompt'));
+    const submitted = JSON.parse(String(request?.[1]?.body)).prompt;
+    expect(submitted['4'].inputs.image).toBe('source.png');
+    expect(submitted['5'].inputs.image).toBe('mask.png');
+  });
+
+  it('keeps task requirements out of executable parameters without suppressing unsupported tasks', async () => {
+    profile.workflowMetadata = {
+      id: 'text',
+      revision: 'r1',
+      tasks: ['text-to-image'],
+      inputs: [],
+      adapter: 'native',
+      preparation: 'ready',
+    };
+    const fetchImpl = fetchFixture();
+    const savedGraph = JSON.parse(fs.readFileSync(profile.workflowPath, 'utf8'));
+    savedGraph['4'] = { class_type: 'Text', inputs: { text: 'immutable snapshot marker' } };
+    const source = JSON.stringify(savedGraph),
+      snapshotPath = path.join(root, 'snapshot.json');
+    fs.writeFileSync(snapshotPath, source);
+    const executionWorkflow = { path: snapshotPath, sha256: createHash('sha256').update(source).digest('hex') };
+    const leaseDirectory = path.join(root, 'snapshot-test-lease');
+    fs.mkdirSync(leaseDirectory);
+    const runtime = engine(fetchImpl, {
+      runtimeCoordinator: new ComfyRuntimeCoordinator({ directory: leaseDirectory }),
+    });
+    profile.validation = { fingerprint: await runtime.snapshotFingerprint(profile), checkedAt: '2026-11-10' };
+    await runtime.generate(
+      profile,
+      { prompt: 'A scene', requirements: { task: 'text-to-image' } },
+      new AbortController().signal,
+      undefined,
+      undefined,
+      undefined,
+      executionWorkflow
+    );
+    const submitted = vi.mocked(fetchImpl).mock.calls.find(([url]) => String(url).endsWith('/prompt'));
+    expect(JSON.parse(String(submitted?.[1]?.body)).prompt['1'].inputs).toEqual({ text: 'A scene' });
+    expect(JSON.parse(String(submitted?.[1]?.body)).prompt['4'].inputs.text).toBe('immutable snapshot marker');
+    const fingerprint = await runtime.snapshotFingerprint(profile);
+    profile.workflowMetadata.preparation = 'pending';
+    profile.workflowMetadata.evidence = [{ kind: 'execution', workflowHash: 'a'.repeat(64), checkedAt: '2026-11-10' }];
+    expect(await runtime.snapshotFingerprint(profile)).toBe(fingerprint);
+    profile.workflowMetadata.adapter = 'external';
+    expect(await runtime.snapshotFingerprint(profile)).not.toBe(fingerprint);
+    profile.family = 'fasth3-omni';
+    profile.kind = 'video';
+    await expect(
+      runtime.generate(
+        profile,
+        { prompt: 'Animate', requirements: { task: 'image-to-video' }, imagePaths: [path.join(root, 'frame.png')] },
+        new AbortController().signal
+      )
+    ).rejects.toThrow('COMFY_WORKFLOW_TASK_UNSUPPORTED');
+  });
+
+  it.each([
+    { connected: false, outputMetadata: true, error: 'COMFY_REFERENCE_INPUT_DISCONNECTED' },
+    { connected: true, outputMetadata: undefined, error: 'COMFY_REFERENCE_OUTPUT_UNCONFIRMED' },
+  ])('never submits an ignored or unconfirmed reference: $error', async ({ connected, outputMetadata, error }) => {
+    profile.family = 'qwen-edit';
+    profile.bindings.image = [{ nodeId: '4', input: 'image' }];
+    const graph = JSON.parse(fs.readFileSync(profile.workflowPath, 'utf8'));
+    graph['4'] = { class_type: 'LoadImage', inputs: { image: 'placeholder.png' } };
+    if (connected) graph['3'].inputs.image = ['4', 0];
+    fs.writeFileSync(profile.workflowPath, JSON.stringify(graph));
+    const imagePath = path.join(root, 'input.png');
+    fs.writeFileSync(imagePath, 'image');
+    const fetchImpl = fetchFixture({
+      '/object_info': { ...registry, Save: { ...registry.Save, output_node: outputMetadata } },
+      '/upload/image': { name: 'uploaded.png', type: 'input' },
+    });
+    await expect(
+      engine(fetchImpl).generate(profile, { prompt: 'edit', imagePaths: [imagePath] }, new AbortController().signal)
+    ).rejects.toThrow(error);
+    expect(vi.mocked(fetchImpl).mock.calls.some(([url]) => String(url).endsWith('/prompt'))).toBe(false);
+  });
+
+  it('rejects an Omni conditioning branch disconnected from the output before submitting', async () => {
+    profile.family = 'fasth3-omni';
+    profile.kind = 'video';
+    const graph = JSON.parse(fs.readFileSync(profile.workflowPath, 'utf8'));
+    graph['4'] = { class_type: 'MiniMaxH3ReferenceToVideo', inputs: { prompt: 'default' } };
+    fs.writeFileSync(profile.workflowPath, JSON.stringify(graph));
+    const imagePath = path.join(root, 'input.png');
+    fs.writeFileSync(imagePath, 'image');
+    const fetchImpl = fetchFixture({
+      '/object_info': {
+        ...registry,
+        MiniMaxH3ReferenceToVideo: {
+          input: { required: { prompt: ['STRING'] }, optional: { ref_images: ['AUTOGROW'] } },
+          output: ['CONDITIONING', 'LATENT'],
+        },
+      },
+      '/upload/image': { name: 'uploaded.png', type: 'input' },
+    });
+    await expect(
+      engine(fetchImpl, { referencePreflight: { inspect: async () => new Map() } }).generate(
+        profile,
+        { prompt: 'animate the reference', references: [{ type: 'image', path: imagePath }] },
+        new AbortController().signal
+      )
+    ).rejects.toThrow('COMFY_REFERENCE_INPUT_DISCONNECTED');
+    expect(vi.mocked(fetchImpl).mock.calls.some(([url]) => String(url).endsWith('/prompt'))).toBe(false);
+  });
+
   it('uploads ordered Omni references and binds image, video, embedded audio, and audio labels', async () => {
     profile.family = 'fasth3-omni';
     profile.kind = 'video';
@@ -384,6 +594,7 @@ describe('generic ComfyUI workflow engine', () => {
     profile.bindings.prompt = [{ nodeId: '1', input: 'text' }];
     const graph = JSON.parse(fs.readFileSync(profile.workflowPath, 'utf8'));
     graph['4'] = { class_type: 'MiniMaxH3ReferenceToVideo', inputs: { prompt: 'default' } };
+    graph['3'].inputs.conditioning = ['4', 0];
     fs.writeFileSync(profile.workflowPath, JSON.stringify(graph));
     const imagePath = path.join(root, 'ref.png');
     const videoPath = path.join(root, 'ref.mp4');
@@ -688,7 +899,47 @@ describe('generic ComfyUI workflow engine', () => {
     await expect(runtime.ensureStarted(profile)).rejects.toThrow('COMFY_LOCAL_SERVER_REQUIRED');
   });
 
-  it('starts only the selected interpreter with hidden localhost arguments and stops its owned child', async () => {
+  it.each(
+    ['--listen', '--port', '--base-directory', '--output-directory', '--input-directory'].flatMap((flag) => [
+      { flag, args: [flag, '8190'] },
+      { flag, args: [`${flag}=8190`] },
+    ])
+  )('identifies reserved launch flag $args before starting a process', async ({ flag, args }) => {
+    profile.environment.baseUrl = 'http://127.0.0.1:8190';
+    profile.environment.launchArgs = ['--lowvram', ...args];
+    const spawnImpl = vi.fn();
+    const startRuntime = vi.fn();
+    const runtime = engine(
+      vi.fn(async () => {
+        throw new Error('offline');
+      }) as typeof fetch,
+      { spawnImpl, startRuntime }
+    );
+    await expect(runtime.ensureStarted(profile)).rejects.toThrow(
+      new RegExp(`COMFY_LAUNCH_ARGS_INVALID:.*${flag}.*environment\\.baseUrl`)
+    );
+    expect(spawnImpl).not.toHaveBeenCalled();
+    expect(startRuntime).not.toHaveBeenCalled();
+  });
+
+  it('identifies the invalid launch argument index without including a NUL in the diagnostic', async () => {
+    profile.environment.launchArgs = ['--lowvram', 'bad\0argument'];
+    const spawnImpl = vi.fn();
+    const runtime = engine(
+      vi.fn(async () => {
+        throw new Error('offline');
+      }) as typeof fetch,
+      { spawnImpl }
+    );
+    await expect(runtime.ensureStarted(profile)).rejects.toThrow(
+      'COMFY_LAUNCH_ARGS_INVALID:environment.launchArgs[1] contains a NUL character'
+    );
+    expect(spawnImpl).not.toHaveBeenCalled();
+  });
+
+  it('starts only the selected interpreter using the baseUrl port and permitted arguments, then stops its owned child', async () => {
+    profile.environment.baseUrl = 'http://127.0.0.1:8190';
+    profile.environment.launchArgs = ['--lowvram'];
     let online = false;
     const fetchImpl = vi.fn(async () => {
       if (!online) throw new Error('offline');
@@ -712,7 +963,7 @@ describe('generic ComfyUI workflow engine', () => {
     await runtime.ensureStarted(profile);
     expect(spawnImpl).toHaveBeenCalledWith(
       profile.environment.python,
-      expect.arrayContaining([path.join(root, 'main.py'), '--listen', '127.0.0.1', '--port', '8188']),
+      [path.join(root, 'main.py'), '--lowvram', '--listen', '127.0.0.1', '--port', '8190'],
       expect.objectContaining({ cwd: root, windowsHide: true })
     );
     await runtime.stopOwned();
@@ -965,6 +1216,7 @@ describe('generic ComfyUI workflow engine', () => {
     profile.bindings.image = [{ nodeId: '4', input: 'image' }];
     const graph = JSON.parse(fs.readFileSync(profile.workflowPath, 'utf8'));
     graph['4'] = { class_type: 'LoadImage', inputs: { image: 'user-input-placeholder.png' } };
+    graph['3'].inputs.image = ['4', 0];
     fs.writeFileSync(profile.workflowPath, JSON.stringify(graph));
     const fetchImpl = fetchFixture({
       '/object_info': {
@@ -1192,6 +1444,49 @@ describe('generic ComfyUI workflow engine', () => {
     expect(spawnImpl).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])(
+    'cleans up a failed schema probe only when it started the runtime (online=%s)',
+    async (initiallyOnline) => {
+      let online = initiallyOnline;
+      const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+        if (!online) throw new Error('offline');
+        return Response.json(new URL(String(url)).pathname === '/object_info' ? {} : stats);
+      }) as typeof fetch;
+      const child = Object.assign(new EventEmitter(), {
+        kill: vi.fn(() => {
+          online = false;
+          child.emit('exit', 0);
+          return true;
+        }),
+        exitCode: null,
+        stdout: null,
+        stderr: null,
+        pid: 42,
+      });
+      const spawnImpl = vi.fn(() => {
+        online = true;
+        return child as unknown as ChildProcess;
+      });
+      const runtime = engine(fetchImpl, { spawnImpl });
+      const plan: ComfyInstallPlan = {
+        ...profile,
+        targetRoot: root,
+        downloadBytes: 0,
+        requiredBytes: 0,
+        reason: 'test existing runtime',
+        evidence: [],
+        workflow: { '1': { class_type: 'MissingLoader', inputs: {} } },
+        commands: [],
+        smokeInput: { prompt: 'smoke' },
+        repair: false,
+      };
+      await expect(runtime.validateInstallRuntime(plan)).rejects.toThrow('COMFY_EXISTING_RUNTIME_INCOMPATIBLE');
+      expect(spawnImpl).toHaveBeenCalledTimes(initiallyOnline ? 0 : 1);
+      expect(child.kill).toHaveBeenCalledTimes(initiallyOnline ? 0 : 1);
+      expect(online).toBe(initiallyOnline);
+    }
+  );
+
   it('blocks installs against busy or external healthy runtimes without stopping them', async () => {
     const spawnImpl = vi.fn();
     await expect(
@@ -1202,6 +1497,14 @@ describe('generic ComfyUI workflow engine', () => {
     await expect(engine(fetchFixture(), { spawnImpl }).assertInstallable(profile)).rejects.toThrow(
       'COMFY_EXTERNAL_RUNTIME_RUNNING'
     );
+    await expect(
+      engine(fetchFixture(), { spawnImpl }).assertInstallable(profile, { additive: true })
+    ).resolves.toBeUndefined();
+    await expect(
+      engine(fetchFixture({ '/queue': { queue_running: [[0, 'other-job']], queue_pending: [] } }), {
+        spawnImpl,
+      }).assertInstallable(profile, { additive: true })
+    ).rejects.toThrow('COMFY_RUNTIME_BUSY');
     expect(spawnImpl).not.toHaveBeenCalled();
     const offline = engine(
       vi.fn(async () => {
@@ -1321,5 +1624,86 @@ describe('generic ComfyUI workflow engine', () => {
     await expect(engine(fetchFixture({ '/object_info': loaderRegistry })).validate(profile)).resolves.toMatchObject({
       loadable: true,
     });
+  });
+
+  describe('ModelPatchLoader component integrity', () => {
+    const patchName = 'control/union.safetensors';
+    function patchFixture(register = true): typeof fetch {
+      const patchPath = path.join(root, 'models', 'model_patches', patchName);
+      fs.mkdirSync(path.dirname(patchPath), { recursive: true });
+      fs.writeFileSync(patchPath, 'patch weights');
+      if (register)
+        profile.components.push({
+          role: 'control',
+          name: 'union',
+          path: patchPath,
+          version: '1',
+          precision: 'fp16',
+          sizeBytes: 13,
+        });
+      const graph = JSON.parse(fs.readFileSync(profile.workflowPath, 'utf8'));
+      graph['4'] = { class_type: 'ModelPatchLoader', inputs: { name: patchName } };
+      graph['3'].inputs.patch = ['4', 0];
+      fs.writeFileSync(profile.workflowPath, JSON.stringify(graph));
+      return fetchFixture({
+        '/object_info': {
+          ...registry,
+          ModelPatchLoader: {
+            input: { required: { name: [[patchName]] } },
+            output: ['MODEL_PATCH'],
+          },
+          Save: {
+            ...registry.Save,
+            input: { ...registry.Save.input, optional: { ...registry.Save.input.optional, patch: ['MODEL_PATCH'] } },
+          },
+        },
+      });
+    }
+
+    it('accepts the exact registered patch and retains component integrity checks', async () => {
+      const fetchImpl = patchFixture();
+      await expect(engine(fetchImpl).validate(profile)).resolves.toMatchObject({ loadable: true });
+      fs.appendFileSync(profile.components[1].path, 'changed');
+      await expect(engine(fetchImpl).validate(profile)).rejects.toThrow('COMFY_MODEL_SIZE_MISMATCH');
+    });
+
+    it.each([
+      ['validate', 'omitted'],
+      ['validate', 'mismatched'],
+      ['generate', 'omitted'],
+      ['generate', 'mismatched'],
+    ] as const)(
+      'rejects an %s request with an %s patch registration before submission',
+      async (action, registration) => {
+        const fetchImpl = patchFixture(registration === 'mismatched');
+        if (registration === 'mismatched') {
+          profile.components[1].path = path.join(root, 'models', 'model_patches', 'another.safetensors');
+          fs.writeFileSync(profile.components[1].path, 'patch weights');
+        }
+        const runtime = engine(fetchImpl);
+        await expect(
+          action === 'validate'
+            ? runtime.validate(profile)
+            : runtime.generate(profile, { prompt: 'Use the selected patch' }, new AbortController().signal)
+        ).rejects.toThrow('COMFY_PROFILE_MODEL_BINDING_MISMATCH');
+        expect(vi.mocked(fetchImpl).mock.calls.some(([url]) => String(url).endsWith('/prompt'))).toBe(false);
+      }
+    );
+
+    it.each(['separate', 'equals'] as const)(
+      'resolves patches in the configured models root with %s arguments',
+      async (style) => {
+        const fetchImpl = patchFixture();
+        const modelsRoot = path.join(root, 'shared-models');
+        profile.environment.launchArgs =
+          style === 'separate' ? ['--models-directory', modelsRoot] : [`--models-directory=${modelsRoot}`];
+        const selectedPatch = path.join(modelsRoot, 'model_patches', patchName);
+        fs.mkdirSync(path.dirname(selectedPatch), { recursive: true });
+        fs.copyFileSync(profile.components[1].path, selectedPatch);
+        await expect(engine(fetchImpl).validate(profile)).rejects.toThrow('COMFY_PROFILE_MODEL_BINDING_MISMATCH');
+        profile.components[1].path = selectedPatch;
+        await expect(engine(fetchImpl).validate(profile)).resolves.toMatchObject({ loadable: true });
+      }
+    );
   });
 });

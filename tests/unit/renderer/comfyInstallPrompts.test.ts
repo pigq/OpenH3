@@ -18,16 +18,14 @@ const load = (locale: string) =>
   };
 
 describe('ComfyUI install prompts', () => {
-  it('uses short Skill instructions instead of repeating the installation implementation in every locale', () => {
+  it('keeps model-card goals concise and leaves implementation details in the injected Skill', () => {
     expect(locales.length).toBeGreaterThanOrEqual(13);
     for (const locale of locales) {
       const { comfy } = load(locale);
       for (const intent of ['install', 'repair', 'install-other'] as const) {
         const prompt = comfy.prompts[intent];
         const label = `${locale} ${intent}`;
-        for (const token of ['{{family}}', 'comfyui-local']) {
-          expect(prompt, label).toContain(token);
-        }
+        expect(prompt, label).toContain('{{family}}');
         // Family-specific details belong to the selected Skill guide, not every card.
         expect(prompt, label).not.toMatch(/FastH3-Omni|NVFP4|Turbo LoRA|H3.*Z-Image/);
         expect(prompt, label).not.toMatch(
@@ -67,7 +65,9 @@ describe('ComfyUI install prompts', () => {
     const { comfy } = load('zh-CN');
     expect(comfy.intentSummary).not.toMatch(/等待我确认|等我确认|先制定/);
     expect(comfy.prompts.install).not.toMatch(/等待我确认|等我确认|先制定/);
-    expect(comfy.prompts.install).toContain('自动检测');
-    expect(comfy.prompts.install).toContain('下载安装');
+    expect(comfy.prompts.install).toContain('安装本地');
+    expect(comfy.prompts.install).toContain('复用已有环境和文件');
+    expect(comfy.prompts.install).toContain('遇错诊断修复');
+    expect(comfy.prompts.install).toContain('实际生成验证成功');
   });
 });
