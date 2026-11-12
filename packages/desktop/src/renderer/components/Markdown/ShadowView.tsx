@@ -82,11 +82,11 @@ export const createInitStyle = (
     gap: 4px;
     max-width: 100%;
     min-height: 22px;
-    padding: 2px 6px;
-    background: var(--bg-2);
-    color: var(--text-primary);
-    border: 1px solid transparent;
-    border-radius: 6px;
+    padding: 0;
+    background: transparent;
+    color: var(--primary);
+    border: 0;
+    border-radius: 3px;
     box-shadow: none;
     font: inherit;
     line-height: inherit;
@@ -99,16 +99,18 @@ export const createInitStyle = (
   span.markdown-local-file-link {
     cursor: default;
   }
-  .markdown-local-file-link:hover {
-    background: var(--bg-3);
-    color: var(--text-primary);
-    text-decoration: none;
+  .markdown-local-file-link:hover,
+  .markdown-local-file-link:focus-visible {
+    background: transparent;
+    color: var(--primary);
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
   }
-  .markdown-local-file-link .truncate {
+  .markdown-local-file-name {
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: start;
   }
   .markdown-local-file-line {
     padding: 0 4px;
@@ -130,6 +132,18 @@ export const createInitStyle = (
     background: transparent;
     color: var(--text-secondary);
     cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+  .markdown-local-file:hover .markdown-local-file-copy,
+  .markdown-local-file:focus-within .markdown-local-file-copy {
+    opacity: 1;
+  }
+  @media (hover: none) {
+    .markdown-local-file-copy { opacity: 1; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .markdown-local-file-copy, .markdown-local-file-link { transition: none; }
   }
   .markdown-local-file-copy:hover {
     background: var(--bg-3);

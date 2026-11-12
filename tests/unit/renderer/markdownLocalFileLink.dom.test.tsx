@@ -81,14 +81,16 @@ describe('MarkdownView local file links', () => {
         <MarkdownView onLocalFileLink={onOpen}>{'[下载繁體預算](./交付/經費預算表.docx)'}</MarkdownView>
       </ConversationProvider>
     );
-    fireEvent.click(screen.getByRole('button', { name: '下载繁體預算' }));
+    expect(screen.queryByText('下载繁體預算')).not.toBeInTheDocument();
+    expect(screen.getByTestId('file-type-icon-file')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '經費預算表.docx' }));
     expect(onOpen).toHaveBeenCalledWith('C:/项目/活动/交付/經費預算表.docx', expect.any(Object));
   });
 
   it('keeps encoded hash characters and file URL hosts in clickable deliveries', () => {
     const onOpen = vi.fn();
     render(<MarkdownView onLocalFileLink={onOpen}>{'[预算文件](file://server/share/预算%20%231.docx)'}</MarkdownView>);
-    fireEvent.click(screen.getByRole('button', { name: '预算文件' }));
+    fireEvent.click(screen.getByRole('button', { name: '预算 #1.docx' }));
     expect(onOpen).toHaveBeenCalledWith('//server/share/预算 #1.docx', expect.any(Object));
   });
 

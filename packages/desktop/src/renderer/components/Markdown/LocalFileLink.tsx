@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 import type { LocalFileLinkReference } from './markdownUtils';
 import { buildFileStreamUrl } from '@/renderer/utils/file/fileUrls';
 import { useRenderedMedia } from './RenderedMediaContext';
+import FileTypeIcon from '@/renderer/pages/conversation/explorer/fileIcon/FileTypeIcon';
 
 /** Command-produced edits are ordinary local files, not generation jobs. */
 function LocalVideoPreview({ path, label }: { path: string; label: string }) {
@@ -73,7 +74,8 @@ const LocalFileLink: React.FC<LocalFileLinkProps> = ({ reference, children, onOp
   const renderedMedia = useRenderedMedia();
   const { filePath, line, rawReference } = reference;
   const fallbackLabel = filePath.split(/[\\/]/).pop() || filePath;
-  const label = children || fallbackLabel;
+  const isDocument = line == null && /\.(?:pdf|docx?|xlsx?|xlsm|csv|pptx?|md|markdown|zip)$/i.test(filePath);
+  const label = isDocument ? fallbackLabel : children || fallbackLabel;
   const textLabel =
     React.Children.toArray(children)
       .map((child) => (typeof child === 'string' || typeof child === 'number' ? String(child) : ''))
@@ -109,7 +111,8 @@ const LocalFileLink: React.FC<LocalFileLinkProps> = ({ reference, children, onOp
 
   const content = (
     <span className='inline-flex items-center gap-4px max-w-full'>
-      <span className='truncate'>{label}</span>
+      <FileTypeIcon node={{ name: fallbackLabel, relativePath: filePath, isFile: true }} />
+      <span className='markdown-local-file-name'>{label}</span>
       {locationLabel && (
         <span className='flex-shrink-0 rd-4px bg-fill-2 px-4px text-11px font-mono text-t-secondary'>
           {locationLabel}
@@ -120,7 +123,7 @@ const LocalFileLink: React.FC<LocalFileLinkProps> = ({ reference, children, onOp
 
   return (
     <span
-      className='inline-flex items-center gap-2px max-w-full align-baseline'
+      className='markdown-local-file inline-flex items-center gap-2px max-w-full align-baseline'
       style={
         showVideo
           ? {
@@ -142,8 +145,9 @@ const LocalFileLink: React.FC<LocalFileLinkProps> = ({ reference, children, onOp
           <Button
             type='text'
             size='mini'
-            aria-label={locationLabel ? `${textLabel} ${locationLabel}` : textLabel}
-            className='markdown-local-file-link !px-6px !py-2px !h-auto !leading-normal !align-baseline max-w-full !rd-6px'
+            aria-label={locationLabel ? `${textLabel} ${locationLabel}` : isDocument ? fallbackLabel : textLabel}
+            title={isDocument ? `${textLabel}\n${filePath}` : rawReference}
+            className='markdown-local-file-link !px-0 !py-0 !h-auto !leading-normal !align-baseline max-w-full'
             onClick={handleOpen}
           >
             {content}
