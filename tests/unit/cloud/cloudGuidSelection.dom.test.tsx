@@ -2,13 +2,22 @@ import React from 'react';
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { IProvider } from '@/common/config/storage';
-const f = vi.hoisted(() => ({ providers: [] as IProvider[], scope: 'a:1', connected: true }));
+const f = vi.hoisted(() => ({
+  providers: [] as IProvider[],
+  scope: 'a:1',
+  connected: true,
+  refreshCatalog: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
 vi.mock('@/renderer/hooks/agent/useGoogleAuthModels', () => ({ useGoogleAuthModels: () => ({ isGoogleAuth: false }) }));
 vi.mock('@/renderer/hooks/agent/useModelProviderList', () => ({ useProvidersQuery: () => ({ data: f.providers }) }));
 vi.mock('@/renderer/components/settings/SettingsModal/CloudAccount/Provider', () => ({
-  useOptionalCloudAccount: () => ({ scope: f.scope, session: { state: f.connected ? 'connected' : 'disconnected' } }),
+  useOptionalCloudAccount: () => ({
+    scope: f.scope,
+    session: { state: f.connected ? 'connected' : 'disconnected' },
+    refreshCatalog: f.refreshCatalog,
+  }),
 }));
 import { useGuidModelSelection } from '@/renderer/pages/guid/hooks/useGuidModelSelection';
 import GuidModelSelector from '@/renderer/pages/guid/components/GuidModelSelector';

@@ -5,6 +5,7 @@
  */
 
 import { CloudAccountEntry } from '@/renderer/components/settings/SettingsModal/CloudAccount/Entry';
+import { useOptionalCloudAccount } from '@/renderer/components/settings/SettingsModal/CloudAccount/Provider';
 
 import type { AionrsModelSelection } from './useAionrsModelSelection';
 import type { AcpConfigSetStatus, AcpDerivedOption } from '@/renderer/hooks/agent/useAcpConfigOptions';
@@ -39,6 +40,7 @@ const AionrsModelSelector: React.FC<{
   onSetThoughtLevel?: (optionId: string, value: string) => Promise<unknown>;
 }> = ({ selection, disabled = false, thoughtLevel = null, onSetThoughtLevel }) => {
   const { t } = useTranslation();
+  const cloud = useOptionalCloudAccount();
   const { isOpen: isPreviewOpen } = usePreviewContext();
   const layout = useLayoutContext();
   const compact = isPreviewOpen || layout?.isMobile;
@@ -115,6 +117,9 @@ const AionrsModelSelector: React.FC<{
   return (
     <Dropdown
       trigger='click'
+      onVisibleChange={(visible) => {
+        if (visible) void cloud?.refreshCatalog(false);
+      }}
       // Mobile: portal the popup to <body> so it escapes the titlebar slot.
       // Desktop: leave default container so click events reach Menu.Item normally.
       {...(isMobileHeaderCompact ? { getPopupContainer: () => document.body } : {})}

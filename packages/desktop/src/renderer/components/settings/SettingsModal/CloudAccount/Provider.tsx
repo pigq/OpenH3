@@ -13,7 +13,12 @@ import type { IProvider } from '@/common/config/storage';
 import { useAuth } from '@/renderer/hooks/context/AuthContext';
 import { resolveCurrentUserId } from '@/renderer/hooks/system/currentUserId';
 import { requestCloudAccount } from './transport';
-import { ACCOUNT_FOCUS_THROTTLE, onAccountActivity, SETTLEMENT_RETRY_DELAYS } from './Panels/freshness';
+import {
+  ACCOUNT_FOCUS_THROTTLE,
+  MODEL_CATALOG_REFRESH_SPACING,
+  onAccountActivity,
+  SETTLEMENT_RETRY_DELAYS,
+} from './Panels/freshness';
 import { useManagedTurnSettlement } from './Panels/useManagedTurnSettlement';
 
 type View = 'login' | 'register' | 'recovery' | 'proof' | 'reset';
@@ -57,7 +62,7 @@ type Lifecycle = State & {
   /** Re-read wallet and usage a bounded number of times while late debits settle. */
   settle: () => void;
   settling: boolean;
-  refreshCatalog: () => Promise<void>;
+  refreshCatalog: (deliberate?: boolean) => Promise<void>;
   deviceTarget?: { id: string; label: string; current: boolean };
   chooseDevice: (target: { id: string; label: string; current: boolean }) => void;
   available: boolean;
@@ -94,6 +99,7 @@ export const CloudAccountProvider: React.FC<React.PropsWithChildren> = ({ childr
   const fence = useRef({ owner, epoch: 0 });
   const readPublication = useRef(0);
   const catalogFlight = useRef<ReadScope | undefined>(undefined);
+  const catalogRead = useRef<(ReadScope & { nextAt: number }) | undefined>(undefined);
   const [deviceTarget, setDeviceTarget] = useState<{
     target: NonNullable<Lifecycle['deviceTarget']>;
     ticket: Ticket;
@@ -397,8 +403,18 @@ export const CloudAccountProvider: React.FC<React.PropsWithChildren> = ({ childr
       if (connected?.state === 'connected') {
         // Catalog admission is Core-owned. Revalidate the existing providers key
         // after success AND failure because failure clears admission as well.
+        catalogRead.current = {
+          ticket,
+          publication: readPublication.current,
+          nextAt: Date.now() + MODEL_CATALOG_REFRESH_SPACING,
+        };
         const catalog = await requestCloudAccount({ operation: 'models' });
         if (!matches(ticket)) return;
+        if (catalog.success === false && catalog.code === 'CLOUD_RATE_LIMITED' && catalogRead.current)
+          catalogRead.current.nextAt = Math.max(
+            catalogRead.current.nextAt,
+            Date.now() + (catalog.retry_after ?? catalog.details?.retry_after ?? 60) * 1000
+          );
         await mutate('providers');
         if (!matches(ticket)) return;
         setState((previous) => ({
@@ -574,15 +590,29 @@ export const CloudAccountProvider: React.FC<React.PropsWithChildren> = ({ childr
     },
     settle,
     settling,
-    refreshCatalog: async () => {
+    refreshCatalog: async (deliberate = true) => {
+      if (current.session?.state !== 'connected') return;
       if (current.catalogPending || (catalogFlight.current && matchesRead(catalogFlight.current))) return;
       const original = { ticket: { owner, epoch: renderEpoch }, publication };
       if (!matchesRead(original)) return;
+      if (
+        !deliberate &&
+        catalogRead.current &&
+        matchesRead(catalogRead.current) &&
+        Date.now() < catalogRead.current.nextAt
+      )
+        return;
       catalogFlight.current = original;
+      catalogRead.current = { ...original, nextAt: Date.now() + MODEL_CATALOG_REFRESH_SPACING };
       setState((previous) => ({ ...previous, catalogPending: true }));
       const result = await readOwned({ operation: 'models' });
       if (catalogFlight.current === original) catalogFlight.current = undefined;
       if (!matchesRead(original)) return;
+      if (result?.success === false && result.code === 'CLOUD_RATE_LIMITED' && catalogRead.current)
+        catalogRead.current.nextAt = Math.max(
+          catalogRead.current.nextAt,
+          Date.now() + (result.retry_after ?? result.details?.retry_after ?? 60) * 1000
+        );
       setState((previous) => ({
         ...previous,
         catalogPending: false,

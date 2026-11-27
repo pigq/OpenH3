@@ -155,7 +155,10 @@ export default function CreationControls({
       <Dropdown
         trigger='click'
         popupVisible={open}
-        onVisibleChange={setOpen}
+        onVisibleChange={(visible) => {
+          setOpen(visible);
+          if (visible && selection.source === 'cloud') accountMedia?.refresh(false);
+        }}
         position='bl'
         triggerProps={{ autoAlignPopupWidth: false, popupStyle: { maxWidth: 'calc(100vw - 24px)' } }}
         droplist={
@@ -186,11 +189,7 @@ export default function CreationControls({
             )}
             {accountMedia?.catalogState && (
               <Menu.ItemGroup key='account' title={t('settings.cloudAccount.title')}>
-                {accountMedia.catalogState === 'unavailable' ? (
-                  <Menu.Item key='retry-account' onClick={accountMedia.refresh}>
-                    {t('guid.creation.retryAccountModels')}
-                  </Menu.Item>
-                ) : accountMedia.catalogState !== 'available' ? (
+                {accountMedia.catalogState !== 'available' && accountMedia.catalogState !== 'unavailable' ? (
                   <Menu.Item key='account-status' disabled>
                     {t(
                       accountMedia.catalogState === 'empty'
@@ -200,6 +199,15 @@ export default function CreationControls({
                   </Menu.Item>
                 ) : null}
                 {models.filter((item) => item.id.startsWith('account-media:')).map(renderModel)}
+                {accountMedia.catalogState !== 'checking' && (
+                  <Menu.Item key='refresh-account' onClick={() => accountMedia.refresh()}>
+                    {t(
+                      accountMedia.catalogState === 'unavailable'
+                        ? 'guid.creation.retryAccountModels'
+                        : 'settings.cloudAccount.refreshCatalog'
+                    )}
+                  </Menu.Item>
+                )}
               </Menu.ItemGroup>
             )}
             {models.filter((item) => !item.id.startsWith('account-media:')).map(renderModel)}

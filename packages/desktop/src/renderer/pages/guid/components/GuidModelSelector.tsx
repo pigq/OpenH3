@@ -13,6 +13,7 @@ import { getAvailableModels } from '../utils/modelUtils';
 import { Button, Dropdown, Menu, Tooltip } from '@arco-design/web-react';
 import { Brain, Down, Plus } from '@icon-park/react';
 import React from 'react';
+import { useOptionalCloudAccount } from '@/renderer/components/settings/SettingsModal/CloudAccount/Provider';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -56,6 +57,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
 }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const cloud = useOptionalCloudAccount();
   const defaultModelLabel = t('common.defaultModel');
 
   // 过滤掉被禁用的 provider
@@ -143,6 +145,9 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
     return (
       <Dropdown
         trigger='hover'
+        onVisibleChange={(visible) => {
+          if (visible) void cloud?.refreshCatalog(false);
+        }}
         droplist={
           <Menu selectedKeys={currentProviderModelId ? [currentProviderModelId] : []}>
             {providerModelGroups.length === 0

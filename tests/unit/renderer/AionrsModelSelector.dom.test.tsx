@@ -8,9 +8,18 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import AionrsModelSelector from '@/renderer/pages/conversation/platforms/aionrs/AionrsModelSelector';
+import GoogleModelSelector from '@/renderer/pages/conversation/platforms/gemini/GoogleModelSelector';
 import type { IProvider, TProviderWithModel } from '@/common/config/storage';
 import type { AcpDerivedOption } from '@/renderer/hooks/agent/useAcpConfigOptions';
 import type { AionrsModelSelection } from '@/renderer/pages/conversation/platforms/aionrs/useAionrsModelSelection';
+
+const cloud = vi.hoisted(() => ({
+  session: { state: 'connected' },
+  refreshCatalog: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('@/renderer/components/settings/SettingsModal/CloudAccount/Provider', () => ({
+  useOptionalCloudAccount: () => cloud,
+}));
 
 const provider: IProvider = {
   id: 'openai',
@@ -132,8 +141,16 @@ vi.mock('@arco-design/web-react', () => {
         {children}
       </button>
     ),
-    Dropdown: ({ children, droplist }: { children?: React.ReactNode; droplist?: React.ReactNode }) => (
-      <div>
+    Dropdown: ({
+      children,
+      droplist,
+      onVisibleChange,
+    }: {
+      children?: React.ReactNode;
+      droplist?: React.ReactNode;
+      onVisibleChange?: (visible: boolean) => void;
+    }) => (
+      <div onClick={() => onVisibleChange?.(true)}>
         {children}
         {droplist}
       </div>
@@ -146,6 +163,21 @@ vi.mock('@arco-design/web-react', () => {
 describe('AionrsModelSelector runtime options', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('refreshes the managed catalog automatically when opening the conversation picker', () => {
+    render(<AionrsModelSelector selection={makeSelection()} />);
+    expect(cloud.refreshCatalog).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('aionrs-model-selector'));
+    expect(cloud.refreshCatalog).toHaveBeenCalledWith(false);
+  });
+
+  it('refreshes the same managed catalog from the legacy provider picker', () => {
+    render(
+      <GoogleModelSelector selection={{ ...makeSelection(), formatModelLabel: (_provider, model) => model ?? '' }} />
+    );
+    fireEvent.click(screen.getByTestId('chat-model-selector'));
+    expect(cloud.refreshCatalog).toHaveBeenCalledWith(false);
   });
 
   it('shows the current model and thought level in the header pill', () => {

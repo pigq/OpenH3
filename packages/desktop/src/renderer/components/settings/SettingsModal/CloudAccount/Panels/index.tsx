@@ -118,7 +118,7 @@ export function CatalogPanel() {
           </Details>
         </div>
       ))}
-      <Button size='small' onClick={catalog.refresh}>
+      <Button size='small' onClick={() => void catalog.refresh()}>
         {t('settings.cloudAccount.refreshCatalog')}
       </Button>
     </Panel>

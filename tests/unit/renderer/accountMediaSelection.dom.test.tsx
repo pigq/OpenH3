@@ -75,4 +75,73 @@ describe('account media selection for ordinary chats', () => {
     expect(api.setDefault).toHaveBeenCalledWith('image', undefined);
     expect(api.read).not.toHaveBeenCalled();
   });
+  it.each(['image', 'video'] as const)(
+    'refreshes a changed %s catalog on entry without repeated reads',
+    async (kind) => {
+      let now = 1700000000000;
+      const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+      try {
+        const model = {
+          ...fixture,
+          kind,
+          capabilities: [kind === 'image' ? 'text-to-image' : 'text-to-video'],
+        };
+        api.read.mockResolvedValue(reply('u1', []));
+        const { result } = renderHook(() => useAccountMedia(true, true, kind), { wrapper });
+        await waitFor(() => expect(result.current.catalogState).toBe('empty'));
+        act(() => result.current.refresh(false));
+        expect(api.read).toHaveBeenCalledTimes(1);
+        now += 30001;
+        api.read.mockResolvedValue(reply('u1', [model]));
+        act(() => {
+          result.current.refresh(false);
+          result.current.refresh(false);
+        });
+        await waitFor(() => expect(result.current.catalogState).toBe('available'));
+        expect(result.current.catalog?.models).toEqual([model]);
+        expect(api.read).toHaveBeenCalledTimes(2);
+        api.read.mockResolvedValue(reply('u1', []));
+        act(() => result.current.refresh());
+        await waitFor(() => expect(result.current.catalogState).toBe('empty'));
+        expect(api.read).toHaveBeenCalledTimes(3);
+        expect(api.setDefault).not.toHaveBeenCalled();
+      } finally {
+        clock.mockRestore();
+      }
+    }
+  );
+  it('keeps a delayed catalog from replacing the next account catalog', async () => {
+    let finish!: (value: ReturnType<typeof reply>) => void;
+    api.read.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    const { result, rerender } = renderHook(() => useAccountMedia(true, true, 'image'), { wrapper });
+    await waitFor(() => expect(api.read).toHaveBeenCalledOnce());
+    api.accountId = 'u2';
+    api.read.mockResolvedValue(reply('u2', [fixture]));
+    rerender();
+    await waitFor(() => expect(result.current.catalog?.account_id).toBe('u2'));
+    await act(async () => finish(reply('u1', [])));
+    expect(result.current.catalog?.account_id).toBe('u2');
+    expect(result.current.catalogState).toBe('available');
+  });
+  it.each(['empty', 'rate-limited'] as const)(
+    'shares %s catalog freshness across new-chat navigation',
+    async (state) => {
+      api.read.mockResolvedValue(
+        state === 'empty' ? reply('u1', []) : { success: false, code: 'CLOUD_RATE_LIMITED', retry_after: 90 }
+      );
+      const cache = new Map();
+      const sharedWrapper = ({ children }: React.PropsWithChildren) => (
+        <SWRConfig value={{ provider: () => cache }}>{children}</SWRConfig>
+      );
+      const first = renderHook(() => useAccountMedia(true, true, 'image'), { wrapper: sharedWrapper });
+      const expected = state === 'empty' ? 'empty' : 'unavailable';
+      await waitFor(() => expect(first.result.current.catalogState).toBe(expected));
+      first.unmount();
+      const second = renderHook(() => useAccountMedia(true, true, 'image'), { wrapper: sharedWrapper });
+      await waitFor(() => expect(second.result.current.catalogState).toBe(expected));
+      expect(api.read).toHaveBeenCalledTimes(1);
+      act(() => second.result.current.refresh(false));
+      expect(api.read).toHaveBeenCalledTimes(1);
+    }
+  );
 });

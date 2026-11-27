@@ -11,7 +11,10 @@ import GuidActionRow from '@/renderer/pages/guid/components/GuidActionRow';
 import type { IMcpServer } from '@/common/config/storage';
 import { ipcBridge } from '@/common';
 
-const environment = vi.hoisted(() => ({ isMobile: false, isDesktop: true }));
+const environment = vi.hoisted(() => ({ isMobile: false, isDesktop: true, refreshCatalog: vi.fn() }));
+vi.mock('@/renderer/components/settings/SettingsModal/CloudAccount/Provider', () => ({
+  useOptionalCloudAccount: () => ({ refreshCatalog: environment.refreshCatalog }),
+}));
 
 vi.mock('@/common', () => ({
   ipcBridge: {
@@ -106,6 +109,7 @@ vi.mock('@arco-design/web-react', () => {
     Button: ({
       children,
       disabled,
+      loading: _loading,
       onClick,
       ...props
     }: {
@@ -184,6 +188,14 @@ describe('GuidActionRow skill/MCP submenu search', () => {
     vi.clearAllMocks();
     environment.isMobile = false;
     environment.isDesktop = true;
+  });
+
+  it('refreshes provider choices when opening the mobile model sheet', () => {
+    environment.isMobile = true;
+    renderActionRow({ isGeminiMode: true });
+    expect(environment.refreshCatalog).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('file-upload-btn'));
+    expect(environment.refreshCatalog).toHaveBeenCalledWith(false);
   });
 
   it('offers both host files and device upload in the mobile WebUI action sheet', () => {

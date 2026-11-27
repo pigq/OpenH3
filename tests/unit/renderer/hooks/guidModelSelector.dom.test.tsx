@@ -9,6 +9,11 @@ import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import GuidModelSelector from '@/renderer/pages/guid/components/GuidModelSelector';
 
+const cloud = vi.hoisted(() => ({ refreshCatalog: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('@/renderer/components/settings/SettingsModal/CloudAccount/Provider', () => ({
+  useOptionalCloudAccount: () => cloud,
+}));
+
 vi.mock('@/renderer/hooks/agent/useModelProviderList', () => ({
   useProvidersQuery: () => ({ data: [] }),
 }));
@@ -91,8 +96,16 @@ vi.mock('@arco-design/web-react', () => {
         {children}
       </button>
     ),
-    Dropdown: ({ children, droplist }: { children?: React.ReactNode; droplist?: React.ReactNode }) => (
-      <div>
+    Dropdown: ({
+      children,
+      droplist,
+      onVisibleChange,
+    }: {
+      children?: React.ReactNode;
+      droplist?: React.ReactNode;
+      onVisibleChange?: (visible: boolean) => void;
+    }) => (
+      <div onMouseEnter={() => onVisibleChange?.(true)}>
         {children}
         {droplist}
       </div>
@@ -105,6 +118,23 @@ vi.mock('@arco-design/web-react', () => {
 });
 
 describe('GuidModelSelector', () => {
+  it('refreshes the managed catalog automatically when opening the provider model picker', () => {
+    cloud.refreshCatalog.mockClear();
+    render(
+      <GuidModelSelector
+        isGeminiMode
+        modelList={[]}
+        current_model={undefined}
+        setCurrentModel={vi.fn()}
+        currentAcpCachedModelInfo={null}
+        selectedAcpModel={null}
+        setSelectedAcpModel={vi.fn()}
+      />
+    );
+    expect(cloud.refreshCatalog).not.toHaveBeenCalled();
+    fireEvent.mouseEnter(screen.getByTestId('guid-model-selector'));
+    expect(cloud.refreshCatalog).toHaveBeenCalledWith(false);
+  });
   const thoughtLevelOption = {
     id: 'reasoning_effort',
     category: 'thought_level',

@@ -7,6 +7,9 @@ export const SETTLEMENT_RETRY_DELAYS = [5000, 20000] as const;
 /** Focus revalidation for account reads, throttled so window switching cannot flood the gateway. */
 export const ACCOUNT_FOCUS_THROTTLE = 30000;
 
+/** Bound automatic model-directory reads when users reopen a selector. */
+export const MODEL_CATALOG_REFRESH_SPACING = 30000;
+
 /** The first usage page every account view shares, so the status bar and ledger reuse one read. */
 export const DEFAULT_USAGE_INPUT = { page: 1, page_size: 20 } as const;
 

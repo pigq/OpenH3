@@ -18,6 +18,7 @@ import type {
 import type { AgentModeOption } from '@/renderer/utils/model/agentTypes';
 import type { AgentRuntimeDerivedOption } from '@/renderer/utils/model/agentRuntimeCatalog';
 import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
+import { useOptionalCloudAccount } from '@/renderer/components/settings/SettingsModal/CloudAccount/Provider';
 import { getCleanFileNames, FileService } from '@/renderer/services/FileService';
 import { iconColors } from '@/renderer/styles/colors';
 import { isElectronDesktop } from '@/renderer/utils/platform';
@@ -160,6 +161,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
   const isMobile = layout?.isMobile ?? false;
   const [isPlusDropdownOpen, setIsPlusDropdownOpen] = useState(false);
   const [isSheetOpen, setIsSheetOpen] = useState(false);
+  const cloud = useOptionalCloudAccount();
   const [skillQuery, setSkillQuery] = useState('');
   const [mcpQuery, setMcpQuery] = useState('');
 
@@ -595,7 +597,10 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
                 loading={uploading}
                 disabled={uploading}
                 data-testid='file-upload-btn'
-                onClick={() => setIsSheetOpen(true)}
+                onClick={() => {
+                  setIsSheetOpen(true);
+                  if (isGeminiMode) void cloud?.refreshCatalog(false);
+                }}
               />
               {files.length > 0 && (
                 <Tooltip

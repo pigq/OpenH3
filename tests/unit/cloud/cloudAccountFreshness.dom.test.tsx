@@ -1,15 +1,21 @@
 import React from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { SWRConfig } from 'swr';
-import type { CloudAccountRequest, CloudAccountResponse, CloudWallet } from '@/common/types/platform/cloudAccount';
+import type {
+  CloudAccountRequest,
+  CloudAccountResponse,
+  CloudModels,
+  CloudWallet,
+} from '@/common/types/platform/cloudAccount';
 const f = vi.hoisted(() => ({
+  owner: 'owner',
   request: vi.fn<(r: CloudAccountRequest) => Promise<CloudAccountResponse>>(),
   turn: undefined as undefined | ((event: { session_id: string; turn_id: string }) => void),
   conversation: vi.fn(),
 }));
 vi.mock('@/renderer/hooks/context/AuthContext', () => ({
-  useAuth: () => ({ status: 'authenticated', user: { id: 'owner' } }),
+  useAuth: () => ({ status: 'authenticated', user: { id: f.owner } }),
 }));
 vi.mock('@/renderer/components/settings/SettingsModal/CloudAccount/transport', () => ({
   requestCloudAccount: f.request,
@@ -32,7 +38,10 @@ vi.mock('@/common', () => ({
     },
   },
 }));
-import { CloudAccountProvider } from '@/renderer/components/settings/SettingsModal/CloudAccount/Provider';
+import {
+  CloudAccountProvider,
+  useCloudAccount,
+} from '@/renderer/components/settings/SettingsModal/CloudAccount/Provider';
 import CloudAccount from '@/renderer/components/settings/SettingsModal/CloudAccount';
 import { formatAccountTime } from '@/renderer/components/settings/SettingsModal/CloudAccount/Panels/format';
 import { signalAccountActivity } from '@/renderer/components/settings/SettingsModal/CloudAccount/Panels/freshness';
@@ -124,6 +133,7 @@ async function advance(ms: number) {
   });
 }
 beforeEach(() => {
+  f.owner = 'owner';
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
     value: vi.fn(() => ({ matches: false, addListener: vi.fn(), removeListener: vi.fn() })),
@@ -137,6 +147,86 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+});
+it('refreshes model catalogs on entry within one scoped time limit, while allowing a deliberate refresh', async () => {
+  let now = 1700000000000;
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    let names = ['first-model'];
+    const catalog = (): CloudModels => ({
+      status: 'available',
+      quote_semantics: 'observed_rules_not_frozen_final_charge',
+      models: names.map((name) => ({
+        model_id: name,
+        display_name: name,
+        provider: 'official',
+        purpose: 'text',
+        protocol: 'Responses',
+        input_capabilities: ['text'],
+        supports_tools: true,
+        context_limit: 8000,
+        max_output_tokens: 1000,
+        compatibility_version: 'v1',
+        evidence: 'gateway',
+        quotes: [
+          {
+            group: 'default',
+            kind: 'request',
+            unit: 'USD_per_request',
+            group_ratio: '1',
+            per_request: '0',
+            cache_write_mode: 'none',
+            version: 'v1',
+            quota_per_usd: '500000',
+          },
+        ],
+      })),
+    });
+    f.request.mockImplementation(async (r) =>
+      r.operation === 'models' ? { success: true, data: catalog() } : response(r)
+    );
+    const wrapper = ({ children }: React.PropsWithChildren) => (
+      <SWRConfig value={{ provider: () => new Map(), shouldRetryOnError: false }}>
+        <CloudAccountProvider>{children}</CloudAccountProvider>
+      </SWRConfig>
+    );
+    const { result, rerender } = renderHook(() => useCloudAccount(), { wrapper });
+    await waitFor(() => expect(result.current.session?.state).toBe('connected'));
+    await act(async () => result.current.refreshCatalog(false));
+    expect(reads('models')).toBe(1);
+    expect(result.current.catalog?.models.map((model) => model.model_id)).toEqual(['first-model']);
+    names = ['new-model'];
+    await act(async () => result.current.refreshCatalog(false));
+    expect(reads('models')).toBe(1);
+    now += 30001;
+    await act(async () => {
+      await Promise.all([result.current.refreshCatalog(false), result.current.refreshCatalog(false)]);
+    });
+    expect(reads('models')).toBe(2);
+    expect(result.current.catalog?.models.map((model) => model.model_id)).toEqual(['new-model']);
+    names = [];
+    await act(async () => result.current.refreshCatalog());
+    expect(reads('models')).toBe(3);
+    expect(result.current.catalog?.models).toEqual([]);
+    f.request.mockImplementation(async (r) =>
+      r.operation === 'models'
+        ? { success: false, code: 'CLOUD_RATE_LIMITED', error: 'limited', retry_after: 90 }
+        : response(r)
+    );
+    await act(async () => result.current.refreshCatalog());
+    expect(reads('models')).toBe(4);
+    now += 30001;
+    await act(async () => result.current.refreshCatalog(false));
+    expect(reads('models')).toBe(4);
+    f.request.mockImplementation(async (r) => response(r));
+    f.owner = 'other-owner';
+    rerender();
+    await waitFor(() => expect(result.current.session?.state).toBe('connected'));
+    await act(async () => result.current.refreshCatalog(false));
+    expect(reads('models')).toBe(5);
+  } finally {
+    clock.mockRestore();
+  }
 });
 it('shows one shared read time and a short recent ledger, with no manual refresh while reads are healthy', async () => {
   mount();

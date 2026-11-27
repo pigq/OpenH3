@@ -53,6 +53,7 @@ describe('creation model selection', () => {
       available: false,
     };
     const setDefault = vi.fn();
+    const refresh = vi.fn();
     render(
       <CreationControls
         selection={{ kind: 'video', source: 'cloud', modelIds: {} }}
@@ -66,13 +67,16 @@ describe('creation model selection', () => {
           catalogState: 'empty',
           setDefault,
           defaultModel: undefined,
-          refresh: vi.fn(),
+          refresh,
         }}
       />
     );
     fireEvent.click(screen.getByTestId('creation-model-selector'));
     expect(await screen.findByText('guid.creation.noAccountModels')).toBeVisible();
     expect(screen.getByText('settings.cloudAccount.title')).toBeVisible();
+    expect(refresh).toHaveBeenCalledWith(false);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'settings.cloudAccount.refreshCatalog' }));
+    expect(refresh).toHaveBeenLastCalledWith();
     expect(setDefault).not.toHaveBeenCalled();
   });
   it('saves the account default only on an explicit model selection and exposes first-frame support', async () => {
@@ -86,6 +90,7 @@ describe('creation model selection', () => {
       capabilities: ['image-to-video'],
     };
     const setDefault = vi.fn().mockResolvedValue(undefined);
+    const refresh = vi.fn();
     const onChange = vi.fn();
     render(
       <CreationControls
@@ -100,12 +105,15 @@ describe('creation model selection', () => {
           catalogState: 'available',
           setDefault,
           defaultModel: undefined,
-          refresh: vi.fn(),
+          refresh,
         }}
       />
     );
     fireEvent.click(screen.getByTestId('creation-model-selector'));
     const choice = await screen.findByRole('menuitem', { name: /Clip.*guid.comfy.workflows.tasks.image-to-video/ });
+    expect(refresh).toHaveBeenCalledWith(false);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'settings.cloudAccount.refreshCatalog' }));
+    expect(refresh).toHaveBeenLastCalledWith();
     expect(setDefault).not.toHaveBeenCalled();
     fireEvent.click(choice);
     await waitFor(() => expect(onChange).toHaveBeenCalledOnce());

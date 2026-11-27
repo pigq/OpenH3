@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Message } from '@arco-design/web-react';
 import { BackendHttpError } from '@/common/adapter/httpBridge';
@@ -12,7 +12,10 @@ import { beginComfySelectionChange } from '@/renderer/pages/conversation/runtime
 import { templateSnapshotFixture } from '../../contentCatalog/galleryFixture';
 const bindComfy = vi.fn().mockResolvedValue({ ok: true });
 const requestInstall = vi.fn();
-const mobile = vi.hoisted(() => ({ enabled: false }));
+const mobile = vi.hoisted(() => ({ enabled: false, refreshCatalog: vi.fn() }));
+vi.mock('@/renderer/components/settings/SettingsModal/CloudAccount/Provider', () => ({
+  useOptionalCloudAccount: () => ({ refreshCatalog: mobile.refreshCatalog }),
+}));
 vi.mock('@/common/chat/document/creation/comfyApi', () => ({
   comfyApi: {
     bind: (...args: unknown[]) => bindComfy(...args),
@@ -85,6 +88,7 @@ vi.mock('@/renderer/components/chat/SendBox', () => ({
     onSelectedSessionsChange,
     crossSessionEnabled,
     isTeamConversation,
+    onMobilePlusClick,
   }: {
     onSend: (message: string) => Promise<void>;
     onChange?: (value: string) => void;
@@ -101,6 +105,7 @@ vi.mock('@/renderer/components/chat/SendBox', () => ({
     onSelectedSessionsChange?: (sessions: Array<{ id: string }>) => void;
     crossSessionEnabled?: boolean;
     isTeamConversation?: boolean;
+    onMobilePlusClick?: () => void;
   }) => {
     sendBoxPropsSpy({
       active,
@@ -116,6 +121,11 @@ vi.mock('@/renderer/components/chat/SendBox', () => ({
     });
     return (
       <div>
+        {onMobilePlusClick && (
+          <button type='button' onClick={onMobilePlusClick}>
+            mobile model sheet
+          </button>
+        )}
         {rightTools}
         {sendButtonPrefix}
         {topRightOverlay}
@@ -368,6 +378,8 @@ describe('AionrsSendBox', () => {
     );
     expect(screen.getByText('settings.cloudAccount.official · Managed')).toBeInTheDocument();
     expect(screen.getByText('settings.cloudAccount.byok · Own')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'mobile model sheet' }));
+    expect(mobile.refreshCatalog).toHaveBeenCalledWith(false);
     expect(sendMessageInvokeMock).not.toHaveBeenCalled();
   });
 

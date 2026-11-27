@@ -1,6 +1,7 @@
 import type { GoogleModelSelection } from '@/renderer/pages/conversation/platforms/gemini/useGoogleModelSelection';
 import { usePreviewContext } from '@/renderer/pages/conversation/Preview';
 import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
+import { useOptionalCloudAccount } from '@/renderer/components/settings/SettingsModal/CloudAccount/Provider';
 import { getModelDisplayLabel } from '@/renderer/utils/model/agentLogo';
 import { iconColors } from '@/renderer/styles/colors';
 import { Button, Dropdown, Menu, Tooltip } from '@arco-design/web-react';
@@ -17,6 +18,7 @@ const GoogleModelSelector: React.FC<{
   variant?: 'header' | 'settings';
 }> = ({ selection, disabled = false, label: customLabel, variant = 'header' }) => {
   const { t } = useTranslation();
+  const cloud = useOptionalCloudAccount();
   const { isOpen: isPreviewOpen } = usePreviewContext();
   const layout = useLayoutContext();
   const compact = variant === 'header' && (isPreviewOpen || layout?.isMobile);
@@ -100,6 +102,9 @@ const GoogleModelSelector: React.FC<{
   return (
     <Dropdown
       trigger='click'
+      onVisibleChange={(visible) => {
+        if (visible) void cloud?.refreshCatalog(false);
+      }}
       position={variant === 'settings' ? 'br' : undefined}
       droplist={
         <Menu>
