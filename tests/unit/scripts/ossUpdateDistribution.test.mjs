@@ -32,28 +32,48 @@ cmd="$1"; shift
 if [[ "$cmd" == ls ]]; then
   prefix="\${1#oss://bohuauhd/}"
   if [[ -d "$MOCK_ROOT/remote/$prefix" ]]; then
-    find "$MOCK_ROOT/remote/$prefix" -type f ! -name '*.digest' | while IFS= read -r file; do
+    find "$MOCK_ROOT/remote/$prefix" -type f ! -name '*.digest' ! -name '*.headers' | while IFS= read -r file; do
       printf 'oss://bohuauhd/%s\\n' "\${file#"$MOCK_ROOT/remote/"}"
     done
   fi
   exit 0
 fi
-[[ "$cmd" == cp ]]
-source="$1"; destination="\${2#oss://bohuauhd/}"; shift 2
-digest=""; force=false
+source=""; destination="\${1#oss://bohuauhd/}"
+if [[ "$cmd" == cp ]]; then source="$1"; destination="\${2#oss://bohuauhd/}"; shift; fi
+[[ "$cmd" == cp || "$cmd" == set-props ]]
+shift
+digest=""; force=false; content_type=""; disposition=""; cache=""; directive=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --metadata) digest="\${2#sha256=}"; shift 2 ;;
-    --cache-control|--content-type) shift 2 ;;
+    --content-type) content_type="$2"; shift 2 ;;
+    --content-disposition) disposition="$2"; shift 2 ;;
+    --cache-control) cache="$2"; shift 2 ;;
+    --metadata-directive) directive="$2"; shift 2 ;;
     --force) force=true; shift ;;
     *) echo "Unsupported ossutil v2 option: $1" >&2; exit 2 ;;
   esac
 done
 [[ "$destination" != "\${MOCK_FAIL_OBJECT:-}" ]] || exit 7
 target="$MOCK_ROOT/remote/$destination"
+if [[ "$cmd" == set-props ]]; then
+  [[ -f "$target" && "$force" == true ]] || exit 9
+  [[ "$destination" != "\${MOCK_FAIL_METADATA_OBJECT:-}" ]] || exit 10
+  if [[ "$directive" != update ]]; then : > "$target.headers"; fi
+  touch "$target.headers"
+  awk 'tolower($0) !~ /^content-type:|^content-disposition:/' "$target.headers" > "$target.headers.tmp"
+  mv "$target.headers.tmp" "$target.headers"
+  printf 'Content-Type: %s\\nContent-Disposition: %s\\n' "$content_type" "$disposition" >> "$target.headers"
+  if [[ "$destination" == "\${MOCK_CORRUPT_METADATA_OBJECT:-}" ]]; then printf X | dd of="$target" bs=1 count=1 conv=notrunc status=none; fi
+  if [[ "$destination" == "\${MOCK_CHANGE_CACHE_OBJECT:-}" ]]; then sed -i 's/^Cache-Control:.*/Cache-Control: no-store/' "$target.headers"; fi
+  printf '%s\\n' "$destination" >> "$MOCK_ROOT/metadata.log"
+  exit 0
+fi
 if [[ -f "$target" && "$force" != true ]]; then exit 8; fi
 mkdir -p "$(dirname "$target")"
 cp "$source" "$target"
+printf 'Content-Type: %s\\nContent-Disposition: %s\\nCache-Control: %s\\n' "$content_type" "$disposition" "$cache" > "$target.headers"
+if [[ "$destination" == "\${MOCK_MISSING_DISPOSITION_OBJECT:-}" ]]; then sed -i '/^Content-Disposition:/d' "$target.headers"; fi
 [[ -z "$digest" ]] || printf '%s' "$digest" > "$target.digest"
 printf '%s\\n' "$destination" >> "$MOCK_ROOT/uploads.log"
 `
@@ -63,11 +83,14 @@ printf '%s\\n' "$destination" >> "$MOCK_ROOT/uploads.log"
     `#!/usr/bin/env bash
 set -euo pipefail
 url="\${!#}"
-key="\${url#https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/}"
+key="\${url#https://openh3-download.bohuauhd.top/}"
 target="$MOCK_ROOT/remote/$key"
 if [[ " $* " == *" --head "* ]]; then
   [[ -f "$target.digest" ]] || exit 22
   printf 'x-oss-meta-sha256: %s\\r\\n' "$(cat "$target.digest")"
+  printf 'Content-Length: %s\\r\\n' "$(wc -c < "$target" | tr -d '[:space:]')"
+  printf 'x-oss-hash-crc64ecma: %s\\r\\n' "$(cksum < "$target" | awk '{print $1}')"
+  if [[ -f "$target.headers" ]]; then cat "$target.headers"; fi
   exit 0
 fi
 output=""
@@ -95,6 +118,7 @@ if [[ -f "$target" ]]; then cp "$target" "$output"; printf 200; else printf 404;
           OSS_STABLE_PREFIX: 'updates/stable',
           OSS_BUCKET_NAME: 'bohuauhd',
           OSS_ENDPOINT: 'https://oss-cn-shenzhen.aliyuncs.com',
+          OSS_PUBLIC_BASE: 'https://openh3-download.bohuauhd.top',
           VERSION: '3.0.8',
           ...extra,
         },
@@ -105,6 +129,11 @@ if [[ -f "$target" ]]; then cp "$target" "$output"; printf 200; else printf 404;
     artifact,
     bytes,
     run,
+    properties: (name) => fs.readFileSync(path.join(root, 'remote/updates/stable/3.0.8', `${name}.headers`), 'utf8'),
+    metadataUpdates: () =>
+      fs.existsSync(path.join(root, 'metadata.log'))
+        ? fs.readFileSync(path.join(root, 'metadata.log'), 'utf8').trim().split('\n')
+        : [],
     uploads: () =>
       fs.existsSync(path.join(root, 'uploads.log'))
         ? fs.readFileSync(path.join(root, 'uploads.log'), 'utf8').trim().split('\n')
@@ -118,6 +147,77 @@ afterEach(() => {
 });
 
 describe.skipIf(!bash)('OSS publication using isolated local command fixtures', () => {
+  it('sets explicit download types and attachment filenames for immutable assets', () => {
+    const f = fixture();
+    const types = {
+      [f.artifact]: 'application/vnd.microsoft.portable-executable',
+      [`${f.artifact}.blockmap`]: 'application/octet-stream',
+      'OpenH3.msi': 'application/x-msi',
+      'OpenH3.dmg': 'application/x-apple-diskimage',
+      'OpenH3.zip': 'application/zip',
+      'OpenH3.deb': 'application/vnd.debian.binary-package',
+      'OpenH3.rpm': 'application/x-rpm',
+    };
+    for (const name of Object.keys(types)) fs.writeFileSync(path.join(f.root, 'dist', name), f.bytes);
+    expect(f.run().status).toBe(0);
+    for (const [name, type] of Object.entries(types)) {
+      expect(f.properties(name)).toContain(`Content-Type: ${type}\n`);
+      expect(f.properties(name)).toContain(`Content-Disposition: attachment; filename="${name}"\n`);
+    }
+  });
+
+  it('repairs existing download headers without uploading bytes or replacing other metadata', () => {
+    const f = fixture();
+    expect(f.run().status).toBe(0);
+    const target = path.join(f.root, 'remote/updates/stable/3.0.8', f.artifact);
+    const original = fs.readFileSync(target);
+    const digest = fs.readFileSync(`${target}.digest`, 'utf8');
+    fs.writeFileSync(
+      `${target}.headers`,
+      'Content-Type: text/plain\nCache-Control: public, max-age=1234\nX-Oss-Meta-Custom: preserved\n'
+    );
+    const before = f.uploads().length;
+    const result = f.run();
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+    expect(f.uploads().slice(before)).toEqual(['updates/stable/latest.yml', 'updates/stable/releases.json']);
+    expect(f.metadataUpdates()).toEqual([`updates/stable/3.0.8/${f.artifact}`]);
+    expect(fs.readFileSync(target)).toEqual(original);
+    expect(fs.readFileSync(`${target}.digest`, 'utf8')).toBe(digest);
+    expect(f.properties(f.artifact)).toContain('Cache-Control: public, max-age=1234\n');
+    expect(f.properties(f.artifact)).toContain('X-Oss-Meta-Custom: preserved\n');
+    expect(f.properties(f.artifact)).toContain(`Content-Disposition: attachment; filename="${f.artifact}"\n`);
+  });
+
+  it.each(['failure', 'changed bytes', 'changed cache policy'])(
+    'does not publish stable metadata after a metadata repair has %s',
+    (problem) => {
+      const f = fixture();
+      expect(f.run().status).toBe(0);
+      const key = `updates/stable/3.0.8/${f.artifact}`;
+      fs.writeFileSync(
+        path.join(f.root, 'remote', `${key}.headers`),
+        'Content-Type: text/plain\nCache-Control: immutable\n'
+      );
+      const before = f.uploads().length;
+      const extra =
+        problem === 'failure'
+          ? { MOCK_FAIL_METADATA_OBJECT: key }
+          : problem === 'changed bytes'
+            ? { MOCK_CORRUPT_METADATA_OBJECT: key }
+            : { MOCK_CHANGE_CACHE_OBJECT: key };
+      expect(f.run(extra).status).not.toBe(0);
+      expect(f.uploads().slice(before)).toEqual([]);
+    }
+  );
+
+  it('refuses to publish stable metadata when an uploaded object does not serve its download headers', () => {
+    const f = fixture();
+    expect(f.run({ MOCK_MISSING_DISPOSITION_OBJECT: `updates/stable/3.0.8/${f.artifact}` }).status).not.toBe(0);
+    expect(f.uploads()).not.toContain('updates/stable/latest.yml');
+    expect(f.uploads()).not.toContain('updates/stable/releases.json');
+  });
+
   it('publishes metadata only after all immutable assets and supports exact-match reruns', () => {
     const f = fixture();
     const result = f.run();
@@ -133,6 +233,7 @@ describe.skipIf(!bash)('OSS publication using isolated local command fixtures', 
     const before = f.uploads().length;
     expect(f.run().status).toBe(0);
     expect(f.uploads().slice(before)).toEqual(['updates/stable/latest.yml', 'updates/stable/releases.json']);
+    expect(f.metadataUpdates()).toEqual([]);
   });
 
   it.each(['unexpected object', 'digest mismatch'])('rejects an immutable prefix containing %s', (problem) => {

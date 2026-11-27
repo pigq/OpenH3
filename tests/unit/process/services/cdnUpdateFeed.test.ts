@@ -31,7 +31,7 @@ describe('GitHub update feed options', () => {
 
     expect(options).toMatchObject({
       provider: 'custom',
-      url: 'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/',
+      url: 'https://openh3-download.bohuauhd.top/updates/stable/',
       updateProvider: CdnGenericProvider,
     });
   });
@@ -72,7 +72,7 @@ describe('CdnGenericProvider', () => {
     const provider = new CdnGenericProvider(
       {
         provider: 'custom',
-        url: 'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/',
+        url: 'https://openh3-download.bohuauhd.top/updates/stable/',
       },
       {} as AppUpdater,
       makeRuntimeOptions()

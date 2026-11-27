@@ -45,6 +45,12 @@ updates/stable/<version>/<installer>.blockmap
 
 示例基础 URL：`https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/`。平台清单使用 electron-builder 生成的正式元数据，不手工改写其中的版本、路径或 SHA-512。版本目录不可变；禁止用新内容覆盖已发布版本的对象。`latest*.yml` 和 `releases.json` 是可更新的索引对象。
 
+OpenH3 专用下载域名为 `openh3-download.bohuauhd.top`，直接绑定同一个深圳 OSS Bucket；不经账号网关生成限时下载链接。证书链、域名匹配和安装包 HEAD/Range 验收通过后，新客户端使用 `https://openh3-download.bohuauhd.top/updates/stable/`。原 OSS 地址继续服务既有客户端，公开索引仅包含文件名、大小和摘要，无需因域名切换改写安装包或版本索引内容。
+
+安装包使用与扩展名匹配的 Content-Type，并以 `Content-Disposition: attachment; filename="<安装包文件名>"` 明确下载方式。外部 blockmap 使用 application/octet-stream；JSON 和 YAML 索引保持可直接读取。修复既有对象的响应头时仅使用 ossutil set-props 的 metadata-directive update，不重新上传安装包；前后核对长度、CRC64、SHA-256 元数据和缓存策略，发布指针前再次验证下载响应头。
+
+新增自有下载域名时，先完成 DNS、OSS 自定义域名绑定及有效 HTTPS 证书，再验证索引、安装包 HEAD 与 Range 下载。旧 OSS 域名须继续直接提供原对象，不能重定向到新域名；已安装客户端的下载主机白名单可能拒绝新域名重定向。新客户端仅在公开入口验证通过后切换，URL 校验仍限制为精确域名及更新前缀。
+
 新增 Bucket Policy 仅对 `updates/stable/*` 对象允许匿名读取；上传角色也仅获得该前缀所需的权限。首次配置时发现 Bucket 已使用 `public-read` ACL，为避免影响现有图片业务，本次保留该 ACL。因此新增策略不意味着其他业务前缀已经私有化；若后续需要收紧现有公共读范围，应另行梳理业务依赖或迁移到独立更新 Bucket。
 
 ## 发布流程

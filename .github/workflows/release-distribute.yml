@@ -202,6 +202,7 @@ jobs:
       OSS_ENDPOINT: https://oss-cn-shenzhen.aliyuncs.com
       OSS_REGION: cn-shenzhen
       OSS_STABLE_PREFIX: updates/stable
+      OSS_PUBLIC_BASE: https://openh3-download.bohuauhd.top
       OSSUTIL_VERSION: 2.4.1
       OSSUTIL_SHA256: 57ee4c56796a40144acd6b0b96b53b4ba75e5cec09c01d8d0313c09a5524022f
     steps:
@@ -288,6 +289,7 @@ jobs:
           OSS_ENDPOINT: ${{ env.OSS_ENDPOINT }}
           OSS_BUCKET_NAME: ${{ env.OSS_BUCKET_NAME }}
           OSS_STABLE_PREFIX: ${{ env.OSS_STABLE_PREFIX }}
+          OSS_PUBLIC_BASE: ${{ env.OSS_PUBLIC_BASE }}
           VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
@@ -295,7 +297,11 @@ jobs:
           VERSION_PREFIX="${OSS_STABLE_PREFIX}/${VERSION}"
           OSS_VERSION_URI="oss://${OSS_BUCKET_NAME}/${VERSION_PREFIX}/"
           OSS_STABLE_URI="oss://${OSS_BUCKET_NAME}/${OSS_STABLE_PREFIX}/"
-          PUBLIC_BASE="https://${OSS_BUCKET_NAME}.${OSS_ENDPOINT#https://}"
+          PUBLIC_BASE="${OSS_PUBLIC_BASE:-https://${OSS_BUCKET_NAME}.${OSS_ENDPOINT#https://}}"
+
+          read_header() {
+            awk -v name="$1" 'tolower($0) ~ "^" name ":" { sub(/^[^:]*:[[:space:]]*/, ""); gsub("\r", ""); print }'
+          }
 
           # The shared concurrency group and monotonic pointer check prevent a
           # delayed older release/manual rerun from rolling stable metadata back.
@@ -345,23 +351,20 @@ jobs:
               echo "::error::Unexpected object already exists in the immutable release prefix: $object_key"
               exit 1
             fi
-            remote_digest="$(curl --fail --silent --show-error --head "$PUBLIC_BASE/$object_key" | awk 'tolower($1) == "x-oss-meta-sha256:" { gsub("\r", "", $2); print $2 }')"
+            remote_headers="$(curl --fail --silent --show-error --head "$PUBLIC_BASE/$object_key")"
+            remote_digest="$(read_header x-oss-meta-sha256 <<< "$remote_headers")"
             if [[ "$remote_digest" != "${expected_sha256[$name]}" ]]; then
               echo "::error::Existing OSS object has a missing or mismatched SHA-256: $object_key"
               exit 1
             fi
-            present["$name"]=1
+            present["$name"]="$remote_headers"
           done <<< "$remote_listing"
 
           for name in "${!expected_sha256[@]}"; do
-            if [[ -n "${present[$name]+present}" ]]; then
-              echo "Verified existing immutable object $VERSION_PREFIX/$name"
-              continue
-            fi
             file="dist/$name"
+            size="$(wc -c < "$file" | tr -d '[:space:]')"
             mime_type="application/octet-stream"
             case "$name" in
-              *.blockmap) mime_type="application/json" ;;
               *.zip) mime_type="application/zip" ;;
               *.deb) mime_type="application/vnd.debian.binary-package" ;;
               *.rpm) mime_type="application/x-rpm" ;;
@@ -369,13 +372,45 @@ jobs:
               *.dmg) mime_type="application/x-apple-diskimage" ;;
               *.exe) mime_type="application/vnd.microsoft.portable-executable" ;;
             esac
-            ossutil cp "$file" "$OSS_VERSION_URI$name" \
-              --metadata "sha256=${expected_sha256[$name]}" \
-              --cache-control "public, max-age=31536000, immutable" \
-              --content-type "$mime_type"
-            remote_digest="$(curl --fail --silent --show-error --head "$PUBLIC_BASE/$VERSION_PREFIX/$name" | awk 'tolower($1) == "x-oss-meta-sha256:" { gsub("\r", "", $2); print $2 }')"
-            if [[ "$remote_digest" != "${expected_sha256[$name]}" ]]; then
-              echo "::error::Uploaded OSS object failed SHA-256 metadata verification: $VERSION_PREFIX/$name"
+            disposition="attachment; filename=\"$name\""
+            if [[ -n "${present[$name]+present}" ]]; then
+              remote_headers="${present[$name]}"
+              if [[ "$(read_header content-type <<< "$remote_headers")" != "$mime_type" || \
+                    "$(read_header content-disposition <<< "$remote_headers")" != "$disposition" ]]; then
+                # ossutil 2 update changes only these headers, preserving the
+                # immutable object's bytes, custom metadata and cache policy.
+                original_crc="$(read_header x-oss-hash-crc64ecma <<< "$remote_headers")"
+                original_cache="$(read_header cache-control <<< "$remote_headers")"
+                if [[ ! "$original_crc" =~ ^[0-9]+$ || "$(read_header content-length <<< "$remote_headers")" != "$size" ]]; then
+                  echo "::error::Cannot verify existing OSS object before metadata repair: $VERSION_PREFIX/$name"
+                  exit 1
+                fi
+                ossutil set-props "$OSS_VERSION_URI$name" \
+                  --force \
+                  --metadata-directive update \
+                  --content-type "$mime_type" \
+                  --content-disposition "$disposition"
+                remote_headers="$(curl --fail --silent --show-error --head "$PUBLIC_BASE/$VERSION_PREFIX/$name")"
+                if [[ "$(read_header x-oss-hash-crc64ecma <<< "$remote_headers")" != "$original_crc" || \
+                      "$(read_header cache-control <<< "$remote_headers")" != "$original_cache" ]]; then
+                  echo "::error::OSS metadata repair changed the content checksum or cache policy: $VERSION_PREFIX/$name"
+                  exit 1
+                fi
+              fi
+              echo "Verified existing immutable object $VERSION_PREFIX/$name"
+            else
+              ossutil cp "$file" "$OSS_VERSION_URI$name" \
+                --metadata "sha256=${expected_sha256[$name]}" \
+                --cache-control "public, max-age=31536000, immutable" \
+                --content-type "$mime_type" \
+                --content-disposition "$disposition"
+              remote_headers="$(curl --fail --silent --show-error --head "$PUBLIC_BASE/$VERSION_PREFIX/$name")"
+            fi
+            if [[ "$(read_header x-oss-meta-sha256 <<< "$remote_headers")" != "${expected_sha256[$name]}" || \
+                  "$(read_header content-length <<< "$remote_headers")" != "$size" || \
+                  "$(read_header content-type <<< "$remote_headers")" != "$mime_type" || \
+                  "$(read_header content-disposition <<< "$remote_headers")" != "$disposition" ]]; then
+              echo "::error::OSS object failed content or download-header verification: $VERSION_PREFIX/$name"
               exit 1
             fi
           done

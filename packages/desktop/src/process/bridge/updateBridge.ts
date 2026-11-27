@@ -5,6 +5,7 @@
  */
 
 import { ipcBridge } from '@/common';
+import { isOssUpdateHost, STABLE_OSS_UPDATE_INDEX_URL } from '@/common/update/updateSources';
 import type {
   AutoUpdateReadyResult,
   UpdateCheckResult,
@@ -67,8 +68,6 @@ const DEFAULT_REPO = 'pigq/OpenH3';
 const DEFAULT_USER_AGENT = 'OpenH3';
 const ALLOWED_ASSET_EXTS = new Set(['.exe', '.msi', '.dmg', '.zip', '.deb', '.rpm']);
 const GITHUB_RELEASES_URL = 'https://github.com/pigq/OpenH3/releases';
-const OSS_STABLE_INDEX_URL = 'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/releases.json';
-const OSS_UPDATE_HOST = 'bohuauhd.oss-cn-shenzhen.aliyuncs.com';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const ALLOWED_DOWNLOAD_HOSTS = new Set<string>([
   'github.com',
@@ -288,10 +287,10 @@ const assertAllowedUrl = async (rawUrl: string) => {
   if (parsed.port || parsed.username || parsed.password || parsed.hash) {
     throw new Error((await getI18n()).t('update.errors.invalidUrl'));
   }
-  if (parsed.hostname === OSS_UPDATE_HOST) {
+  if (isOssUpdateHost(parsed.hostname)) {
     const match = /^\/updates\/stable\/(0|[1-9]\d*\.\d+\.\d+)\/([A-Za-z0-9][A-Za-z0-9._-]*)$/.exec(parsed.pathname);
     if (
-      rawUrl !== `https://${OSS_UPDATE_HOST}${parsed.pathname}` ||
+      rawUrl !== `https://${parsed.hostname}${parsed.pathname}` ||
       !match ||
       !semver.valid(match[1]) ||
       !isAllowedAssetName(match[2])
@@ -310,7 +309,7 @@ const getOssUpdateAsset = (rawUrl: string): { version: string; name: string } | 
     const parsed = new URL(rawUrl);
     if (
       parsed.protocol !== 'https:' ||
-      parsed.hostname !== OSS_UPDATE_HOST ||
+      !isOssUpdateHost(parsed.hostname) ||
       parsed.port ||
       parsed.username ||
       parsed.password
@@ -319,7 +318,7 @@ const getOssUpdateAsset = (rawUrl: string): { version: string; name: string } | 
     }
     const match = /^\/updates\/stable\/(0|[1-9]\d*\.\d+\.\d+)\/([A-Za-z0-9][A-Za-z0-9._-]*)$/.exec(parsed.pathname);
     if (
-      rawUrl !== `https://${OSS_UPDATE_HOST}${parsed.pathname}` ||
+      rawUrl !== `https://${parsed.hostname}${parsed.pathname}` ||
       !match ||
       !semver.valid(match[1]) ||
       !isAllowedAssetName(match[2])
@@ -335,9 +334,10 @@ const fetchStableReleaseIndex = async (timeoutMs = 30000) => {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(OSS_STABLE_INDEX_URL, {
+    const res = await fetch(STABLE_OSS_UPDATE_INDEX_URL, {
       headers: { 'User-Agent': DEFAULT_USER_AGENT },
       signal: controller.signal,
+      redirect: 'error',
     });
     if (!res.ok) throw new Error(`OSS update index request failed (${res.status})`);
     return parseStableReleaseIndex((await res.json()) as unknown);

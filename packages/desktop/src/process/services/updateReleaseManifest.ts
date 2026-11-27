@@ -5,11 +5,11 @@
  */
 
 import type { GitHubReleaseAsset, StableReleaseAssetV1, StableReleaseIndexV1 } from '@/common/update/updateTypes';
+import { STABLE_OSS_UPDATE_BASE_URL } from '@/common/update/updateSources';
 import semver from 'semver';
 
 export type { StableReleaseAssetV1, StableReleaseIndexV1 };
 
-const OSS_RELEASE_BASE = 'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable';
 const GITHUB_RELEASE_BASE = 'https://github.com/pigq/OpenH3/releases/download';
 const INSTALLER_EXTENSIONS = new Set(['.exe', '.msi', '.dmg', '.zip', '.deb', '.rpm']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -125,7 +125,7 @@ export const buildStableReleaseAssets = (index: StableReleaseIndexV1): GitHubRel
       name: asset.name,
       size: asset.size,
       sha256: asset.sha256,
-      url: `${OSS_RELEASE_BASE}/${parsed.release.version}/${encodedName}`,
+      url: `${STABLE_OSS_UPDATE_BASE_URL}${parsed.release.version}/${encodedName}`,
       fallbackUrl: `${GITHUB_RELEASE_BASE}/v${parsed.release.version}/${encodedName}`,
     };
   });

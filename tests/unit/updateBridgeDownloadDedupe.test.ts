@@ -8,6 +8,10 @@ import fs from 'fs';
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const ossHosts = ['openh3-download.bohuauhd.top', 'bohuauhd.oss-cn-shenzhen.aliyuncs.com'];
+const installerPath = '/updates/stable/3.0.8/OpenH3-3.0.8-win-x64.exe';
+const installerFallback = 'https://github.com/pigq/OpenH3/releases/download/v3.0.8/OpenH3-3.0.8-win-x64.exe';
+
 vi.mock('@/common/platform/bridge', () => ({
   bridge: {
     buildProvider: vi.fn(() => {
@@ -224,48 +228,30 @@ describe('updateBridge manual download dedupe', () => {
     expect(second.data?.downloadId).toBe('second-download');
   });
 
-  it.each([
-    [
-      'missing digest',
-      'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/3.0.8/OpenH3-3.0.8-win-x64.exe',
-      undefined,
-    ],
-    ['empty digest', 'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/3.0.8/OpenH3-3.0.8-win-x64.exe', ''],
-    [
-      'HTTP scheme',
-      'http://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/3.0.8/OpenH3-3.0.8-win-x64.exe',
-      'a'.repeat(64),
-    ],
-    [
-      'alternate port',
-      'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com:444/updates/stable/3.0.8/OpenH3-3.0.8-win-x64.exe',
-      'a'.repeat(64),
-    ],
-    [
-      'path traversal',
-      'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/3.0.8/../3.0.8/OpenH3-3.0.8-win-x64.exe',
-      'a'.repeat(64),
-    ],
-    [
-      'prefix lookalike',
-      'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable-evil/3.0.8/OpenH3-3.0.8-win-x64.exe',
-      'a'.repeat(64),
-    ],
-    [
-      'sibling bucket',
-      'https://other.oss-cn-shenzhen.aliyuncs.com/updates/stable/3.0.8/OpenH3-3.0.8-win-x64.exe',
-      'a'.repeat(64),
-    ],
-    [
-      'user info',
-      'https://user@bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/3.0.8/OpenH3-3.0.8-win-x64.exe',
-      'a'.repeat(64),
-    ],
-  ])('rejects an OSS download with %s', async (_label, url, sha256) => {
+  it.each(
+    ossHosts.flatMap(
+      (host) =>
+        [
+          [`${host}: missing digest`, `https://${host}${installerPath}`, undefined],
+          [`${host}: empty digest`, `https://${host}${installerPath}`, ''],
+          [`${host}: HTTP scheme`, `http://${host}${installerPath}`, 'a'.repeat(64)],
+          [`${host}: alternate port`, `https://${host}:444${installerPath}`, 'a'.repeat(64)],
+          [`${host}: explicit default port`, `https://${host}:443${installerPath}`, 'a'.repeat(64)],
+          [`${host}: user info`, `https://user@${host}${installerPath}`, 'a'.repeat(64)],
+          [`${host}: query`, `https://${host}${installerPath}?raw=1`, 'a'.repeat(64)],
+          [`${host}: fragment`, `https://${host}${installerPath}#fragment`, 'a'.repeat(64)],
+          [`${host}: path traversal`, `https://${host}/updates/stable/3.0.8/../3.0.8/OpenH3.exe`, 'a'.repeat(64)],
+          [`${host}: encoded separator`, `https://${host}/updates/stable/3.0.8/nested%2FOpenH3.exe`, 'a'.repeat(64)],
+          [`${host}: prefix lookalike`, `https://${host}/updates/stable-evil/3.0.8/OpenH3.exe`, 'a'.repeat(64)],
+          [`${host}: hostname suffix`, `https://${host}.evil.example${installerPath}`, 'a'.repeat(64)],
+          [`${host}: hostname subdomain`, `https://evil.${host}${installerPath}`, 'a'.repeat(64)],
+        ] as const
+    )
+  )('rejects an OSS download with %s', async (_label, url, sha256) => {
     const handler = await getDownloadHandler();
     const result = await handler({
       url,
-      fallbackUrl: 'https://github.com/pigq/OpenH3/releases/download/v3.0.8/OpenH3-3.0.8-win-x64.exe',
+      fallbackUrl: installerFallback,
       sha256,
       file_name: 'OpenH3-3.0.8-win-x64.exe',
     });
@@ -274,7 +260,51 @@ describe('updateBridge manual download dedupe', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('falls back from OSS to GitHub and validates the streamed SHA-256', async () => {
+  it.each(
+    ossHosts.flatMap((host) =>
+      [
+        undefined,
+        installerFallback.replace('v3.0.8/', 'v3.0.9/'),
+        installerFallback.replace('win-x64.exe', 'win-arm64.exe'),
+        installerFallback.replace('/pigq/OpenH3/', '/other/OpenH3/'),
+      ].map((fallbackUrl) => [host, fallbackUrl] as const)
+    )
+  )('requires the canonical GitHub fallback for %s (%s)', async (host, fallbackUrl) => {
+    const handler = await getDownloadHandler();
+    const result = await handler({
+      url: `https://${host}${installerPath}`,
+      sha256: 'a'.repeat(64),
+      fallbackUrl,
+      file_name: 'OpenH3-3.0.8-win-x64.exe',
+    });
+    expect(result.success).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each(ossHosts)('downloads directly from %s and verifies the installer SHA-256', async (host) => {
+    fs.mkdirSync('/tmp/aionui-update-dedupe-test', { recursive: true });
+    const content = Buffer.from('verified direct installer bytes');
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(content));
+    vi.stubGlobal('fetch', fetchMock);
+    const handler = await getDownloadHandler();
+    const result = await handler({
+      url: `https://${host}${installerPath}`,
+      sha256: createHash('sha256').update(content).digest('hex'),
+      fallbackUrl: installerFallback,
+      file_name: 'OpenH3-3.0.8-win-x64.exe',
+    });
+    const { ipcBridge } = await import('@/common');
+
+    expect(result.success).toBe(true);
+    await expect
+      .poll(() =>
+        vi.mocked(ipcBridge.update.downloadProgress.emit).mock.calls.some(([evt]) => evt.status === 'completed')
+      )
+      .toBe(true);
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([`https://${host}${installerPath}`]);
+  });
+
+  it.each(ossHosts)('falls back from %s to GitHub and validates the streamed SHA-256', async (host) => {
     fs.mkdirSync('/tmp/aionui-update-dedupe-test', { recursive: true });
     const content = Buffer.from('verified installer bytes');
     const sha256 = createHash('sha256').update(content).digest('hex');
@@ -288,7 +318,7 @@ describe('updateBridge manual download dedupe', () => {
     const handler = await getDownloadHandler();
 
     const result = await handler({
-      url: 'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/3.0.8/OpenH3-3.0.8-win-x64.exe',
+      url: `https://${host}${installerPath}`,
       fallbackUrl: 'https://github.com/pigq/OpenH3/releases/download/v3.0.8/OpenH3-3.0.8-win-x64.exe',
       sha256,
       file_name: 'OpenH3-3.0.8-win-x64.exe',
@@ -302,7 +332,7 @@ describe('updateBridge manual download dedupe', () => {
       )
       .toBe(true);
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
-      'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/3.0.8/OpenH3-3.0.8-win-x64.exe',
+      `https://${host}${installerPath}`,
       'https://github.com/pigq/OpenH3/releases/download/v3.0.8/OpenH3-3.0.8-win-x64.exe',
     ]);
   });
@@ -329,6 +359,65 @@ describe('updateBridge manual download dedupe', () => {
       .poll(() => vi.mocked(ipcBridge.update.downloadProgress.emit).mock.calls.some(([evt]) => evt.status === 'error'))
       .toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('follows an exact legacy-origin redirect from the canonical host and verifies the same digest', async () => {
+    fs.mkdirSync('/tmp/aionui-update-dedupe-test', { recursive: true });
+    const content = Buffer.from('verified redirected installer bytes');
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, { status: 302, headers: { location: `https://${ossHosts[1]}${installerPath}` } })
+      )
+      .mockResolvedValueOnce(new Response(content));
+    vi.stubGlobal('fetch', fetchMock);
+    const handler = await getDownloadHandler();
+    const result = await handler({
+      url: `https://${ossHosts[0]}${installerPath}`,
+      sha256: createHash('sha256').update(content).digest('hex'),
+      fallbackUrl: installerFallback,
+      file_name: 'OpenH3-3.0.8-win-x64.exe',
+    });
+    const { ipcBridge } = await import('@/common');
+
+    expect(result.success).toBe(true);
+    await expect
+      .poll(() =>
+        vi.mocked(ipcBridge.update.downloadProgress.emit).mock.calls.some(([evt]) => evt.status === 'completed')
+      )
+      .toBe(true);
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual(
+      ossHosts.map((host) => `https://${host}${installerPath}`)
+    );
+  });
+
+  it.each([
+    'https://openh3-download.bohuauhd.top.evil.example/OpenH3.exe',
+    'https://openh3-download.bohuauhd.top/other/OpenH3.exe',
+  ])('rejects an unsafe OSS redirect before fetching %s', async (location) => {
+    fs.mkdirSync('/tmp/aionui-update-dedupe-test', { recursive: true });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 302, headers: { location } }))
+      .mockResolvedValueOnce(new Response('unavailable', { status: 503 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const handler = await getDownloadHandler();
+    const result = await handler({
+      url: `https://${ossHosts[0]}${installerPath}`,
+      sha256: 'a'.repeat(64),
+      fallbackUrl: installerFallback,
+      file_name: 'OpenH3-3.0.8-win-x64.exe',
+    });
+    const { ipcBridge } = await import('@/common');
+
+    expect(result.success).toBe(true);
+    await expect
+      .poll(() => vi.mocked(ipcBridge.update.downloadProgress.emit).mock.calls.some(([evt]) => evt.status === 'error'))
+      .toBe(true);
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      `https://${ossHosts[0]}${installerPath}`,
+      installerFallback,
+    ]);
   });
 
   it('rejects a GitHub redirect that leaves the download host allowlist', async () => {
