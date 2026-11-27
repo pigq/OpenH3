@@ -5,11 +5,12 @@
  */
 
 import type { GithubOptions } from 'builder-util-runtime';
+import { STABLE_OSS_UPDATE_BASE_URL } from '@/common/update/updateSources';
 import { CdnGenericProvider } from './cdnGenericProvider';
 
 export type UpdateFeedSource = 'oss' | 'github';
 
-export const STABLE_OSS_UPDATE_BASE_URL = 'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/';
+export { STABLE_OSS_UPDATE_BASE_URL };
 
 export const buildGitHubFeedOptions = (): GithubOptions => ({ provider: 'github', owner: 'pigq', repo: 'OpenH3' });
 

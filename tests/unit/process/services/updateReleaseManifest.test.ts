@@ -29,7 +29,7 @@ describe('stable update release manifest', () => {
         name: 'OpenH3-3.0.8-win-x64.exe',
         size: 1024,
         sha256: 'a'.repeat(64),
-        url: 'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/3.0.8/OpenH3-3.0.8-win-x64.exe',
+        url: 'https://openh3-download.bohuauhd.top/updates/stable/3.0.8/OpenH3-3.0.8-win-x64.exe',
         fallbackUrl: 'https://github.com/pigq/OpenH3/releases/download/v3.0.8/OpenH3-3.0.8-win-x64.exe',
       },
     ]);

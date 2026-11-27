@@ -548,7 +548,7 @@ describe('AutoUpdaterService', () => {
     expect(autoUpdaterMock.setFeedURL).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: 'custom',
-        url: 'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/',
+        url: 'https://openh3-download.bohuauhd.top/updates/stable/',
       })
     );
   });

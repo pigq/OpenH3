@@ -83,7 +83,7 @@ printf '%s\\n' "$destination" >> "$MOCK_ROOT/uploads.log"
     `#!/usr/bin/env bash
 set -euo pipefail
 url="\${!#}"
-key="\${url#https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/}"
+key="\${url#https://openh3-download.bohuauhd.top/}"
 target="$MOCK_ROOT/remote/$key"
 if [[ " $* " == *" --head "* ]]; then
   [[ -f "$target.digest" ]] || exit 22
@@ -118,6 +118,7 @@ if [[ -f "$target" ]]; then cp "$target" "$output"; printf 200; else printf 404;
           OSS_STABLE_PREFIX: 'updates/stable',
           OSS_BUCKET_NAME: 'bohuauhd',
           OSS_ENDPOINT: 'https://oss-cn-shenzhen.aliyuncs.com',
+          OSS_PUBLIC_BASE: 'https://openh3-download.bohuauhd.top',
           VERSION: '3.0.8',
           ...extra,
         },

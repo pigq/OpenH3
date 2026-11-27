@@ -136,7 +136,7 @@ describe('OSS-first update checks', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input) === 'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/releases.json') {
+        if (String(input) === 'https://openh3-download.bohuauhd.top/updates/stable/releases.json') {
           return new Response('unavailable', { status: 503 });
         }
         return new Response(JSON.stringify(data), { status });
@@ -196,12 +196,33 @@ describe('OSS-first update checks', () => {
       body: 'stable notes',
       htmlUrl: 'https://github.com/pigq/OpenH3/releases/tag/v2.1.45',
       recommendedAsset: {
-        url: 'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/2.1.45/OpenH3-mac-arm64.dmg',
+        url: 'https://openh3-download.bohuauhd.top/updates/stable/2.1.45/OpenH3-mac-arm64.dmg',
         fallbackUrl: 'https://github.com/pigq/OpenH3/releases/download/v2.1.45/OpenH3-mac-arm64.dmg',
         sha256: 'a'.repeat(64),
       },
     });
     expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith(
+      'https://openh3-download.bohuauhd.top/updates/stable/releases.json',
+      expect.objectContaining({ redirect: 'error' })
+    );
+  });
+
+  it('falls back to GitHub without following a stable index redirect', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === 'https://openh3-download.bohuauhd.top/updates/stable/releases.json') {
+        return new Response(null, { status: 302, headers: { location: 'https://evil.example/releases.json' } });
+      }
+      return new Response(JSON.stringify([release()]), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    expect((await (await getCheckHandler())({})).success).toBe(true);
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      'https://openh3-download.bohuauhd.top/updates/stable/releases.json',
+      'https://api.github.com/repos/pigq/OpenH3/releases',
+    ]);
+    expect(fetchMock).toHaveBeenNthCalledWith(1, expect.anything(), expect.objectContaining({ redirect: 'error' }));
   });
 
   it.each([
@@ -209,7 +230,7 @@ describe('OSS-first update checks', () => {
     ['malformed index', async () => new Response('{broken', { status: 200 })],
   ])('falls back to GitHub after OSS %s', async (_label, ossResponse) => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === 'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/releases.json') {
+      if (String(input) === 'https://openh3-download.bohuauhd.top/updates/stable/releases.json') {
         return ossResponse();
       }
       return new Response(JSON.stringify([release()]), { status: 200 });

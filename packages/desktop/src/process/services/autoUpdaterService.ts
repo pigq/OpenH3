@@ -12,6 +12,7 @@ import type { StdioOptions } from 'node:child_process';
 import { findFile } from 'electron-updater/out/providers/Provider';
 import { CancellationError, CancellationToken } from 'builder-util-runtime';
 import type { AutoUpdateReadyResult } from '@/common/update/updateTypes';
+import { STABLE_OSS_UPDATE_BASE_URL } from '@/common/update/updateSources';
 import { app, autoUpdater as nativeAutoUpdater, shell } from 'electron';
 import log from 'electron-log';
 import { EventEmitter } from 'events';
@@ -175,7 +176,7 @@ class AutoUpdaterService extends EventEmitter {
     log.info('Update feed set to Aliyun OSS provider');
     log.debug('[auto-update] OSS feed configured', {
       provider: stableFeedOptions.provider,
-      url: 'https://bohuauhd.oss-cn-shenzhen.aliyuncs.com/updates/stable/',
+      url: STABLE_OSS_UPDATE_BASE_URL,
       channel: channel ?? 'latest',
       platform: process.platform,
       arch: process.arch,
